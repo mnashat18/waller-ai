@@ -1,0 +1,197 @@
+#snow {
+  pointer-events: none;
+}
+
+.hero-title {
+  font-size: 4.6rem;
+  font-weight: 800;
+  line-height: 1.05;
+  margin-bottom: 24px;
+  color: #f8fafc;
+  .hero-title {
+  text-shadow:
+    0 10px 40px rgba(0,0,0,0.55),
+    0 0 40px rgba(56,189,248,0.15);
+}
+
+}
+
+.hero-title span {
+  color: #38bdf8;
+}
+
+.hero-content {
+  max-width: 720px;
+  margin-left: 10%;   /* 👈 كده المراية ماتت */
+  text-align: left;
+}
+
+.hero h1 {
+  font-size: 4rem;
+  line-height: 1.1;
+  color: #f8fafc;
+  text-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+
+.hero h1 span {
+  color: #38bdf8;
+}
+
+.description {
+  margin-top: 24px;
+  max-width: 520px;
+  opacity: 0.85;
+}
+
+/* Buttons */
+.actions {
+  margin-top: 36px;
+  display: flex;
+  gap: 16px;
+}
+
+.btn-primary {
+  padding: 14px 36px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: white;
+  text-decoration: none;
+}
+
+.btn-ghost {
+  padding: 14px 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.4);
+  color: white;
+}
+.hero {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  align-items: center;
+}
+
+.hero-visual {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-right: 10%;
+}
+
+.stat-card {
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 18px 22px;
+  color: white;
+}
+
+.stat-card strong {
+  font-size: 1.6rem;
+  display: block;
+}
+.premium-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+
+  color: #facc15; /* دهبي */
+  background: linear-gradient(
+    135deg,
+    rgba(250, 204, 21, 0.463),
+    rgba(250, 204, 21, 0.05)
+  );
+
+  border: 1px solid rgba(250, 204, 21, 0.616);
+  box-shadow: 0 0 25px rgba(250, 204, 21, 0.466);
+}
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    600px at 75% 55%,
+    rgba(56,189,248,0.25),
+    transparent 60%
+  );
+  pointer-events: none;
+}
+.hero-landing {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.hero-left {
+  margin-left: 10%;
+}
+
+.hero-right {
+  margin-right: 10%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.stat-card {
+  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 20px 24px;
+  color: white;
+}
+
+.stat-card strong {
+  font-size: 1.6rem;
+  display: block;
+}
+.hero-landing {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  align-items: center;
+  min-height: 100vh;
+}
+
+/* RIGHT SIDE */
+.hero-right {
+  margin-right: 10%;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* ROTATING TEXT */
+.rotating-text {
+  font-size: 1.3rem;
+  font-weight: 500;
+  color: #e0f2fe;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: all 0.6s ease;
+}
+
+.rotating-text.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+a, button {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+a:active, button:active {
+  transform: scale(0.97);
+}
+.actions {
+  position: relative;
+  z-index: 10;
+}
+
+.btn-primary,
+.btn-ghost {
+  cursor: pointer;
+}

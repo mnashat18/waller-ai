@@ -1,0 +1,172 @@
+<div class="auth-layout">
+
+  <!-- LEFT -->
+  <div class="auth-brand">
+    <div class="brand-content">
+
+      <!-- LOGO (نفس login بالظبط) -->
+      <div class="logo-wrapper">
+        <!-- SVG LOGO -->
+        <svg
+          class="waller-logo"
+          viewBox="0 0 420 140"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#7C3AED">
+                <animate attributeName="offset" values="0;1;0" dur="10s" repeatCount="indefinite"/>
+              </stop>
+              <stop offset="100%" stop-color="#38BDF8">
+                <animate attributeName="offset" values="1;0;1" dur="10s" repeatCount="indefinite"/>
+              </stop>
+            </linearGradient>
+          </defs>
+
+          <g class="logo-icon">
+            <polygon
+              points="40,20 80,45 80,85 40,110 0,85 0,45"
+              stroke="url(#brandGrad)"
+              stroke-width="4"
+              fill="none"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M28 52 L28 78 M52 52 L52 78"
+              stroke="url(#brandGrad)"
+              stroke-width="4"
+              stroke-linecap="round"
+            />
+          </g>
+
+          <text x="120" y="92" class="logo-text">
+            Waller <tspan class="logo-ai">AI</tspan>
+          </text>
+        </svg>
+      </div>
+
+      <h1>Create your AI Health Profile</h1>
+      <p>
+        Join Waller AI and start proactive,
+        intelligent healthcare monitoring.
+      </p>
+
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="auth-form">
+    <div class="auth-card signup">
+
+      <h2>Create account</h2>
+      <p class="subtitle">Start your AI healthcare journey</p>
+
+      <form #signupForm="ngForm" (ngSubmit)="signup(signupForm)" novalidate>
+
+  <!-- First Name -->
+  <div class="field">
+    <label for="signup-first-name">First Name</label>
+    <input
+      id="signup-first-name"
+      name="firstName"
+      type="text"
+      minlength="2"
+      required
+      [(ngModel)]="firstName"
+      #fn="ngModel"
+      placeholder="Enter your first name"
+    />
+    <small class="error" *ngIf="fn.invalid && fn.touched">
+      First name must be at least 2 characters
+    </small>
+  </div>
+
+  <!-- Last Name -->
+  <div class="field">
+    <label for="signup-last-name">Last Name</label>
+    <input
+      id="signup-last-name"
+      name="lastName"
+      type="text"
+      minlength="2"
+      required
+      [(ngModel)]="lastName"
+      #ln="ngModel"
+      placeholder="Enter your last name"
+    />
+    <small class="error" *ngIf="ln.invalid && ln.touched">
+      Last name must be at least 2 characters
+    </small>
+  </div>
+
+  <!-- Email -->
+  <div class="field">
+    <label for="signup-email">Email</label>
+    <input
+      id="signup-email"
+      name="email"
+      type="email"
+      required
+      email
+      [(ngModel)]="email"
+      #em="ngModel"
+      placeholder="Enter your email"
+    />
+    <small class="error" *ngIf="em.invalid && em.touched">
+      Please enter a valid email address
+    </small>
+  </div>
+
+  <!-- Password -->
+  <div class="field">
+    <label for="signup-password">Password</label>
+    <input
+      id="signup-password"
+      name="password"
+      type="password"
+      minlength="6"
+      required
+      [(ngModel)]="password"
+      #pw="ngModel"
+      placeholder="Enter your password"
+    />
+    <small class="error" *ngIf="pw.invalid && pw.touched">
+      Password must be at least 6 characters
+    </small>
+  </div>
+
+  <!-- Confirm Password -->
+  <div class="field">
+    <label for="signup-confirm-password">Confirm Password</label>
+    <input
+      id="signup-confirm-password"
+      name="confirmPassword"
+      type="password"
+      required
+      [(ngModel)]="confirmPassword"
+      placeholder="Confirm password"
+    />
+    <small class="error" *ngIf="passwordMismatch && confirmPassword">
+      Passwords do not match
+    </small>
+  </div>
+
+  <button
+    class="btn-primary"
+    type="submit"
+    [disabled]="signupForm.invalid || passwordMismatch || loading"
+  >
+    {{ loading ? 'Creating account...' : 'Create Account' }}
+  </button>
+
+</form>
+
+      <p class="link">
+        Already have an account?
+        <a routerLink="/login">Login</a>
+      </p>
+
+    </div>
+  </div>
+
+</div>

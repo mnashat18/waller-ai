@@ -1,0 +1,221 @@
+<div class="space-y-10">
+
+  <!-- Header -->
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="text-3xl font-semibold">Audit Logs</h1>
+      <p class="text-slate-500 mt-1">
+        Report wellness-related issues and personal observations
+      </p>
+    </div>
+    <div class="flex items-center gap-2 text-sm text-slate-500">
+      <span class="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+        <span class="h-2 w-2 rounded-full bg-primary"></span>
+        {{ logs.length }} logs
+      </span>
+    </div>
+  </div>
+
+  <!-- Create Log -->
+  <div class="card space-y-6">
+
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h3 class="font-semibold text-lg">Create Audit Log</h3>
+      <span class="text-xs text-slate-500">Attach as much context as possible.</span>
+    </div>
+
+    <div class="grid grid-cols-2 gap-6">
+
+      <!-- Email -->
+      <div>
+        <label class="label">Email</label>
+        <input
+          #emailInput
+          class="input"
+          [value]="currentUserEmail"
+          [readonly]="!canReviewLogs"
+          placeholder="name@example.com" />
+        <p *ngIf="!canReviewLogs" class="text-xs text-slate-500 mt-2">
+          Your email is locked to protect privacy. Logs are visible only to admins and managers.
+        </p>
+      </div>
+
+      <!-- Type -->
+      <div>
+        <label class="label">Type</label>
+        <input
+          #typeInput
+          class="input"
+          placeholder="Fatigue / Focus / Risk / Other" />
+      </div>
+
+    </div>
+
+    <!-- Description -->
+    <div>
+      <label class="label">Description</label>
+      <textarea
+        #descriptionInput
+        rows="4"
+        class="input"
+        placeholder="Describe the issue clearly..."></textarea>
+    </div>
+
+    <!-- Metadata -->
+    <div>
+      <label class="label">Metadata (JSON)</label>
+      <textarea
+        #metadataInput
+        rows="4"
+        class="input font-mono text-xs"
+        placeholder='{ "sleep_hours": 4, "stress": "high" }'></textarea>
+    </div>
+
+    <button
+      type="button"
+      class="btn-primary w-fit"
+      (click)="submitLog(emailInput.value, typeInput.value, descriptionInput.value, metadataInput.value)">
+      Submit Log
+    </button>
+    <p
+      *ngIf="submitFeedback as feedback"
+      class="text-sm"
+      [ngClass]="{
+        'text-green-600': feedback.type === 'success',
+        'text-red-500': feedback.type === 'error',
+        'text-slate-500': feedback.type === 'info'
+      }">
+      {{ feedback.message }}
+    </p>
+
+  </div>
+
+  <!-- Logs Table -->
+  <div class="bg-white rounded-xl shadow border overflow-hidden" *ngIf="canViewLogs; else accessDenied">
+
+    <div class="px-6 py-4 border-b flex flex-wrap items-center justify-between gap-2">
+      <h3 class="font-semibold">
+        {{ canReviewLogs ? 'All Logs' : 'My Logs' }}
+      </h3>
+      <span class="text-xs text-slate-500">
+        {{ canReviewLogs ? 'Latest entries from Directus' : 'Your submitted logs from Directus' }}
+      </span>
+    </div>
+
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50">
+        <tr>
+          <th class="th">Email</th>
+          <th class="th">Type</th>
+          <th class="th">Description</th>
+          <th class="th">Admin Response</th>
+          <th class="th">Date</th>
+          <th class="th"></th>
+        </tr>
+      </thead>
+
+      <tbody *ngIf="logs.length; else emptyLogs">
+        <tr
+          class="row cursor-pointer"
+          *ngFor="let log of logs"
+          (click)="openLog(log)">
+
+          <td>{{ log.user }}</td>
+          <td>
+            <span class="badge" [ngClass]="badgeClass(log.type)">
+              {{ log.type }}
+            </span>
+          </td>
+          <td class="text-slate-600 truncate max-w-sm">
+            {{ log.description }}
+          </td>
+          <td class="text-slate-600 truncate max-w-sm">
+            {{ log.adminResponse || 'No response yet' }}
+          </td>
+          <td class="text-slate-400">
+            {{ log.timestamp }}
+          </td>
+          <td class="text-primary font-medium">
+            View
+          </td>
+
+        </tr>
+      </tbody>
+      <ng-template #emptyLogs>
+        <tbody>
+          <tr class="row">
+            <td class="text-slate-500 text-center py-6" colspan="6">
+              No audit logs yet.
+            </td>
+          </tr>
+        </tbody>
+      </ng-template>
+    </table>
+
+  </div>
+
+</div>
+
+<!-- View Log Modal -->
+<div
+  *ngIf="canViewLogs && selectedLog as log"
+  class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+
+  <div class="bg-white rounded-xl p-8 w-full max-w-xl space-y-6">
+
+    <div class="flex justify-between items-start">
+      <h3 class="text-xl font-semibold">Audit Log Details</h3>
+      <button
+        class="text-slate-400 hover:text-slate-600"
+        (click)="closeLog()">
+        x
+      </button>
+    </div>
+
+    <div class="space-y-3 text-sm">
+      <p><strong>Email:</strong> {{ log.user }}</p>
+      <p><strong>Type:</strong> {{ log.type }}</p>
+      <p><strong>Date:</strong> {{ log.timestamp }}</p>
+    </div>
+
+    <div>
+      <p class="font-medium mb-1">Description</p>
+      <p class="text-slate-600">
+        {{ log.description }}
+      </p>
+    </div>
+
+    <div>
+      <p class="font-medium mb-1">Admin Response</p>
+      <p class="text-slate-600">
+        {{ log.adminResponse || 'No response yet.' }}
+      </p>
+      <p *ngIf="log.responseTimestamp" class="text-xs text-slate-400 mt-1">
+        {{ log.responseTimestamp }}
+        <span *ngIf="log.responseBy">· {{ log.responseBy }}</span>
+      </p>
+    </div>
+
+    <div>
+      <p class="font-medium mb-1">Metadata</p>
+      <pre class="bg-slate-100 rounded-lg p-4 text-xs">
+{{ log.metadata | json }}
+      </pre>
+    </div>
+
+  </div>
+</div>
+
+<ng-template #accessDenied>
+  <div class="card">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h3 class="text-lg font-semibold">Private logs</h3>
+        <p class="text-slate-500 text-sm">
+          Please sign in to view your audit logs.
+        </p>
+      </div>
+      <span class="badge badge-risk">Restricted</span>
+    </div>
+  </div>
+</ng-template>

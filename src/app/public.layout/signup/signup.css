@@ -1,0 +1,139 @@
+/* LAYOUT */
+.auth-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+}
+
+/* LEFT */
+.auth-brand {
+  background: radial-gradient(circle at top left, #2563eb, #020617);
+  display: flex;
+  align-items: center;
+  padding: 80px;
+  color: white;
+}
+
+.brand-content {
+  max-width: 460px;
+}
+
+/* LOGO */
+.logo-wrapper {
+  margin-bottom: 36px;
+}
+
+.waller-logo {
+  width: 260px;
+  animation: introOnce 1.4s ease forwards;
+}
+
+.logo-text {
+  font-family: 'Satoshi', 'Inter', sans-serif;
+  font-size: 48px;
+  fill: white;
+  font-weight: 400;
+}
+
+.logo-ai {
+  font-weight: 600;
+  fill: #38bdf8;
+}
+
+/* INTRO ONCE */
+@keyframes introOnce {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* RIGHT */
+.auth-form {
+  background: #020617;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-card {
+  width: 420px;
+  padding: 36px;
+  border-radius: 28px;
+  background: rgba(20, 24, 40, 0.88);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 40px 120px rgba(0,0,0,0.45);
+  color: #f8fafc;
+max-height: 85vh;
+  overflow-y: auto;
+  animation: fadeUp 1.4s ease forwards;
+
+}
+
+/* INPUTS */
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom:14px;
+}
+
+.field label {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+.field input {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.12);
+  border: none;
+  color: white;
+}
+
+.btn-primary {
+  margin-top: 22px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb, #38bdf8);
+  border: none;
+  color: white;
+  font-weight: 600;
+}
+.error {
+  color: #f87171;
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+
+@keyframes fadeUpSlow {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.waller-logo {
+  width: 260px;
+  animation: logoIntro 2s ease forwards;
+}
+
+@keyframes logoIntro {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+

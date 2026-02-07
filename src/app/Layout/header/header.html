@@ -1,0 +1,20 @@
+<header class="h-16 bg-white dark:bg-slate-900 border-b flex items-center justify-between px-6">
+
+  <div>
+    <h1 class="text-lg font-semibold text-slate-900 dark:text-white">
+      {{ title }}
+    </h1>
+    <p class="text-sm text-slate-500">
+      {{ today }}
+    </p>
+  </div>
+
+  <div class="flex items-center gap-4">
+    <app-notifications></app-notifications>
+
+    <button (click)="toggleDark()" class="text-sm font-medium text-slate-600 dark:text-slate-200">
+      Theme
+    </button>
+  </div>
+
+</header>

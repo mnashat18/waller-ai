@@ -1,0 +1,122 @@
+<div class="space-y-10 fade-in">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold">Requests</h1>
+      <p class="text-slate-500">
+        Admin scan requests & responses
+      </p>
+    </div>
+
+    <button
+      class="btn-primary"
+      (click)="openCreateModal()">
+      + Create Scan Request
+    </button>
+
+  <app-create-request-modal
+      *ngIf="showCreateModal"
+      [feedback]="submitFeedback"
+      [submitting]="submittingRequest"
+      (submitRequest)="handleCreateRequest($event)"
+      (close)="showCreateModal = false">
+    </app-create-request-modal>
+
+  </div>
+
+  <div
+    *ngIf="showPermissionNotice"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-6">
+    <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-xs uppercase tracking-wide text-slate-400">Permission Required</p>
+          <h2 class="mt-2 text-xl font-semibold text-slate-900">غير مسموح لك تنفيذ هذا الإجراء</h2>
+        </div>
+        <button
+          class="text-slate-400 hover:text-slate-600"
+          (click)="dismissPermissionNotice()">
+          x
+        </button>
+      </div>
+      <p class="mt-3 text-sm text-slate-600">
+        مش مسموح ليك تعمل الإجراء ده إلا لو انت ادمن، مش يوزر.
+      </p>
+      <div class="mt-6 flex justify-end">
+        <button
+          class="btn-primary"
+          (click)="dismissPermissionNotice()">
+          فهمت
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Requests Table -->
+  <div class="card">
+
+  <table class="w-full text-sm">
+    <thead class="bg-slate-50">
+      <tr>
+        <th class="th">Target</th>
+        <th class="th">Required State</th>
+        <th class="th">Status</th>
+        <th class="th">Date</th>
+        <th class="th">Actions</th>
+      </tr>
+    </thead>
+
+    <tbody>
+
+      <tr class="row" *ngFor="let req of requests">
+
+        <td>{{ req.target }}</td>
+
+        <td>
+          <span class="badge" [ngClass]="badgeClass(req.required_state)">
+            {{ req.required_state }}
+          </span>
+        </td>
+
+        <td>
+          <span
+            class="badge"
+            [ngClass]="{
+              'badge-stable': req.status === 'Approved',
+              'badge-low': req.status === 'Pending',
+              'badge-risk': req.status === 'Denied'
+            }">
+            {{ req.status }}
+          </span>
+        </td>
+
+        <td class="text-slate-400">
+          {{ req.timestamp }}
+        </td>
+
+        <td>
+          <span
+            class="text-slate-400"
+            *ngIf="req.status !== 'Pending'">
+            Response received
+          </span>
+
+          <span
+            *ngIf="req.status === 'Pending'"
+            class="text-slate-400">
+            Waiting for user response
+          </span>
+        </td>
+
+      </tr>
+
+    </tbody>
+  </table>
+
+</div>
+
+
+</div>
+
+

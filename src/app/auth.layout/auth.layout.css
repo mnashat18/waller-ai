@@ -1,0 +1,14 @@
+:host {
+  display: block;
+  min-height: 100vh;
+  background: #020617;
+}
+:host {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+* {
+  box-sizing: border-box;
+}

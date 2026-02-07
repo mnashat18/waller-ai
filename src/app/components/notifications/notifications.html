@@ -1,0 +1,95 @@
+<div class="notif-wrap">
+
+  <!-- Bell -->
+  <button (click)="toggleOpen()" class="notif-button" aria-label="Notifications">
+    <svg class="notif-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 1 0-14 0v5l-2 2v1h18v-1l-2-2Z"
+        fill="currentColor"/>
+    </svg>
+    <span class="notif-count" *ngIf="unreadCount > 0">
+      {{ unreadCount }}
+    </span>
+  </button>
+
+  <!-- Dropdown -->
+  <div *ngIf="open" class="notif-panel">
+
+    <div class="notif-header">
+      <h4>Notifications</h4>
+      <span class="notif-sub">{{ unreadCount }} unread</span>
+    </div>
+
+    <div *ngIf="loading" class="notif-empty">
+      Loading notifications...
+    </div>
+
+    <div *ngIf="!loading && notifications.length === 0" class="notif-empty">
+      No notifications yet.
+    </div>
+
+    <div class="notif-list" *ngIf="!loading && notifications.length > 0">
+      <button
+        *ngFor="let n of notifications"
+        class="notif-item"
+        [class.notif-item-read]="n.isRead"
+        (click)="openDetails(n)">
+
+        <div class="notif-dot" [class.notif-dot-read]="n.isRead"></div>
+
+        <div class="notif-body">
+          <div class="notif-row">
+            <span class="notif-type">{{ n.type }}</span>
+            <span class="notif-status" [ngClass]="statusClass(n)">{{ n.status }}</span>
+            <span class="notif-time">{{ n.date }}</span>
+          </div>
+          <p class="notif-title">{{ n.title }}</p>
+          <p class="notif-desc">{{ n.description }}</p>
+        </div>
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- DETAILS MODAL -->
+<div
+  *ngIf="selectedNotification"
+  class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+
+  <div class="bg-white dark:bg-slate-900 rounded-xl p-8 w-full max-w-xl space-y-6">
+
+    <!-- Header -->
+    <div class="flex justify-between items-start">
+      <h3 class="text-xl font-semibold">
+        {{ selectedNotification.title }}
+      </h3>
+
+      <button class="notif-close" (click)="closeDetails()" aria-label="Close">
+        &times;
+      </button>
+    </div>
+
+    <!-- Meta -->
+    <div class="text-sm space-y-1">
+      <p><strong>Type:</strong> {{ selectedNotification.type }}</p>
+      <p><strong>Status:</strong> {{ selectedNotification.status }}</p>
+      <p><strong>Date:</strong> {{ selectedNotification.date }}</p>
+    </div>
+
+    <!-- Description -->
+    <div>
+      <p class="font-medium mb-1">Description</p>
+      <p class="text-slate-600 dark:text-slate-300">
+        {{ selectedNotification.description }}
+      </p>
+    </div>
+
+    <!-- Details -->
+    <div class="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
+      <p class="font-medium mb-2">Details</p>
+      <pre class="text-xs">{{ selectedNotification.details | json }}</pre>
+    </div>
+
+  </div>
+</div>

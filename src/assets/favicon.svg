@@ -1,0 +1,17 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fGrad">
+      <stop offset="0%" stop-color="#7C3AED">
+        <animate attributeName="offset" values="0;1;0" dur="4s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" stop-color="#38BDF8"/>
+    </linearGradient>
+  </defs>
+
+  <polygon
+    points="32,2 60,16 60,48 32,62 4,48 4,16"
+    stroke="url(#fGrad)"
+    stroke-width="4"
+    fill="none"
+  />
+</svg>

@@ -1,0 +1,99 @@
+<div class="auth-layout">
+
+  <!-- LEFT -->
+  <div class="auth-brand">
+    <div class="brand-content">
+
+      <div class="logo-wrapper">
+        <!-- SVG LOGO -->
+        <svg
+          class="waller-logo intro"
+          viewBox="0 0 420 140"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#7C3AED">
+                <animate attributeName="offset" values="0;1;0" dur="6s" repeatCount="indefinite"/>
+              </stop>
+              <stop offset="100%" stop-color="#38BDF8">
+                <animate attributeName="offset" values="1;0;1" dur="6s" repeatCount="indefinite"/>
+              </stop>
+            </linearGradient>
+          </defs>
+
+          <!-- ICON -->
+          <g class="logo-icon">
+            <polygon
+              points="40,20 80,45 80,85 40,110 0,85 0,45"
+              stroke="url(#brandGrad)"
+              stroke-width="4"
+              fill="none"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M28 52 L28 78 M52 52 L52 78"
+              stroke="url(#brandGrad)"
+              stroke-width="4"
+              stroke-linecap="round"
+            />
+          </g>
+
+          <!-- TEXT -->
+          <text x="120" y="92" class="logo-text">
+            Waller <tspan class="logo-ai">AI</tspan>
+          </text>
+        </svg>
+      </div>
+
+      <h1>Secure AI Healthcare Access</h1>
+      <p>
+        Monitor cognitive wellness, detect risks early,
+        and empower better healthcare decisions with AI.
+      </p>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="auth-form">
+    <div class="auth-card">
+
+      <h2>Welcome back</h2>
+      <p class="subtitle">Login to continue with Waller AI</p>
+
+      <!-- EMAIL -->
+      <div class="field">
+  <label>Email</label>
+  <input
+    type="email"
+    placeholder="Enter your email"
+    [(ngModel)]="email"
+  />
+</div>
+
+<div class="field">
+  <label>Password</label>
+  <input
+    type="password"
+    placeholder="Enter your password"
+    [(ngModel)]="password"
+  />
+</div>
+
+<button
+  type="button"
+  class="btn-primary"
+  (click)="login()"
+>
+  Continue
+</button>
+
+      <p class="link">
+        Don't have an account?
+        <a routerLink="/signup">Create one</a>
+      </p>
+
+    </div>
+  </div>
+
+</div>

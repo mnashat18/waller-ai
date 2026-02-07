@@ -1,0 +1,340 @@
+:host {
+  display: block;
+}
+
+.notif-wrap {
+  position: relative;
+}
+
+.notif-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.notif-button:hover {
+  transform: translateY(-1px);
+  border-color: #cbd5f5;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+}
+
+.notif-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.notif-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ef4444, #f97316);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.35);
+}
+
+.notif-panel {
+  position: absolute;
+  right: 0;
+  margin-top: 12px;
+  width: 420px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 50;
+}
+
+.notif-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notif-header h4 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.notif-sub {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.notif-empty {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  padding: 12px 0;
+}
+
+.notif-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.notif-item {
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  background: #f8fafc;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  text-align: left;
+  appearance: none;
+  font: inherit;
+}
+
+.notif-item:hover {
+  transform: translateY(-1px);
+  border-color: #cbd5f5;
+  background: #f1f5f9;
+}
+
+.notif-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #14b8a6;
+  margin-top: 6px;
+  box-shadow: 0 0 12px rgba(20, 184, 166, 0.45);
+  flex-shrink: 0;
+}
+
+.notif-dot-read {
+  background: #cbd5f5;
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+.notif-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notif-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.notif-type,
+.notif-status {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #475569;
+  font-weight: 600;
+}
+
+.notif-status {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0ea5e9;
+}
+
+.status-stable {
+  background: rgba(34, 197, 94, 0.16);
+  color: #15803d;
+}
+
+.status-low {
+  background: rgba(249, 115, 22, 0.16);
+  color: #c2410c;
+}
+
+.status-fatigue {
+  background: rgba(234, 179, 8, 0.18);
+  color: #a16207;
+}
+
+.status-risk {
+  background: rgba(239, 68, 68, 0.16);
+  color: #b91c1c;
+}
+
+.status-approved {
+  background: rgba(59, 130, 246, 0.18);
+  color: #1d4ed8;
+}
+
+.status-denied {
+  background: rgba(239, 68, 68, 0.18);
+  color: #b91c1c;
+}
+
+.status-delayed {
+  background: rgba(249, 115, 22, 0.18);
+  color: #c2410c;
+}
+
+.notif-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #0f172a;
+  margin: 0;
+}
+
+.notif-desc {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.notif-time {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.notif-item-read {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  opacity: 0.85;
+}
+
+.notif-list {
+  scrollbar-width: thin;
+}
+
+.notif-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notif-list::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+}
+
+.notif-close {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.notif-close:hover {
+  color: #0f172a;
+}
+
+:host-context(.dark) .notif-button {
+  background: #0f172a;
+  border-color: #1e293b;
+  color: #e2e8f0;
+  box-shadow: 0 12px 24px rgba(2, 6, 23, 0.5);
+}
+
+:host-context(.dark) .notif-panel {
+  background: #0f172a;
+  border-color: #1e293b;
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55);
+}
+
+:host-context(.dark) .notif-header h4,
+:host-context(.dark) .notif-title {
+  color: #f8fafc;
+}
+
+:host-context(.dark) .notif-item {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+:host-context(.dark) .notif-item:hover {
+  background: rgba(30, 41, 59, 0.7);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+:host-context(.dark) .notif-type {
+  background: rgba(148, 163, 184, 0.2);
+  color: #cbd5f5;
+}
+
+:host-context(.dark) .notif-status {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+}
+
+:host-context(.dark) .status-stable {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+}
+
+:host-context(.dark) .status-low {
+  background: rgba(249, 115, 22, 0.22);
+  color: #fb923c;
+}
+
+:host-context(.dark) .status-fatigue {
+  background: rgba(234, 179, 8, 0.22);
+  color: #facc15;
+}
+
+:host-context(.dark) .status-risk {
+  background: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+
+:host-context(.dark) .status-approved {
+  background: rgba(59, 130, 246, 0.24);
+  color: #60a5fa;
+}
+
+:host-context(.dark) .status-denied {
+  background: rgba(239, 68, 68, 0.24);
+  color: #f87171;
+}
+
+:host-context(.dark) .status-delayed {
+  background: rgba(249, 115, 22, 0.24);
+  color: #fb923c;
+}
+
+:host-context(.dark) .notif-desc,
+:host-context(.dark) .notif-sub,
+:host-context(.dark) .notif-time,
+:host-context(.dark) .notif-empty {
+  color: #94a3b8;
+}
+
+:host-context(.dark) .notif-close:hover {
+  color: #e2e8f0;
+}

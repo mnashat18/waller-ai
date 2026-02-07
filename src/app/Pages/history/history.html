@@ -1,0 +1,114 @@
+<div class="space-y-8 fade-in">
+
+  <div>
+    <h1 class="text-3xl font-semibold">History</h1>
+    <p class="text-slate-500">All wellness scan results</p>
+  </div>
+
+  <div class="card overflow-hidden">
+    <table class="w-full">
+      <thead>
+        <tr>
+          <th class="th">Date</th>
+          <th class="th">Result</th>
+          <th class="th">Details</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        <tr
+          class="row cursor-pointer"
+          *ngFor="let scan of scans"
+          (click)="openScan(scan)">
+          <td>{{ scan.date }}</td>
+          <td>
+            <span
+              class="badge"
+              [ngClass]="{
+                'badge-stable': scan.result === 'Stable',
+                'badge-low': scan.result === 'Low Focus',
+                'badge-fatigue': scan.result === 'Elevated Fatigue',
+                'badge-risk': scan.result === 'High Risk'
+              }">
+              {{ scan.result }}
+            </span>
+          </td>
+          <td>{{ scan.report }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+<!-- Scan Details Modal -->
+<div *ngIf="selectedScan as scan"
+     class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+
+  <div
+    class="bg-white dark:bg-slate-900 rounded-xl p-8 w-full max-w-2xl shadow-xl animate-scale">
+
+    <!-- Header -->
+    <div class="flex justify-between items-start mb-6">
+      <div>
+        <h2 class="text-xl font-semibold">Scan Details</h2>
+        <p class="text-slate-500 text-sm">
+          {{ scan.date }} - {{ scan.time }}
+        </p>
+      </div>
+
+      <button
+        (click)="closeScan()"
+        class="text-slate-400 hover:text-slate-600 text-xl">
+        x
+      </button>
+    </div>
+
+    <!-- Status -->
+    <div class="mb-6">
+      <span
+        class="badge"
+        [ngClass]="{
+          'badge-stable': scan.result === 'Stable',
+          'badge-low': scan.result === 'Low Focus',
+          'badge-fatigue': scan.result === 'Elevated Fatigue',
+          'badge-risk': scan.result === 'High Risk'
+        }">
+        {{ scan.result }}
+      </span>
+    </div>
+
+    <!-- Medical Report -->
+    <div class="card mb-6">
+      <h3 class="font-semibold mb-2">Medical Report</h3>
+      <p class="text-slate-600 text-sm leading-relaxed">
+        {{ scan.report }}
+      </p>
+    </div>
+
+    <!-- Metrics -->
+    <div class="grid grid-cols-2 gap-6 mb-6">
+      <div class="card">
+        <p class="text-sm text-slate-500">Fatigue Level</p>
+        <p class="font-medium mt-1">
+          {{ scan.fatigueLevel }}
+        </p>
+      </div>
+
+      <div class="card">
+        <p class="text-sm text-slate-500">Focus Score</p>
+        <p class="font-medium mt-1">
+          {{ scan.focusScore }}
+        </p>
+      </div>
+    </div>
+
+    <!-- Recommendation -->
+    <div class="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
+      <p class="text-sm text-slate-500 mb-1">Recommendation</p>
+      <p class="text-slate-700 dark:text-slate-300">
+        {{ scan.recommendation }}
+      </p>
+    </div>
+
+  </div>
+</div>

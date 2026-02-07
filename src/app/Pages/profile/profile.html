@@ -1,0 +1,138 @@
+<div class="profile-shell">
+  <div class="profile-hero">
+    <div class="profile-hero__bg"></div>
+    <div class="profile-hero__content">
+      <div class="profile-avatar">
+        <img
+          *ngIf="avatarPreviewUrl || profile?.avatarUrl"
+          [src]="avatarPreviewUrl || profile?.avatarUrl"
+          alt="Profile avatar" />
+        <span *ngIf="!avatarPreviewUrl && !profile?.avatarUrl">{{ profile?.initials || 'W' }}</span>
+      </div>
+
+      <div class="profile-hero__meta">
+        <p class="profile-kicker">Account Profile</p>
+        <h1 class="profile-title">{{ profile?.name || 'Wellar User' }}</h1>
+        <p class="profile-subtitle">{{ profile?.email }}</p>
+
+        <div class="profile-badges">
+          <span class="badge badge-stable">{{ profile?.status || 'Active' }}</span>
+          <span class="badge badge-low">{{ profile?.roleLabel || 'User' }}</span>
+        </div>
+      </div>
+
+      <div class="profile-actions">
+        <button class="btn-secondary" (click)="startEdit()">Edit Profile</button>
+        <button class="btn-outline" (click)="logout()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="loading" class="profile-grid">
+    <div class="profile-card skeleton-card"></div>
+    <div class="profile-card skeleton-card"></div>
+    <div class="profile-card skeleton-card"></div>
+  </div>
+
+  <div *ngIf="!loading && errorMessage" class="profile-error">
+    {{ errorMessage }}
+  </div>
+
+  <div *ngIf="editing && profile" class="profile-card profile-edit-card">
+    <div class="profile-edit-header">
+      <div>
+        <h3 class="profile-card__title">Edit Profile</h3>
+        <p class="profile-hint">Update your name, avatar, and password.</p>
+      </div>
+      <button class="btn-outline" (click)="cancelEdit()">Cancel</button>
+    </div>
+
+    <div class="profile-form">
+      <div class="profile-field">
+        <label>First Name</label>
+        <input class="profile-input" name="firstName" [(ngModel)]="form.firstName" />
+      </div>
+      <div class="profile-field">
+        <label>Last Name</label>
+        <input class="profile-input" name="lastName" [(ngModel)]="form.lastName" />
+      </div>
+      <div class="profile-field">
+        <label>Title (locked)</label>
+        <input class="profile-input" [value]="profile.title" disabled />
+      </div>
+      <div class="profile-field">
+        <label>Email (locked)</label>
+        <input class="profile-input" [value]="profile.email" disabled />
+      </div>
+      <div class="profile-field">
+        <label>New Password</label>
+        <input
+          class="profile-input"
+          type="password"
+          name="password"
+          placeholder="********"
+          [(ngModel)]="form.password" />
+      </div>
+      <div class="profile-field">
+        <label>Profile Photo</label>
+        <input class="profile-input" type="file" (change)="onAvatarSelected($event)" />
+      </div>
+    </div>
+
+    <div class="profile-form__actions">
+      <button class="btn-primary" [disabled]="saving" (click)="saveProfile()">Save Changes</button>
+      <span *ngIf="saveFeedback as info" class="profile-feedback" [ngClass]="info.type">
+        {{ info.message }}
+      </span>
+    </div>
+  </div>
+
+  <div *ngIf="!loading && profile" class="profile-grid">
+    <div class="profile-card">
+      <h3 class="profile-card__title">Account Details</h3>
+      <div class="profile-row">
+        <span>Email</span>
+        <strong>{{ profile.email }}</strong>
+      </div>
+      <div class="profile-row">
+        <span>Password</span>
+        <strong>********</strong>
+      </div>
+      <div class="profile-row">
+        <span>Role</span>
+        <strong>{{ profile.roleLabel }}</strong>
+      </div>
+      <div class="profile-row">
+        <span>Status</span>
+        <strong>{{ profile.status }}</strong>
+      </div>
+    </div>
+
+    <div class="profile-card">
+      <h3 class="profile-card__title">Membership</h3>
+      <div class="profile-row">
+        <span>Member Since</span>
+        <strong>{{ profile.memberSince }}</strong>
+      </div>
+      <div class="profile-row">
+        <span>Last Access</span>
+        <strong>{{ profile.lastAccess }}</strong>
+      </div>
+      <div class="profile-row">
+        <span>Account ID</span>
+        <strong>{{ profile.id }}</strong>
+      </div>
+    </div>
+
+    <div class="profile-card">
+      <h3 class="profile-card__title">Profile Summary</h3>
+      <p class="profile-summary">
+        {{ profile.title }}
+      </p>
+      <div class="profile-row">
+        <span>Primary Email</span>
+        <strong>{{ profile.email }}</strong>
+      </div>
+    </div>
+  </div>
+</div>
