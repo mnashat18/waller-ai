@@ -1,5 +1,5 @@
 <!-- Skeleton Stats -->
-<div class="grid grid-cols-4 gap-6" *ngIf="loading">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" *ngIf="loading">
   <div class="skeleton-card"></div>
   <div class="skeleton-card"></div>
   <div class="skeleton-card"></div>
@@ -9,7 +9,8 @@
 <div class="space-y-10 fade-in" *ngIf="!loading">
 
   <!-- Header -->
-  <div class="flex items-center justify-between">
+  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+
     <div>
       <h1 class="text-3xl font-semibold">Dashboard</h1>
       <p class="text-slate-500 mt-1">
@@ -53,7 +54,7 @@
   </div>
 
   <!-- KPI Cards -->
-  <div class="grid grid-cols-4 gap-6">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
     <div class="stat-card border-l-4 border-green-500">
       <p>Stable</p>
       <h3 class="text-green-600">{{ stats.stable }}</h3>
@@ -76,9 +77,10 @@
   </div>
 
   <!-- Chart + Medical Report -->
-  <div class="grid grid-cols-3 gap-6">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-    <div class="col-span-2 card">
+  <div class="lg:col-span-2 card">
+  
       <h3 class="font-semibold mb-4">Weekly Scan Distribution</h3>
       <app-weekly-chart [scans]="recentScans"></app-weekly-chart>
     </div>
