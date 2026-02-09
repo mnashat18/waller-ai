@@ -1,96 +1,108 @@
-<div class="auth-layout">
+<div class="min-h-screen flex">
 
-  <!-- LEFT -->
-  <div class="auth-brand">
-    <div class="brand-content">
+  <!-- LEFT BRAND (Desktop only) -->
+  <div
+    class="hidden lg:flex w-1/2
+           bg-gradient-to-br from-indigo-600 to-blue-900
+           text-white items-center justify-center px-12">
 
-      <div class="logo-wrapper">
-        <!-- SVG LOGO -->
-        <svg
-          class="waller-logo intro"
-          viewBox="0 0 420 140"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <defs>
-            <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#7C3AED">
-                <animate attributeName="offset" values="0;1;0" dur="6s" repeatCount="indefinite"/>
-              </stop>
-              <stop offset="100%" stop-color="#38BDF8">
-                <animate attributeName="offset" values="1;0;1" dur="6s" repeatCount="indefinite"/>
-              </stop>
-            </linearGradient>
-          </defs>
+    <div class="max-w-md text-center space-y-6">
 
-          <!-- ICON -->
-          <g class="logo-icon">
-            <polygon
-              points="40,20 80,45 80,85 40,110 0,85 0,45"
-              stroke="url(#brandGrad)"
-              stroke-width="4"
-              fill="none"
-              stroke-linejoin="round"
-            />
-            <path
-              d="M28 52 L28 78 M52 52 L52 78"
-              stroke="url(#brandGrad)"
-              stroke-width="4"
-              stroke-linecap="round"
-            />
-          </g>
+      <!-- LOGO -->
+      <svg
+        class="mx-auto w-64"
+        viewBox="0 0 420 140"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <defs>
+          <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#7C3AED"/>
+            <stop offset="100%" stop-color="#38BDF8"/>
+          </linearGradient>
+        </defs>
 
-          <!-- TEXT -->
-          <text x="120" y="92" class="logo-text">
-            Waller <tspan class="logo-ai">AI</tspan>
+        <g>
+          <polygon
+            points="40,20 80,45 80,85 40,110 0,85 0,45"
+            stroke="url(#brandGrad)"
+            stroke-width="4"
+            fill="none"
+          />
+          <path
+            d="M28 52 L28 78 M52 52 L52 78"
+            stroke="url(#brandGrad)"
+            stroke-width="4"
+            stroke-linecap="round"
+          />
+          <text x="120" y="92" fill="white" font-size="48">
+            Waller <tspan fill="#38BDF8">AI</tspan>
           </text>
-        </svg>
-      </div>
+        </g>
+      </svg>
 
-      <h1>Secure AI Healthcare Access</h1>
-      <p>
+      <h1 class="text-3xl font-semibold">
+        Secure AI Healthcare Access
+      </h1>
+
+      <p class="text-white/80">
         Monitor cognitive wellness, detect risks early,
         and empower better healthcare decisions with AI.
       </p>
     </div>
   </div>
 
-  <!-- RIGHT -->
-  <div class="auth-form">
-    <div class="auth-card">
+  <!-- RIGHT FORM -->
+  <div class="flex flex-1 items-center justify-center px-4">
 
-      <h2>Welcome back</h2>
-      <p class="subtitle">Login to continue with Waller AI</p>
+    <div class="w-full max-w-md bg-white dark:bg-slate-900
+                rounded-xl shadow-xl p-8 animate-auth">
+
+      <h2 class="text-2xl font-semibold mb-1">
+        Welcome back
+      </h2>
+
+      <p class="text-slate-500 mb-6">
+        Login to continue with Waller AI
+      </p>
 
       <!-- EMAIL -->
-      <div class="field">
-  <label>Email</label>
-  <input
-    type="email"
-    placeholder="Enter your email"
-    [(ngModel)]="email"
-  />
-</div>
+      <div class="mb-4">
+        <label class="label">Email</label>
+        <input
+          type="email"
+          class="input"
+          placeholder="Enter your email"
+          [(ngModel)]="email"
+        />
+      </div>
 
-<div class="field">
-  <label>Password</label>
-  <input
-    type="password"
-    placeholder="Enter your password"
-    [(ngModel)]="password"
-  />
-</div>
+      <!-- PASSWORD -->
+      <div class="mb-6">
+        <label class="label">Password</label>
+        <input
+          type="password"
+          class="input"
+          placeholder="Enter your password"
+          [(ngModel)]="password"
+        />
+      </div>
 
-<button
-  type="button"
-  class="btn-primary"
-  (click)="login()"
->
-  Continue
-</button>
+      <button
+        type="button"
+        class="btn-primary w-full"
+        (click)="login()"
+      >
+        Continue
+      </button>
 
-      <p class="link">
+      <p class="text-sm text-center text-slate-500 mt-6">
         Don't have an account?
-        <a routerLink="/signup">Create one</a>
+        <a
+          routerLink="/signup"
+          class="text-primary font-medium hover:underline"
+        >
+          Create one
+        </a>
       </p>
 
     </div>
