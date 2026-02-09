@@ -8,21 +8,21 @@ import { SidebarComponent } from './sidebar/sidebar';
   standalone: true,
   imports: [RouterOutlet, HeaderComponent, SidebarComponent],
   template: `
-    <div class="flex h-screen bg-slate-50 dark:bg-slate-950">
+    <div class="flex min-h-screen bg-slate-50 dark:bg-slate-950">
 
-      <!-- SIDEBAR -->
-      <aside class="w-20 bg-slate-900 flex flex-col items-center">
+      <!-- SIDEBAR (Desktop فقط) -->
+      <aside class="hidden md:flex w-20 bg-slate-900 flex-col items-center">
         <app-sidebar></app-sidebar>
       </aside>
 
       <!-- MAIN -->
-      <div class="flex flex-col flex-1 overflow-hidden">
+      <div class="flex flex-col flex-1">
 
         <!-- HEADER -->
         <app-header></app-header>
 
         <!-- CONTENT -->
-        <main class="flex-1 overflow-y-auto p-8">
+        <main class="flex-1 overflow-y-auto p-4 md:p-8">
           <router-outlet></router-outlet>
         </main>
 
