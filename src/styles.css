@@ -13,6 +13,42 @@ body {
 }
 
 /* =========================
+   Mobile Titles
+========================= */
+.mobile-view h1,
+.mobile-view h2,
+.mobile-view h3,
+.mobile-view h4,
+.mobile-view .mobile-title {
+  color: #f5c451;
+}
+
+@media (min-width: 768px) {
+  .mobile-view h1,
+  .mobile-view h2,
+  .mobile-view h3,
+  .mobile-view h4,
+  .mobile-view .mobile-title {
+    color: inherit;
+  }
+}
+
+.mobile-view app-notifications .notif-button {
+  background: rgba(15, 23, 42, 0.6);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  box-shadow: 0 10px 22px rgba(2, 6, 23, 0.35);
+}
+
+.mobile-view app-notifications .notif-panel {
+  width: min(90vw, 360px);
+  right: 0;
+  background: #0f172a;
+  border-color: #1e293b;
+  box-shadow: 0 20px 50px rgba(2, 6, 23, 0.45);
+}
+
+/* =========================
    Buttons
 ========================= */
 .btn-primary {

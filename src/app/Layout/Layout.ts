@@ -8,24 +8,31 @@ import { SidebarComponent } from './sidebar/sidebar';
   standalone: true,
   imports: [RouterOutlet, HeaderComponent, SidebarComponent],
   template: `
-    <div class="flex min-h-screen bg-slate-50 dark:bg-slate-950">
+    <!-- ========================= -->
+    <!-- RESPONSIVE LAYOUT -->
+    <!-- ========================= -->
+    <div class="min-h-screen bg-slate-950 md:bg-slate-50 dark:bg-slate-950 mobile-view">
+      <div class="flex min-h-screen">
 
-      <!-- SIDEBAR (Desktop فقط) -->
-      <aside class="hidden md:flex w-20 bg-slate-900 flex-col items-center">
-        <app-sidebar></app-sidebar>
-      </aside>
+        <!-- SIDEBAR (Desktop only) -->
+        <aside class="hidden md:flex w-20 bg-slate-900 flex-col items-center">
+          <app-sidebar></app-sidebar>
+        </aside>
 
-      <!-- MAIN -->
-      <div class="flex flex-col flex-1">
+        <!-- MAIN -->
+        <div class="flex flex-col flex-1">
 
-        <!-- HEADER -->
-        <app-header></app-header>
+          <!-- HEADER (Desktop only) -->
+          <div class="hidden md:block">
+            <app-header></app-header>
+          </div>
 
-        <!-- CONTENT -->
-        <main class="flex-1 overflow-y-auto p-4 md:p-8">
-          <router-outlet></router-outlet>
-        </main>
+          <!-- CONTENT -->
+          <main class="flex-1 overflow-y-auto p-0 md:p-8">
+            <router-outlet></router-outlet>
+          </main>
 
+        </div>
       </div>
     </div>
   `

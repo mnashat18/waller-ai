@@ -1,0 +1,157 @@
+<div class="min-h-screen bg-[#0b1020] text-white relative overflow-hidden">
+  <div class="absolute inset-0 opacity-30"
+       style="background: radial-gradient(circle at top, rgba(37, 99, 235, 0.55), transparent 60%);">
+  </div>
+  <div class="absolute inset-0 opacity-20"
+       style="background: radial-gradient(circle at 20% 10%, rgba(96, 165, 250, 0.65), transparent 50%);">
+  </div>
+  <div class="absolute inset-0 opacity-10"
+       style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 40px 40px;">
+  </div>
+
+  <div class="relative z-10 px-5 pt-6 pb-28">
+    <ng-container *ngIf="!loading; else loadingTpl">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Welcome</p>
+          <p class="text-xs text-slate-400 mt-1">Role: User</p>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <app-notifications></app-notifications>
+          <a
+            routerLink="/profile"
+            class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </a>
+        </div>
+      </div>
+
+      <a
+        routerLink="/download-app"
+        class="mt-5 w-full inline-flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 transition text-white py-3 rounded-2xl shadow-lg">
+        <span class="text-sm font-semibold">Start New Scan</span>
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M5 12h14"></path>
+          <path d="M13 5l7 7-7 7"></path>
+        </svg>
+      </a>
+
+      <div class="mt-6">
+        <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-[0.2em]">
+          <span>Insights</span>
+          <span class="text-[10px] tracking-normal">Latest result available</span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+            <p class="text-xs text-slate-400">Total Scans</p>
+            <p class="text-2xl font-semibold mt-2">{{ totalScans }}</p>
+          </div>
+          <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+            <p class="text-xs text-slate-400">Latest State</p>
+            <p class="text-lg font-semibold mt-2"
+               [ngClass]="{
+                 'text-emerald-300': latestStateKey === 'stable',
+                 'text-amber-300': latestStateKey === 'low_focus',
+                 'text-yellow-300': latestStateKey === 'fatigue',
+                 'text-red-300': latestStateKey === 'high_risk',
+                 'text-slate-200': latestStateKey === 'unknown'
+               }">
+              {{ latestStateLabel }}
+            </p>
+          </div>
+        </div>
+
+        <div class="rounded-2xl bg-white/5 border border-white/10 p-4 mt-3">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Stability Snapshot</span>
+            <span *ngIf="recentScans.length">{{ recentScans[0].date_created | date:'MMM d' }}</span>
+          </div>
+          <div class="mt-4 flex items-end justify-between h-24">
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div class="w-3 rounded-full bg-emerald-400" [style.height.px]="barHeights.stable"></div>
+              <span class="text-[10px] text-slate-400">Stable</span>
+            </div>
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div class="w-3 rounded-full bg-amber-400" [style.height.px]="barHeights.low_focus"></div>
+              <span class="text-[10px] text-slate-400">Low</span>
+            </div>
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div class="w-3 rounded-full bg-yellow-400" [style.height.px]="barHeights.fatigue"></div>
+              <span class="text-[10px] text-slate-400">Fatigue</span>
+            </div>
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div class="w-3 rounded-full bg-red-400" [style.height.px]="barHeights.high_risk"></div>
+              <span class="text-[10px] text-slate-400">Risk</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </ng-container>
+
+    <ng-template #loadingTpl>
+      <div class="space-y-4">
+        <div class="h-6 w-40 rounded-lg bg-white/10"></div>
+        <div class="h-12 rounded-2xl bg-white/10"></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="h-24 rounded-2xl bg-white/10"></div>
+          <div class="h-24 rounded-2xl bg-white/10"></div>
+          <div class="h-24 rounded-2xl bg-white/10"></div>
+          <div class="h-24 rounded-2xl bg-white/10"></div>
+        </div>
+      </div>
+    </ng-template>
+  </div>
+
+  <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
+    <div class="grid grid-cols-5 text-[10px] text-slate-400">
+      <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 12h6"></path>
+          <path d="M9 16h6"></path>
+          <path d="M5 8h14v12H5z"></path>
+        </svg>
+        <span>Audit logs</span>
+      </a>
+      <a
+        routerLink="/requests"
+        [queryParams]="{ create: 1 }"
+        class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>Create</span>
+      </a>
+      <a routerLink="/dashboard" routerLinkActive="text-white" [routerLinkActiveOptions]="{ exact: true }" class="flex flex-col items-center gap-1">
+        <div class="w-11 h-11 rounded-full bg-[#f5c451] text-slate-900 flex items-center justify-center -mt-6 shadow-lg">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 11.5L12 4l9 7.5"></path>
+            <path d="M5 10.5V20h14v-9.5"></path>
+          </svg>
+        </div>
+        <span class="mt-2 text-white">Home</span>
+      </a>
+      <a routerLink="/requests" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16"></path>
+          <path d="M4 12h16"></path>
+          <path d="M4 17h16"></path>
+        </svg>
+        <span>Requests</span>
+      </a>
+      <a routerLink="/history" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12a9 9 0 1 0 9-9"></path>
+          <path d="M3 4v6h6"></path>
+          <path d="M12 7v5l3 3"></path>
+        </svg>
+        <span>History</span>
+      </a>
+    </div>
+  </nav>
+</div>

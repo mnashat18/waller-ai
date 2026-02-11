@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { ActivatedRoute } from '@angular/router';
 import { of } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
@@ -28,12 +29,14 @@ export class Requests implements OnInit {
   constructor(
     private http: HttpClient,
     private adminTokens: AdminTokenService,
+    private route: ActivatedRoute,
     private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
     this.isAdminUser = this.checkAdminAccess();
     this.loadRequests();
+    this.openCreateFromQuery();
   }
 
   badgeClass(state: string): string {
@@ -438,6 +441,13 @@ export class Requests implements OnInit {
     this.submitFeedback = null;
     this.showCreateModal = true;
     this.cdr.detectChanges();
+  }
+
+  private openCreateFromQuery() {
+    const createParam = this.route.snapshot.queryParamMap.get('create');
+    if (createParam === '1' || createParam === 'true') {
+      this.openCreateModal();
+    }
   }
 
 }

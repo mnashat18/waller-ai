@@ -1,4 +1,4 @@
-import { Routes } from '@angular/router';
+import { CanMatchFn, Routes } from '@angular/router';
 
 import { PublicLayout } from './public.layout/public.layout';
 import { Authlanding } from './public.layout/authlanding/authlanding';
@@ -10,10 +10,24 @@ import { SignupComponent } from './public.layout/signup/signup';
 
 import { LayoutComponent } from './Layout/Layout';
 import { AuditLogs } from './Pages/audit-logs/audit-logs';
+import { DashboardMobileComponent } from './Pages/mobile/dashboard-mobile.component';
 
+const isMobileViewport = () =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(max-width: 768px)').matches;
+
+const mobileDashboardMatch: CanMatchFn = () => isMobileViewport();
 
 
 export const routes: Routes = [
+
+
+{
+  path: 'dashboard',
+  canMatch: [mobileDashboardMatch],
+  component: DashboardMobileComponent
+},
 
   /* ================= PUBLIC ================= */
   {
