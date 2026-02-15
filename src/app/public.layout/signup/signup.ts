@@ -51,4 +51,8 @@ export class SignupComponent {
     }
   });
 }
+
+  continueWithGoogle() {
+    this.auth.loginWithGoogle();
+  }
 }

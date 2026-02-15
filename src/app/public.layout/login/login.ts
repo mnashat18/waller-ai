@@ -42,4 +42,8 @@ login() {
 }
   })
 }
+
+continueWithGoogle() {
+  this.auth.loginWithGoogle();
+}
 }

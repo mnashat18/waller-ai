@@ -1,47 +1,173 @@
-<section class="hero hero-landing">
+<section class="hero hero-landing reveal">
 
   <!-- LEFT -->
-  <div class="hero-left">
-    <span class="badge premium-badge">AI Healthcare Platform</span>
+  <div class="hero-left reveal">
+    <span class="badge premium-badge">Enterprise Wellness Intelligence</span>
 
     <h1 class="hero-title">
-      AI That Understands<br />
-      <span>Your Cognitive Health</span>
+      Operational Health Signals<br />
+      <span>for Every Workforce</span>
     </h1>
 
     <p class="description">
-      Detect risks early. Empower patients and doctors.
-      Real-time cognitive insights powered by AI.
+      Run daily cognitive scans from mobile, monitor risk in real time, and keep teams safe.
+      Built for transport fleets, factories, clinics, and modern enterprises.
     </p>
 
     <div class="actions">
-      <a routerLink="/signup" class="btn-primary">Get Started</a>
-      <a routerLink="/login" class="btn-ghost">Login</a>
+      <button type="button" class="btn-primary" (click)="openAuth('signup')">Start Free</button>
+      <a routerLink="/pricing" class="btn-ghost">View Plans</a>
     </div>
   </div>
 
   <!-- RIGHT -->
-  <div class="hero-right">
+  <div class="hero-right reveal">
 
-    <!-- 🔥 ROTATING TEXT -->
+    <!-- ROTATING TEXT -->
     <h2 id="rotating-text" class="rotating-text"></h2>
 
     <!-- STATS -->
-    <div class="stat-card">
-      <strong>98%</strong>
-      <span>Early Detection Accuracy</span>
+    <div class="stat-card reveal">
+      <strong>2 min</strong>
+      <span>Guided mobile scan</span>
     </div>
 
-    <div class="stat-card">
+    <div class="stat-card reveal">
       <strong>24/7</strong>
-      <span>AI Monitoring</span>
+      <span>Operational monitoring</span>
     </div>
 
-    <div class="stat-card">
-      <strong>Real-time</strong>
-      <span>Cognitive Insights</span>
+    <div class="stat-card reveal">
+      <strong>Enterprise</strong>
+      <span>Role-based controls</span>
     </div>
 
   </div>
 
+</section>
+
+<div class="auth-modal" *ngIf="showAuthModal">
+  <div class="auth-backdrop" (click)="closeAuth()"></div>
+  <div class="auth-card">
+    <button class="auth-close" (click)="closeAuth()">&times;</button>
+
+    <div class="auth-header">
+      <img
+        class="auth-logo-img"
+        src="assets/logo/app_icon.png"
+        alt="Wellar app icon" />
+      <h2 *ngIf="authMode === 'signup'">Create a free account</h2>
+      <h2 *ngIf="authMode === 'login'">Log in to your account</h2>
+      <h2 *ngIf="authMode === 'mobile'">Continue with mobile</h2>
+      <p>Enterprise access for teams that run daily scans.</p>
+    </div>
+
+    <form *ngIf="authMode === 'signup'" (ngSubmit)="submitSignup()" class="auth-form">
+      <input class="auth-input" placeholder="First name" [(ngModel)]="signup.firstName" name="firstName" />
+      <input class="auth-input" placeholder="Last name" [(ngModel)]="signup.lastName" name="lastName" />
+      <input class="auth-input" placeholder="Email address" [(ngModel)]="signup.email" name="email" type="email" />
+      <input class="auth-input" placeholder="Password" [(ngModel)]="signup.password" name="password" type="password" />
+      <button class="auth-primary" type="submit" [disabled]="submitting">Create account</button>
+    </form>
+
+    <form *ngIf="authMode === 'login'" (ngSubmit)="submitLogin()" class="auth-form">
+      <input class="auth-input" placeholder="Email address" [(ngModel)]="login.email" name="loginEmail" type="email" />
+      <input class="auth-input" placeholder="Password" [(ngModel)]="login.password" name="loginPassword" type="password" />
+      <button class="auth-primary" type="submit" [disabled]="submitting">Log in</button>
+    </form>
+
+    <div *ngIf="authMode === 'mobile'" class="auth-form">
+      <input class="auth-input" placeholder="+20 10 0000 0000" [(ngModel)]="mobile.phone" name="mobilePhone" type="tel" />
+      <button class="auth-primary" type="button" (click)="continueWithMobile()">Get the mobile app</button>
+    </div>
+
+    <div class="auth-divider">
+      <span>OR</span>
+    </div>
+
+    <button class="google-btn" type="button" (click)="continueWithGoogle()">
+      <svg class="google-icon" viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="#EA4335" d="M24 9.5c3.3 0 6.2 1.1 8.5 3.1l6.3-6.3C34.7 2.5 29.7.5 24 .5 14.6.5 6.4 6.1 2.6 14.1l7.3 5.7C11.7 13.5 17.4 9.5 24 9.5z"/>
+        <path fill="#34A853" d="M46.5 24.5c0-1.7-.2-3.3-.6-4.8H24v9.2h12.6c-.5 2.8-2.1 5.1-4.4 6.6l7 5.4c4.1-3.8 6.3-9.3 6.3-16.4z"/>
+        <path fill="#4A90E2" d="M9.9 28.8c-.5-1.5-.8-3-.8-4.8s.3-3.3.8-4.8l-7.3-5.7C.8 17.3 0 20.5 0 24c0 3.5.8 6.7 2.6 9.5l7.3-4.7z"/>
+        <path fill="#FBBC05" d="M24 47.5c5.7 0 10.6-1.9 14.1-5.1l-7-5.4c-2 1.3-4.5 2.1-7.1 2.1-6.6 0-12.3-4-14.1-9.7l-7.3 4.7c3.8 8 12 13.4 21.4 13.4z"/>
+      </svg>
+      Continue with Google
+    </button>
+
+    <button class="auth-secondary" type="button" (click)="continueWithMobile()">
+      Continue with Mobile
+    </button>
+
+    <p class="auth-feedback" *ngIf="feedback">{{ feedback }}</p>
+
+    <p class="auth-switch" *ngIf="authMode === 'signup'">
+      Already have an account? <button type="button" (click)="switchAuth('login')">Log in</button>
+    </p>
+    <p class="auth-switch" *ngIf="authMode === 'login'">
+      No account yet? <button type="button" (click)="switchAuth('signup')">Sign up</button>
+    </p>
+  </div>
+</div>
+
+<section class="industry-section reveal">
+  <div class="section-title">
+    <p class="eyebrow">Built for every operation</p>
+    <h2>Use cases that scale across industries</h2>
+  </div>
+  <div class="industry-grid">
+    <article class="industry-card reveal">
+      <h3>Transport & Fleets</h3>
+      <p>Daily scan check-ins before each shift with instant manager alerts.</p>
+      <span class="tag">Drivers</span>
+    </article>
+    <article class="industry-card reveal">
+      <h3>Factories & Plants</h3>
+      <p>Monitor fatigue risk, reduce incidents, and keep compliance reports ready.</p>
+      <span class="tag">Industrial</span>
+    </article>
+    <article class="industry-card reveal">
+      <h3>Clinics & Hospitals</h3>
+      <p>Track patient recovery, physician notes, and care-team handoffs.</p>
+      <span class="tag">Healthcare</span>
+    </article>
+  </div>
+</section>
+
+<section class="flow-section reveal">
+  <div class="section-title">
+    <p class="eyebrow">How it works</p>
+    <h2>Mobile scans, web control</h2>
+  </div>
+  <div class="flow-grid">
+    <div class="flow-card reveal">
+      <span class="flow-number">01</span>
+      <h3>Invite the team</h3>
+      <p>Send email or WhatsApp invites with one click from the dashboard.</p>
+    </div>
+    <div class="flow-card reveal">
+      <span class="flow-number">02</span>
+      <h3>Run daily scans</h3>
+      <p>Users complete a guided scan on mobile in under two minutes.</p>
+    </div>
+    <div class="flow-card reveal">
+      <span class="flow-number">03</span>
+      <h3>Act on insights</h3>
+      <p>Managers review reports, track trends, and export compliance logs.</p>
+    </div>
+  </div>
+</section>
+
+<section class="enterprise-section reveal">
+  <div class="enterprise-card reveal">
+    <div>
+      <p class="eyebrow">Enterprise readiness</p>
+      <h2>Security, governance, and control from day one</h2>
+      <p class="muted">
+        Plans are built for teams that need audit trails, secure access, and structured workflows.
+        Upgrade to Admin or Business to unlock requests, team management, and advanced reporting.
+      </p>
+    </div>
+    <a routerLink="/pricing" class="btn-primary">Compare Plans</a>
+  </div>
 </section>

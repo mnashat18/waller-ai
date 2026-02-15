@@ -1,0 +1,183 @@
+﻿<div class="min-h-screen bg-[#0b1020] text-white relative overflow-hidden">
+  <div class="absolute inset-0 opacity-30"
+       style="background: radial-gradient(circle at top, rgba(37, 99, 235, 0.55), transparent 60%);"></div>
+  <div class="absolute inset-0 opacity-20"
+       style="background: radial-gradient(circle at 20% 10%, rgba(96, 165, 250, 0.65), transparent 50%);"></div>
+  <div class="absolute inset-0 opacity-10"
+       style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 40px 40px;"></div>
+  <span class="mobile-orb" style="top: 90px; right: -10px;"></span>
+  <span class="mobile-orb gold" style="bottom: 140px; left: -10px;"></span>
+  <span class="mobile-sparkle" style="top: 160px; left: 36px;"></span>
+
+  <div class="relative z-10 px-5 pt-6 pb-28">
+    <div class="flex items-start justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Request Center</p>
+        <h1 class="text-2xl font-semibold mt-2">Requests</h1>
+        <p class="text-xs text-slate-400 mt-1">Plan: {{ currentPlanName }}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <app-notifications></app-notifications>
+        <a
+          routerLink="/profile"
+          class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <div class="mt-5 flex gap-3">
+      <button
+        *ngIf="canCreateRequests"
+        class="flex-1 bg-[#f5c451] text-slate-900 py-3 rounded-2xl font-semibold shadow-lg"
+        (click)="openCreateModal()">
+        Create Request
+      </button>
+      <a
+        *ngIf="!canCreateRequests"
+        routerLink="/pricing"
+        class="flex-1 bg-white/10 text-white py-3 rounded-2xl text-center">
+        Upgrade Plan
+      </a>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 mt-6">
+      <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <p class="text-xs text-slate-400">Total</p>
+        <p class="text-2xl font-semibold mt-2">{{ requestStats.total }}</p>
+      </div>
+      <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <p class="text-xs text-slate-400">Pending</p>
+        <p class="text-2xl font-semibold mt-2 text-amber-300">{{ requestStats.pending }}</p>
+      </div>
+      <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <p class="text-xs text-slate-400">Approved</p>
+        <p class="text-2xl font-semibold mt-2 text-emerald-300">{{ requestStats.approved }}</p>
+      </div>
+      <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <p class="text-xs text-slate-400">Denied</p>
+        <p class="text-2xl font-semibold mt-2 text-red-300">{{ requestStats.denied }}</p>
+      </div>
+    </div>
+
+    <div class="mt-6 space-y-3">
+      <div
+        class="rounded-2xl bg-white/5 border border-white/10 p-4"
+        *ngFor="let req of requests">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-semibold">{{ req.target }}</p>
+          <span
+            class="badge"
+            [ngClass]="{
+              'badge-stable': req.status === 'Approved',
+              'badge-low': req.status === 'Pending',
+              'badge-risk': req.status === 'Denied'
+            }">
+            {{ req.status }}
+          </span>
+        </div>
+        <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
+          <span>{{ req.required_state }}</span>
+          <span>{{ req.timestamp }}</span>
+        </div>
+        <a
+          *ngIf="req.status === 'Pending'"
+          routerLink="/download-app"
+          class="mt-3 inline-flex items-center gap-2 text-xs text-amber-300 hover:text-amber-200 transition">
+          Download app to respond
+          <span aria-hidden="true">&rarr;</span>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <app-create-request-modal
+    *ngIf="showCreateModal"
+    [feedback]="submitFeedback"
+    [submitting]="submittingRequest"
+    [requestedByDefault]="requestedByDefault"
+    (submitRequest)="handleCreateRequest($event)"
+    (close)="showCreateModal = false">
+  </app-create-request-modal>
+
+  <div
+    *ngIf="showPermissionNotice"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-6">
+    <div class="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
+      <div class="flex items-start justify-between">
+        <div>
+          <p class="text-xs uppercase tracking-wide text-slate-400">Permission Required</p>
+          <h2 class="mt-2 text-xl font-semibold text-slate-100">لازم تترقى لباقة Business</h2>
+        </div>
+        <button
+          class="text-slate-400 hover:text-slate-200"
+          (click)="dismissPermissionNotice()">
+          x
+        </button>
+      </div>
+      <p class="mt-3 text-sm text-slate-400">
+        ميزة إنشاء الطلبات متاحة لخطط Business فقط. اضغط على Upgrade لاختيار الخطة المناسبة.
+      </p>
+      <div class="mt-6 flex justify-end gap-3">
+        <a routerLink="/pricing" class="bg-[#f5c451] text-slate-900 px-4 py-2 rounded-full">Upgrade</a>
+        <button
+          class="px-4 py-2 rounded-full border border-slate-700 text-slate-300"
+          (click)="dismissPermissionNotice()">
+          فهمت
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
+    <div class="grid grid-cols-5 text-[10px] text-slate-400">
+      <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 12h6"></path>
+          <path d="M9 16h6"></path>
+          <path d="M5 8h14v12H5z"></path>
+        </svg>
+        <span>Audit logs</span>
+      </a>
+      <a
+        routerLink="/requests"
+        [queryParams]="{ create: 1 }"
+        class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>Create</span>
+      </a>
+      <a routerLink="/dashboard" routerLinkActive="text-white" [routerLinkActiveOptions]="{ exact: true }" class="flex flex-col items-center gap-1">
+        <div class="w-11 h-11 rounded-full bg-[#f5c451] text-slate-900 flex items-center justify-center -mt-6 shadow-lg">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 11.5L12 4l9 7.5"></path>
+            <path d="M5 10.5V20h14v-9.5"></path>
+          </svg>
+        </div>
+        <span class="mt-2 text-white">Home</span>
+      </a>
+      <a routerLink="/requests" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16"></path>
+          <path d="M4 12h16"></path>
+          <path d="M4 17h16"></path>
+        </svg>
+        <span>Requests</span>
+      </a>
+      <a routerLink="/history" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12a9 9 0 1 0 9-9"></path>
+          <path d="M3 4v6h6"></path>
+          <path d="M12 7v5l3 3"></path>
+        </svg>
+        <span>History</span>
+      </a>
+    </div>
+  </nav>
+</div>
+

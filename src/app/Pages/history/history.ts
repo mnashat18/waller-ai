@@ -1,13 +1,14 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { RouterModule } from '@angular/router';
 import { map } from 'rxjs/operators';
 import { AdminTokenService } from '../../services/admin-token';
 import { environment } from 'src/environments/environment';
 
 @Component({
   selector: 'app-history',
-  imports: [CommonModule],
+  imports: [CommonModule, RouterModule],
   templateUrl: './history.html',
   styleUrl: './history.css',
 })

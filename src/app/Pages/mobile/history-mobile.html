@@ -1,0 +1,150 @@
+﻿<div class="min-h-screen bg-[#0b1020] text-white relative overflow-hidden">
+  <div class="absolute inset-0 opacity-30"
+       style="background: radial-gradient(circle at top, rgba(37, 99, 235, 0.55), transparent 60%);"></div>
+  <div class="absolute inset-0 opacity-20"
+       style="background: radial-gradient(circle at 20% 10%, rgba(96, 165, 250, 0.65), transparent 50%);"></div>
+  <div class="absolute inset-0 opacity-10"
+       style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 40px 40px;"></div>
+  <span class="mobile-orb" style="top: 80px; right: -10px;"></span>
+  <span class="mobile-orb gold" style="bottom: 140px; left: -10px;"></span>
+  <span class="mobile-sparkle" style="top: 150px; left: 34px;"></span>
+
+  <div class="relative z-10 px-5 pt-6 pb-28">
+    <div class="flex items-start justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Scan History</p>
+        <h1 class="text-2xl font-semibold mt-2">History</h1>
+        <p class="text-xs text-slate-400 mt-1">Total scans: {{ scans.length }}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <app-notifications></app-notifications>
+        <a
+          routerLink="/profile"
+          class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <div class="mt-6 space-y-3">
+      <div
+        class="rounded-2xl bg-white/5 border border-white/10 p-4"
+        *ngFor="let scan of scans">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-semibold">{{ scan.date }}</p>
+          <span
+            class="badge"
+            [ngClass]="{
+              'badge-stable': scan.result === 'Stable',
+              'badge-low': scan.result === 'Low Focus',
+              'badge-fatigue': scan.result === 'Elevated Fatigue',
+              'badge-risk': scan.result === 'High Risk'
+            }">
+            {{ scan.result }}
+          </span>
+        </div>
+        <p class="mt-2 text-sm text-slate-300">{{ scan.report }}</p>
+        <button class="mt-3 text-xs text-[#f5c451]" (click)="openScan(scan)">View details</button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="selectedScan as scan"
+       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-5">
+    <div class="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-xl">
+      <div class="flex justify-between items-start">
+        <div>
+          <p class="text-xs text-slate-400">{{ scan.date }} - {{ scan.time }}</p>
+          <h2 class="text-lg font-semibold mt-1">Scan Details</h2>
+        </div>
+        <button class="text-slate-400" (click)="closeScan()">x</button>
+      </div>
+
+      <div class="mt-4">
+        <span
+          class="badge"
+          [ngClass]="{
+            'badge-stable': scan.result === 'Stable',
+            'badge-low': scan.result === 'Low Focus',
+            'badge-fatigue': scan.result === 'Elevated Fatigue',
+            'badge-risk': scan.result === 'High Risk'
+          }">
+          {{ scan.result }}
+        </span>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs text-slate-400">Medical Report</p>
+        <p class="text-sm text-slate-200 mt-1">{{ scan.report }}</p>
+      </div>
+
+      <div class="mt-4 grid grid-cols-2 gap-3">
+        <div class="rounded-xl bg-white/5 border border-white/10 p-3">
+          <p class="text-xs text-slate-400">Fatigue Level</p>
+          <p class="text-sm mt-1">{{ scan.fatigueLevel }}</p>
+        </div>
+        <div class="rounded-xl bg-white/5 border border-white/10 p-3">
+          <p class="text-xs text-slate-400">Focus Score</p>
+          <p class="text-sm mt-1">{{ scan.focusScore }}</p>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs text-slate-400">Recommendation</p>
+        <p class="text-sm text-slate-200 mt-1">{{ scan.recommendation }}</p>
+      </div>
+    </div>
+  </div>
+
+  <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
+    <div class="grid grid-cols-5 text-[10px] text-slate-400">
+      <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 12h6"></path>
+          <path d="M9 16h6"></path>
+          <path d="M5 8h14v12H5z"></path>
+        </svg>
+        <span>Audit logs</span>
+      </a>
+      <a
+        routerLink="/requests"
+        [queryParams]="{ create: 1 }"
+        class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>Create</span>
+      </a>
+      <a routerLink="/dashboard" routerLinkActive="text-white" [routerLinkActiveOptions]="{ exact: true }" class="flex flex-col items-center gap-1">
+        <div class="w-11 h-11 rounded-full bg-[#f5c451] text-slate-900 flex items-center justify-center -mt-6 shadow-lg">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 11.5L12 4l9 7.5"></path>
+            <path d="M5 10.5V20h14v-9.5"></path>
+          </svg>
+        </div>
+        <span class="mt-2 text-white">Home</span>
+      </a>
+      <a routerLink="/requests" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16"></path>
+          <path d="M4 12h16"></path>
+          <path d="M4 17h16"></path>
+        </svg>
+        <span>Requests</span>
+      </a>
+      <a routerLink="/history" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12a9 9 0 1 0 9-9"></path>
+          <path d="M3 4v6h6"></path>
+          <path d="M12 7v5l3 3"></path>
+        </svg>
+        <span>History</span>
+      </a>
+    </div>
+  </nav>
+</div>
+

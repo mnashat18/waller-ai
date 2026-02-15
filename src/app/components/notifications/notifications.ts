@@ -42,6 +42,10 @@ export class NotificationsComponent implements OnInit, OnDestroy {
     }
   }
 
+  closePanel() {
+    this.open = false;
+  }
+
   openDetails(notification: NotificationItem) {
     this.markAsRead(notification);
     this.selectedNotification = notification;

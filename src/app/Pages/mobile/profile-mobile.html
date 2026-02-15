@@ -1,0 +1,147 @@
+﻿<div class="min-h-screen bg-[#0b1020] text-white relative overflow-hidden">
+  <div class="absolute inset-0 opacity-30"
+       style="background: radial-gradient(circle at top, rgba(37, 99, 235, 0.55), transparent 60%);"></div>
+  <div class="absolute inset-0 opacity-20"
+       style="background: radial-gradient(circle at 20% 10%, rgba(96, 165, 250, 0.65), transparent 50%);"></div>
+  <div class="absolute inset-0 opacity-10"
+       style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 40px 40px;"></div>
+  <span class="mobile-orb" style="top: 90px; right: -10px;"></span>
+  <span class="mobile-orb gold" style="bottom: 140px; left: -10px;"></span>
+  <span class="mobile-sparkle" style="top: 160px; left: 34px;"></span>
+
+  <div class="relative z-10 px-5 pt-6 pb-28">
+    <div class="flex items-start justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Profile</p>
+        <h1 class="text-2xl font-semibold mt-2">Account</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <app-notifications></app-notifications>
+      </div>
+    </div>
+
+    <div class="mt-5 rounded-2xl bg-white/5 border border-white/10 p-4">
+      <div class="flex items-center gap-4">
+        <div class="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center overflow-hidden">
+          <img
+            *ngIf="avatarPreviewUrl || profile?.avatarUrl"
+            [src]="avatarPreviewUrl || profile?.avatarUrl"
+            alt="Profile avatar"
+            class="w-full h-full object-cover" />
+          <span *ngIf="!avatarPreviewUrl && !profile?.avatarUrl" class="text-lg font-semibold">
+            {{ profile?.initials || 'W' }}
+          </span>
+        </div>
+        <div>
+          <p class="text-lg font-semibold">{{ profile?.name || 'Wellar User' }}</p>
+          <p class="text-xs text-slate-400">{{ profile?.email }}</p>
+          <div class="mt-2 flex gap-2">
+            <span class="badge badge-stable">{{ profile?.status || 'Active' }}</span>
+            <span class="badge badge-low">{{ profile?.roleLabel || 'User' }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 flex gap-3">
+        <button class="flex-1 bg-[#f5c451] text-slate-900 py-2 rounded-2xl font-semibold" (click)="startEdit()">
+          Edit
+        </button>
+        <button class="flex-1 bg-white/10 text-white py-2 rounded-2xl" (click)="logout()">
+          Logout
+        </button>
+      </div>
+    </div>
+
+    <div *ngIf="editing && profile" class="mt-5 rounded-2xl bg-white/5 border border-white/10 p-4">
+      <p class="text-sm font-semibold">Edit Profile</p>
+      <div class="grid grid-cols-2 gap-3 mt-3">
+        <div>
+          <label class="text-xs text-slate-400">First Name</label>
+          <input class="mt-1 w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm" [(ngModel)]="form.firstName" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Last Name</label>
+          <input class="mt-1 w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm" [(ngModel)]="form.lastName" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Password</label>
+          <input class="mt-1 w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm" type="password" [(ngModel)]="form.password" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Avatar</label>
+          <input class="mt-1 w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm" type="file" (change)="onAvatarSelected($event)" />
+        </div>
+      </div>
+
+      <div class="mt-4 flex items-center gap-3">
+        <button class="bg-[#f5c451] text-slate-900 px-4 py-2 rounded-full" [disabled]="saving" (click)="saveProfile()">
+          Save
+        </button>
+        <button class="text-slate-300" (click)="cancelEdit()">Cancel</button>
+      </div>
+      <p *ngIf="saveFeedback as info" class="text-xs mt-2" [ngClass]="info.type">
+        {{ info.message }}
+      </p>
+    </div>
+
+    <div *ngIf="!loading && profile" class="mt-5 space-y-3">
+      <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <p class="text-xs text-slate-400">Member Since</p>
+        <p class="text-sm mt-1">{{ profile.memberSince }}</p>
+      </div>
+      <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+        <p class="text-xs text-slate-400">Last Access</p>
+        <p class="text-sm mt-1">{{ profile.lastAccess }}</p>
+      </div>
+    </div>
+  </div>
+
+  <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
+    <div class="grid grid-cols-5 text-[10px] text-slate-400">
+      <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 12h6"></path>
+          <path d="M9 16h6"></path>
+          <path d="M5 8h14v12H5z"></path>
+        </svg>
+        <span>Audit logs</span>
+      </a>
+      <a
+        routerLink="/requests"
+        [queryParams]="{ create: 1 }"
+        class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>Create</span>
+      </a>
+      <a routerLink="/dashboard" routerLinkActive="text-white" [routerLinkActiveOptions]="{ exact: true }" class="flex flex-col items-center gap-1">
+        <div class="w-11 h-11 rounded-full bg-[#f5c451] text-slate-900 flex items-center justify-center -mt-6 shadow-lg">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 11.5L12 4l9 7.5"></path>
+            <path d="M5 10.5V20h14v-9.5"></path>
+          </svg>
+        </div>
+        <span class="mt-2 text-white">Home</span>
+      </a>
+      <a routerLink="/requests" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16"></path>
+          <path d="M4 12h16"></path>
+          <path d="M4 17h16"></path>
+        </svg>
+        <span>Requests</span>
+      </a>
+      <a routerLink="/history" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12a9 9 0 1 0 9-9"></path>
+          <path d="M3 4v6h6"></path>
+          <path d="M12 7v5l3 3"></path>
+        </svg>
+        <span>History</span>
+      </a>
+    </div>
+  </nav>
+</div>
+

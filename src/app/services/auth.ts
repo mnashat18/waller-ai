@@ -51,4 +51,12 @@ signup(data: {
   logout() {
     localStorage.clear();
   }
+
+  loginWithGoogle() {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.location.href =
+      'https://dash.conntinuity.com/auth/login/google?redirect=https://conntinuity.com/auth-callback';
+  }
 }

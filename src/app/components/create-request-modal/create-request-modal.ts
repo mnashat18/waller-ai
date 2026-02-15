@@ -12,6 +12,7 @@ export class CreateRequestModalComponent {
   @Output() submitRequest = new EventEmitter<CreateRequestForm>();
   @Input() feedback: SubmitFeedback | null = null;
   @Input() submitting = false;
+  @Input() requestedByDefault = '';
 
   onSubmit(
     requestedBy: string,

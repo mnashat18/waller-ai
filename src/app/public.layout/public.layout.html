@@ -11,6 +11,50 @@
   <canvas id="snow"></canvas>
 
   <!-- PAGE CONTENT -->
-  <router-outlet></router-outlet>
+  <div class="page-slot">
+    <router-outlet></router-outlet>
+  </div>
 
 </section>
+
+<button
+  class="scroll-top"
+  type="button"
+  aria-label="Back to top"
+  *ngIf="showScrollTop"
+  (click)="scrollToTop()">
+  <span class="scroll-top-ring"></span>
+  <span class="scroll-top-arrow">&uarr;</span>
+</button>
+
+<footer class="site-footer">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <img class="footer-logo" src="assets/logo/app_icon.png" alt="Wellar app icon" />
+      <p>Enterprise wellness intelligence for every workforce.</p>
+    </div>
+    <div>
+      <h4>Product</h4>
+      <a routerLink="/pricing">Pricing</a>
+      <a routerLink="/download-app">Mobile Scan</a>
+      <a routerLink="/signup">Get Started</a>
+    </div>
+    <div>
+      <h4>Company</h4>
+      <a routerLink="/about">About</a>
+      <a routerLink="/careers">Careers</a>
+      <a routerLink="/contact">Contact</a>
+    </div>
+    <div>
+      <h4>Legal</h4>
+      <a routerLink="/privacy">Privacy</a>
+      <a routerLink="/terms">Terms</a>
+      <a routerLink="/security">Security</a>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    (c) 2026 Wellar AI. All rights reserved.
+  </div>
+</footer>
+
+

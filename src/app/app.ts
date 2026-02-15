@@ -13,8 +13,13 @@ export class App {
   constructor() {
     if (typeof window !== 'undefined') {
       const theme = window.localStorage.getItem('theme');
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
+      const root = document.documentElement;
+      if (theme === 'light') {
+        root.classList.add('light');
+        root.classList.remove('dark');
+      } else {
+        root.classList.add('dark');
+        root.classList.remove('light');
       }
     }
   }

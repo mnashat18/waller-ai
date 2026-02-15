@@ -19,17 +19,21 @@
         #requestedByInput
         class="input"
         id="requester-name"
-        placeholder="Admin name" />
+        [value]="requestedByDefault"
+        placeholder="Company or admin name" />
     </div>
 
     <!-- Requested For -->
     <div>
-      <label class="label" for="request-user-id">Requested For (User ID)</label>
+      <label class="label" for="request-user-id">Requested For (Email or Phone)</label>
       <input
         #requestedForInput
         class="input"
         id="request-user-id"
-        placeholder="User UUID or email" />
+        placeholder="name@email.com or +201234567890" />
+      <p class="text-xs text-slate-500 mt-2">
+        We will send an invite if the user is not registered yet.
+      </p>
     </div>
 
     <!-- Required State -->

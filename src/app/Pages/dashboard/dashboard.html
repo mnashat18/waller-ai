@@ -1,36 +1,52 @@
 <!-- Skeleton Stats -->
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" *ngIf="loading">
+<div class="kpi-grid" *ngIf="loading">
   <div class="skeleton-card"></div>
   <div class="skeleton-card"></div>
   <div class="skeleton-card"></div>
   <div class="skeleton-card"></div>
 </div>
 
-<div class="space-y-10 fade-in" *ngIf="!loading">
+<div class="page-shell fade-in" *ngIf="!loading">
 
-  <!-- Header -->
-  <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-
-    <div>
-      <h1 class="text-3xl font-semibold">Dashboard</h1>
-      <p class="text-slate-500 mt-1">
-        Weekly wellness overview & medical insights
+  <div class="page-hero">
+    <div class="hero-left">
+      <span class="hero-chip">Operations Dashboard</span>
+      <h1 class="page-title">Dashboard</h1>
+      <p class="page-subtitle">
+        Weekly wellness overview, risk signals, and medical insights for your teams.
       </p>
     </div>
 
-    <button
-      (click)="openScanModal()"
-      class="bg-primary hover:bg-blue-700 transition text-white px-6 py-3 rounded-lg shadow">
-      Start New Scan
-    </button>
+    <div class="hero-actions">
+      <button
+        (click)="openScanModal()"
+        class="btn-primary px-6 py-3 rounded-full">
+        Start New Scan
+      </button>
+      <a routerLink="/history" class="chip">View History</a>
+    </div>
+
+    <div class="hero-visual">
+      <span class="hero-orb"></span>
+      <span class="hero-orb gold"></span>
+      <span class="hero-orb indigo"></span>
+      <span class="sparkle" style="top: 20px; left: 30px;"></span>
+      <span class="sparkle gold" style="bottom: 24px; right: 30px;"></span>
+      <svg viewBox="0 0 220 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="14" y="20" width="190" height="120" rx="18" stroke="rgba(125,211,252,0.7)" stroke-width="2"/>
+        <path class="pulse-line" d="M30 110L70 80L110 95L150 60L190 72" stroke="#7dd3fc" stroke-width="3" stroke-linecap="round"/>
+        <circle class="pulse-dot" cx="70" cy="80" r="5" fill="#f5c451"/>
+        <circle class="pulse-dot" cx="150" cy="60" r="5" fill="#38bdf8"/>
+        <circle class="pulse-dot" cx="110" cy="95" r="4" fill="#6366f1"/>
+      </svg>
+    </div>
   </div>
 
   <!-- Modal -->
   <div *ngIf="showScanModal"
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
 
-    <div class="bg-white dark:bg-slate-900 rounded-xl p-8 w-full max-w-md shadow-xl animate-scale">
-
+    <div class="panel w-full max-w-md animate-scale">
       <h2 class="text-xl font-semibold mb-2">
         Scan via Mobile App
       </h2>
@@ -42,11 +58,11 @@
       <div class="flex justify-end gap-3">
         <button
           (click)="closeScanModal()"
-          class="px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-100">
+          class="px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800/40">
           Cancel
         </button>
 
-        <a routerLink="/download-app" (click)="closeScanModal()" class="btn-primary">
+        <a routerLink="/download-app" (click)="closeScanModal()" class="btn-primary px-5 py-2 rounded-full">
           Download App
         </a>
       </div>
@@ -54,42 +70,72 @@
   </div>
 
   <!-- KPI Cards -->
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-    <div class="stat-card border-l-4 border-green-500">
-      <p>Stable</p>
-      <h3 class="text-green-600">{{ stats.stable }}</h3>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-icon">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12l4 4 8-8"></path>
+          <path d="M21 12a9 9 0 1 1-9-9"></path>
+        </svg>
+      </div>
+      <p class="text-sm text-slate-400">Stable</p>
+      <p class="kpi-value text-emerald-300">{{ stats.stable }}</p>
     </div>
 
-    <div class="stat-card border-l-4 border-orange-500">
-      <p>Low Focus</p>
-      <h3 class="text-orange-500">{{ stats.low_focus }}</h3>
+    <div class="kpi-card">
+      <div class="kpi-icon">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 3v18"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+      </div>
+      <p class="text-sm text-slate-400">Low Focus</p>
+      <p class="kpi-value text-amber-300">{{ stats.low_focus }}</p>
     </div>
 
-    <div class="stat-card border-l-4 border-yellow-500">
-      <p>Elevated Fatigue</p>
-      <h3 class="text-yellow-500">{{ stats.fatigue }}</h3>
+    <div class="kpi-card">
+      <div class="kpi-icon">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 4v6l4 2"></path>
+          <circle cx="12" cy="12" r="9"></circle>
+        </svg>
+      </div>
+      <p class="text-sm text-slate-400">Elevated Fatigue</p>
+      <p class="kpi-value text-yellow-300">{{ stats.fatigue }}</p>
     </div>
 
-    <div class="stat-card border-l-4 border-red-500">
-      <p>High Risk</p>
-      <h3 class="text-red-500">{{ stats.high_risk }}</h3>
+    <div class="kpi-card">
+      <div class="kpi-icon">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 9v4"></path>
+          <path d="M12 17h.01"></path>
+          <path d="M5 3l14 18H5z"></path>
+        </svg>
+      </div>
+      <p class="text-sm text-slate-400">High Risk</p>
+      <p class="kpi-value text-red-300">{{ stats.high_risk }}</p>
     </div>
   </div>
 
   <!-- Chart + Medical Report -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-  <div class="lg:col-span-2 card">
-  
-      <h3 class="font-semibold mb-4">Weekly Scan Distribution</h3>
+    <div class="panel lg:col-span-2">
+      <div class="panel-header">
+        <h3 class="panel-title">Weekly Scan Distribution</h3>
+        <span class="chip">Last 7 days</span>
+      </div>
       <app-weekly-chart [scans]="recentScans"></app-weekly-chart>
     </div>
 
-    <div class="card space-y-4" *ngIf="recentScans.length">
-      <h3 class="font-semibold">Medical Report</h3>
+    <div class="panel space-y-4" *ngIf="recentScans.length">
+      <div class="panel-header">
+        <h3 class="panel-title">Medical Report</h3>
+        <span class="chip">Latest</span>
+      </div>
 
       <div>
-        <p class="text-sm text-slate-500">Last Scan</p>
+        <p class="text-sm text-slate-400">Last Scan</p>
         <span
           class="badge"
           [ngClass]="{
@@ -103,8 +149,8 @@
       </div>
 
       <div>
-        <p class="text-sm text-slate-500">Recommendation</p>
-        <p class="text-sm">
+        <p class="text-sm text-slate-400">Recommendation</p>
+        <p class="text-sm text-slate-200">
           {{ recentScans[0].medical_report }}
         </p>
       </div>
@@ -113,42 +159,42 @@
   </div>
 
   <!-- Recent Scans -->
-  <div class="card">
-    <h3 class="font-semibold mb-4">Recent Scans</h3>
+  <div class="panel">
+    <div class="panel-header">
+      <h3 class="panel-title">Recent Scans</h3>
+      <a routerLink="/history" class="chip">Full History</a>
+    </div>
 
-    <div class="overflow-x-auto">
-  <table class="w-full min-w-[600px]">
-      <thead>
-        <tr>
-          <th class="th">Date</th>
-          <th class="th">Result</th>
-          <th class="th">Report</th>
-        </tr>
-      </thead>
+    <div class="table-shell">
+      <table class="min-w-[600px]">
+        <thead>
+          <tr>
+            <th class="th">Date</th>
+            <th class="th">Result</th>
+            <th class="th">Report</th>
+          </tr>
+        </thead>
 
-      <tbody>
-  <tr class="row" *ngFor="let scan of recentScans">
-    <td>{{ scan.date_created | date:'yyyy-MM-dd' }}</td>
-    <td>
-      <span
-        class="badge"
-        [ngClass]="{
-          'badge-stable': scan.overall_state_key === 'stable',
-          'badge-low': scan.overall_state_key === 'low_focus',
-          'badge-fatigue': scan.overall_state_key === 'fatigue',
-          'badge-risk': scan.overall_state_key === 'high_risk'
-        }">
-        {{ scan.overall_state_label || scan.overall_state }}
-      </span>
-    </td>
-    <td>{{ scan.medical_report || '-' }}</td>
-  </tr>
-</tbody>
-
-
-
-    </table>
+        <tbody>
+          <tr class="row" *ngFor="let scan of recentScans">
+            <td>{{ scan.date_created | date:'yyyy-MM-dd' }}</td>
+            <td>
+              <span
+                class="badge"
+                [ngClass]="{
+                  'badge-stable': scan.overall_state_key === 'stable',
+                  'badge-low': scan.overall_state_key === 'low_focus',
+                  'badge-fatigue': scan.overall_state_key === 'fatigue',
+                  'badge-risk': scan.overall_state_key === 'high_risk'
+                }">
+                {{ scan.overall_state_label || scan.overall_state }}
+              </span>
+            </td>
+            <td>{{ scan.medical_report || '-' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
 </div>
-

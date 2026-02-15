@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-[#0b1020] text-white relative overflow-hidden">
+<div class="min-h-screen bg-[#0b1020] text-white relative overflow-hidden fade-in">
   <div class="absolute inset-0 opacity-30"
        style="background: radial-gradient(circle at top, rgba(37, 99, 235, 0.55), transparent 60%);">
   </div>
@@ -8,103 +8,97 @@
   <div class="absolute inset-0 opacity-10"
        style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 40px 40px;">
   </div>
+  <span class="mobile-orb" style="top: 80px; right: -20px;"></span>
+  <span class="mobile-orb gold" style="bottom: 120px; left: -20px;"></span>
+  <span class="mobile-sparkle" style="top: 140px; left: 40px;"></span>
 
   <div class="relative z-10 px-5 pt-6 pb-28">
-    <ng-container *ngIf="!loading; else loadingTpl">
-      <div class="flex items-start justify-between">
-        <div>
-          <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Welcome</p>
-          <p class="text-xs text-slate-400 mt-1">Role: User</p>
-        </div>
+    <div class="flex items-start justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Welcome</p>
+        <p class="text-xs text-slate-400 mt-1">Role: User</p>
+      </div>
 
-        <div class="flex items-center gap-3">
-          <app-notifications></app-notifications>
-          <a
-            routerLink="/profile"
-            class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-              <circle cx="12" cy="7" r="4"></circle>
-            </svg>
-          </a>
+      <div class="flex items-center gap-3">
+        <app-notifications></app-notifications>
+        <a
+          routerLink="/profile"
+          class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <a
+      routerLink="/download-app"
+      class="mt-5 w-full inline-flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 transition text-white py-3 rounded-2xl shadow-lg">
+      <span class="text-sm font-semibold">Start New Scan</span>
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M5 12h14"></path>
+        <path d="M13 5l7 7-7 7"></path>
+      </svg>
+    </a>
+
+    <div class="mt-6">
+      <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-[0.2em]">
+        <span>Insights</span>
+        <span class="text-[10px] tracking-normal" *ngIf="refreshing">Syncing data...</span>
+        <span class="text-[10px] tracking-normal" *ngIf="!refreshing && !loading && recentScans.length">Latest result available</span>
+        <span class="text-[10px] tracking-normal" *ngIf="loading">Loading data...</span>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 mt-3">
+        <div class="rounded-2xl bg-white/5 border border-white/10 p-4" [ngClass]="{ 'animate-pulse': loading }">
+          <p class="text-xs text-slate-400">Total Scans</p>
+          <p class="text-2xl font-semibold mt-2">{{ loading ? '-' : totalScans }}</p>
+        </div>
+        <div class="rounded-2xl bg-white/5 border border-white/10 p-4" [ngClass]="{ 'animate-pulse': loading }">
+          <p class="text-xs text-slate-400">Latest State</p>
+          <p class="text-lg font-semibold mt-2"
+             [ngClass]="{
+               'text-emerald-300': !loading && latestStateKey === 'stable',
+               'text-amber-300': !loading && latestStateKey === 'low_focus',
+               'text-yellow-300': !loading && latestStateKey === 'fatigue',
+               'text-red-300': !loading && latestStateKey === 'high_risk',
+               'text-slate-200': loading || latestStateKey === 'unknown'
+             }">
+            {{ loading ? 'Loading...' : latestStateLabel }}
+          </p>
         </div>
       </div>
 
-      <a
-        routerLink="/download-app"
-        class="mt-5 w-full inline-flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 transition text-white py-3 rounded-2xl shadow-lg">
-        <span class="text-sm font-semibold">Start New Scan</span>
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M5 12h14"></path>
-          <path d="M13 5l7 7-7 7"></path>
-        </svg>
-      </a>
-
-      <div class="mt-6">
-        <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-[0.2em]">
-          <span>Insights</span>
-          <span class="text-[10px] tracking-normal">Latest result available</span>
+      <div class="rounded-2xl bg-white/5 border border-white/10 p-4 mt-3">
+        <div class="flex items-center justify-between text-xs text-slate-400">
+          <span>Stability Snapshot</span>
+          <span *ngIf="!loading && recentScans.length">{{ recentScans[0].date_created | date:'MMM d' }}</span>
         </div>
-
-        <div class="grid grid-cols-2 gap-3 mt-3">
-          <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
-            <p class="text-xs text-slate-400">Total Scans</p>
-            <p class="text-2xl font-semibold mt-2">{{ totalScans }}</p>
+        <div class="mt-4 flex items-end justify-between h-24" [ngClass]="{ 'animate-pulse': loading }">
+          <div class="flex flex-col items-center gap-2 flex-1">
+            <div class="w-3 rounded-full bg-emerald-400" [style.height.px]="barHeights.stable"></div>
+            <span class="text-[10px] text-slate-400">Stable</span>
           </div>
-          <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
-            <p class="text-xs text-slate-400">Latest State</p>
-            <p class="text-lg font-semibold mt-2"
-               [ngClass]="{
-                 'text-emerald-300': latestStateKey === 'stable',
-                 'text-amber-300': latestStateKey === 'low_focus',
-                 'text-yellow-300': latestStateKey === 'fatigue',
-                 'text-red-300': latestStateKey === 'high_risk',
-                 'text-slate-200': latestStateKey === 'unknown'
-               }">
-              {{ latestStateLabel }}
-            </p>
+          <div class="flex flex-col items-center gap-2 flex-1">
+            <div class="w-3 rounded-full bg-amber-400" [style.height.px]="barHeights.low_focus"></div>
+            <span class="text-[10px] text-slate-400">Low</span>
           </div>
-        </div>
-
-        <div class="rounded-2xl bg-white/5 border border-white/10 p-4 mt-3">
-          <div class="flex items-center justify-between text-xs text-slate-400">
-            <span>Stability Snapshot</span>
-            <span *ngIf="recentScans.length">{{ recentScans[0].date_created | date:'MMM d' }}</span>
+          <div class="flex flex-col items-center gap-2 flex-1">
+            <div class="w-3 rounded-full bg-yellow-400" [style.height.px]="barHeights.fatigue"></div>
+            <span class="text-[10px] text-slate-400">Fatigue</span>
           </div>
-          <div class="mt-4 flex items-end justify-between h-24">
-            <div class="flex flex-col items-center gap-2 flex-1">
-              <div class="w-3 rounded-full bg-emerald-400" [style.height.px]="barHeights.stable"></div>
-              <span class="text-[10px] text-slate-400">Stable</span>
-            </div>
-            <div class="flex flex-col items-center gap-2 flex-1">
-              <div class="w-3 rounded-full bg-amber-400" [style.height.px]="barHeights.low_focus"></div>
-              <span class="text-[10px] text-slate-400">Low</span>
-            </div>
-            <div class="flex flex-col items-center gap-2 flex-1">
-              <div class="w-3 rounded-full bg-yellow-400" [style.height.px]="barHeights.fatigue"></div>
-              <span class="text-[10px] text-slate-400">Fatigue</span>
-            </div>
-            <div class="flex flex-col items-center gap-2 flex-1">
-              <div class="w-3 rounded-full bg-red-400" [style.height.px]="barHeights.high_risk"></div>
-              <span class="text-[10px] text-slate-400">Risk</span>
-            </div>
+          <div class="flex flex-col items-center gap-2 flex-1">
+            <div class="w-3 rounded-full bg-red-400" [style.height.px]="barHeights.high_risk"></div>
+            <span class="text-[10px] text-slate-400">Risk</span>
           </div>
         </div>
       </div>
-    </ng-container>
 
-    <ng-template #loadingTpl>
-      <div class="space-y-4">
-        <div class="h-6 w-40 rounded-lg bg-white/10"></div>
-        <div class="h-12 rounded-2xl bg-white/10"></div>
-        <div class="grid grid-cols-2 gap-3">
-          <div class="h-24 rounded-2xl bg-white/10"></div>
-          <div class="h-24 rounded-2xl bg-white/10"></div>
-          <div class="h-24 rounded-2xl bg-white/10"></div>
-          <div class="h-24 rounded-2xl bg-white/10"></div>
-        </div>
-      </div>
-    </ng-template>
+      <p class="mt-4 text-xs text-slate-400" *ngIf="!loading && !refreshing && !recentScans.length">
+        No scans yet. Run your first mobile scan to see insights here.
+      </p>
+    </div>
   </div>
 
   <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">

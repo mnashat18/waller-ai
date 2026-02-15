@@ -1,21 +1,23 @@
-import { Component } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { CommonModule } from '@angular/common';
+import { Component, OnDestroy } from '@angular/core';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { HeaderComponent } from './header/header';
 import { SidebarComponent } from './sidebar/sidebar';
 
 @Component({
   selector: 'app-layout',
   standalone: true,
-  imports: [RouterOutlet, HeaderComponent, SidebarComponent],
+  imports: [CommonModule, RouterOutlet, HeaderComponent, SidebarComponent],
   template: `
     <!-- ========================= -->
     <!-- RESPONSIVE LAYOUT -->
     <!-- ========================= -->
-    <div class="min-h-screen bg-slate-950 md:bg-slate-50 dark:bg-slate-950 mobile-view">
+    <div class="app-shell mobile-view">
       <div class="flex min-h-screen">
 
         <!-- SIDEBAR (Desktop only) -->
-        <aside class="hidden md:flex w-20 bg-slate-900 flex-col items-center">
+        <aside class="app-sidebar hidden md:flex">
           <app-sidebar></app-sidebar>
         </aside>
 
@@ -28,7 +30,7 @@ import { SidebarComponent } from './sidebar/sidebar';
           </div>
 
           <!-- CONTENT -->
-          <main class="flex-1 overflow-y-auto p-0 md:p-8">
+          <main class="app-content" [class.is-transitioning]="isTransitioning">
             <router-outlet></router-outlet>
           </main>
 
@@ -37,4 +39,33 @@ import { SidebarComponent } from './sidebar/sidebar';
     </div>
   `
 })
-export class LayoutComponent {}
+export class LayoutComponent implements OnDestroy {
+  isTransitioning = false;
+  private navSub: Subscription;
+  private transitionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private router: Router) {
+    this.navSub = this.router.events.subscribe((event) => {
+      if (event instanceof NavigationEnd) {
+        this.triggerTransition();
+      }
+    });
+  }
+
+  private triggerTransition() {
+    this.isTransitioning = true;
+    if (this.transitionTimer) {
+      clearTimeout(this.transitionTimer);
+    }
+    this.transitionTimer = setTimeout(() => {
+      this.isTransitioning = false;
+    }, 380);
+  }
+
+  ngOnDestroy() {
+    this.navSub.unsubscribe();
+    if (this.transitionTimer) {
+      clearTimeout(this.transitionTimer);
+    }
+  }
+}

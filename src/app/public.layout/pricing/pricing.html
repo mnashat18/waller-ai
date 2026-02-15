@@ -1,0 +1,166 @@
+<section class="pricing-shell">
+  <div class="pricing-hero">
+    <span class="pill">Enterprise Plans</span>
+    <h1>Choose the plan that scales with your team.</h1>
+    <p>
+      Start free, unlock admin tools, or upgrade to Business for full team orchestration.
+      Every plan includes secure mobile scans and real-time dashboards.
+    </p>
+
+    <div class="billing-toggle">
+      <button
+        type="button"
+        class="toggle-btn"
+        [class.active]="billingCycle === 'monthly'"
+        (click)="toggleBilling('monthly')">
+        Monthly
+      </button>
+      <button
+        type="button"
+        class="toggle-btn"
+        [class.active]="billingCycle === 'yearly'"
+        (click)="toggleBilling('yearly')">
+        Yearly
+        <span class="discount">30% off</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="plan-grid" *ngIf="!loading">
+    <article
+      class="plan-card"
+      *ngFor="let plan of plans; trackBy: trackByPlan"
+      [class.popular]="plan.is_popular"
+      [class.selected]="selectedPlanCode === plan.code"
+      (mouseenter)="selectedPlanCode = plan.code">
+      <div class="plan-header">
+        <div>
+          <h2>{{ plan.name }}</h2>
+          <p>{{ plan.description || 'Designed for focused teams.' }}</p>
+        </div>
+        <span class="popular-tag" *ngIf="plan.is_popular">Most Popular</span>
+      </div>
+
+      <div class="plan-price">
+        <span class="amount">${{ priceFor(plan) }}</span>
+        <span class="cycle">{{ billingLabel(plan) }}</span>
+      </div>
+
+      <button
+        type="button"
+        class="plan-cta"
+        [class.current]="isCurrentPlan(plan)"
+        [disabled]="isCurrentPlan(plan)"
+        (click)="selectPlan(plan)">
+        {{ ctaLabel(plan) }}
+        <span class="cta-arrow" *ngIf="!isCurrentPlan(plan)">&rarr;</span>
+        <span class="cta-block" *ngIf="isCurrentPlan(plan)"></span>
+      </button>
+
+      <ul class="plan-features">
+        <li *ngFor="let feature of plan.features">
+          <span class="dot"></span>
+          {{ feature }}
+        </li>
+      </ul>
+    </article>
+  </div>
+
+  <section class="plan-details">
+    <h2>Plan details</h2>
+    <div class="detail-grid">
+      <article class="detail-card">
+        <h3>Free plan</h3>
+        <p>
+          Ideal for pilots and individual users. Run daily scans, review your own history,
+          and validate the workflow before rolling out to a team.
+        </p>
+        <p class="detail-meta">Best for: single users and early trials.</p>
+      </article>
+      <article class="detail-card featured">
+        <h3>Business plan</h3>
+        <p>
+          Full enterprise toolkit with bulk invites, WhatsApp onboarding, advanced analytics,
+          compliance exports, and multi-location management.
+        </p>
+        <p class="detail-meta">Best for: enterprise deployments.</p>
+      </article>
+    </div>
+
+    <div class="comparison">
+      <div class="comparison-head">
+        <h3>Feature comparison</h3>
+        <p>See exactly what you unlock when you upgrade to Business.</p>
+      </div>
+      <div class="comparison-table">
+        <div class="comparison-row comparison-header">
+          <span>Capability</span>
+          <span>Free</span>
+          <span>Business</span>
+        </div>
+        <div class="comparison-row">
+          <span>Daily mobile scans</span>
+          <span class="yes">&check;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Personal scan history</span>
+          <span class="yes">&check;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Create requests from dashboard</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Invite team by email or phone</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>WhatsApp onboarding messages</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Organization dashboards</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Advanced analytics & trends</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Compliance exports (CSV/PDF)</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Multi-location management</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Dedicated success manager</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="pricing-note" *ngIf="feedback">
+    {{ feedback }}
+  </div>
+
+  <div class="pricing-footer">
+    <div>
+      <h3>Need a custom rollout?</h3>
+      <p>We can onboard departments, factories, clinics, and transport fleets in days.</p>
+    </div>
+    <a routerLink="/signup" class="btn-primary">Talk to Sales</a>
+  </div>
+</section>

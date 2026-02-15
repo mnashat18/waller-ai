@@ -1,7 +1,11 @@
 <div class="notif-wrap">
 
   <!-- Bell -->
-  <button (click)="toggleOpen()" class="notif-button" aria-label="Notifications">
+  <button
+    type="button"
+    (click)="toggleOpen(); $event.stopPropagation()"
+    class="notif-button"
+    aria-label="Notifications">
     <svg class="notif-icon" viewBox="0 0 24 24" aria-hidden="true">
       <path
         d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6V11a7 7 0 1 0-14 0v5l-2 2v1h18v-1l-2-2Z"
@@ -13,42 +17,45 @@
   </button>
 
   <!-- Dropdown -->
-  <div *ngIf="open" class="notif-panel">
+  <div
+    *ngIf="open"
+    class="notif-overlay"
+    (click)="closePanel()">
+    <div class="notif-panel" (click)="$event.stopPropagation()">
+      <div class="notif-header">
+        <h4>Notifications</h4>
+        <span class="notif-sub">{{ unreadCount }} unread</span>
+      </div>
 
-    <div class="notif-header">
-      <h4>Notifications</h4>
-      <span class="notif-sub">{{ unreadCount }} unread</span>
-    </div>
+      <div *ngIf="loading" class="notif-empty">
+        Loading notifications...
+      </div>
 
-    <div *ngIf="loading" class="notif-empty">
-      Loading notifications...
-    </div>
+      <div *ngIf="!loading && notifications.length === 0" class="notif-empty">
+        No notifications yet.
+      </div>
 
-    <div *ngIf="!loading && notifications.length === 0" class="notif-empty">
-      No notifications yet.
-    </div>
+      <div class="notif-list" *ngIf="!loading && notifications.length > 0">
+        <button
+          *ngFor="let n of notifications"
+          class="notif-item"
+          [class.notif-item-read]="n.isRead"
+          (click)="openDetails(n)">
 
-    <div class="notif-list" *ngIf="!loading && notifications.length > 0">
-      <button
-        *ngFor="let n of notifications"
-        class="notif-item"
-        [class.notif-item-read]="n.isRead"
-        (click)="openDetails(n)">
+          <div class="notif-dot" [class.notif-dot-read]="n.isRead"></div>
 
-        <div class="notif-dot" [class.notif-dot-read]="n.isRead"></div>
-
-        <div class="notif-body">
-          <div class="notif-row">
-            <span class="notif-type">{{ n.type }}</span>
-            <span class="notif-status" [ngClass]="statusClass(n)">{{ n.status }}</span>
-            <span class="notif-time">{{ n.date }}</span>
+          <div class="notif-body">
+            <div class="notif-row">
+              <span class="notif-type">{{ n.type }}</span>
+              <span class="notif-status" [ngClass]="statusClass(n)">{{ n.status }}</span>
+              <span class="notif-time">{{ n.date }}</span>
+            </div>
+            <p class="notif-title">{{ n.title }}</p>
+            <p class="notif-desc">{{ n.description }}</p>
           </div>
-          <p class="notif-title">{{ n.title }}</p>
-          <p class="notif-desc">{{ n.description }}</p>
-        </div>
-      </button>
+        </button>
+      </div>
     </div>
-
   </div>
 </div>
 

@@ -1,17 +1,36 @@
-import { Component, AfterViewInit } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { CommonModule } from '@angular/common';
+import { Component, AfterViewInit, HostListener } from '@angular/core';
+import { RouterModule, RouterOutlet } from '@angular/router';
 
 @Component({
   selector: 'app-public.layout',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [CommonModule, RouterOutlet, RouterModule],
   templateUrl: './public.layout.html',
   styleUrl: './public.layout.css'
 })
 export class PublicLayout implements AfterViewInit {
+  showScrollTop = false;
 
   ngAfterViewInit() {
     this.startSnow();
+    this.updateScrollTop();
+  }
+
+  @HostListener('window:scroll')
+  updateScrollTop() {
+    if (typeof window === 'undefined') {
+      this.showScrollTop = false;
+      return;
+    }
+    this.showScrollTop = window.scrollY > 200;
+  }
+
+  scrollToTop() {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   startSnow() {
