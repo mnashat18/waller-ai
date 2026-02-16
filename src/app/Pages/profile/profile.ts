@@ -96,7 +96,7 @@ export class Profile implements OnInit {
       return;
     }
 
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
     if (!token || this.isTokenExpired(token)) {
       this.saveFeedback = { type: 'error', message: 'Session expired. Please login again.' };
       this.cdr.detectChanges();
@@ -160,7 +160,7 @@ export class Profile implements OnInit {
   }
 
   private loadProfile() {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
     if (!token || this.isTokenExpired(token)) {
       this.loading = false;
       this.errorMessage = 'You are not signed in.';
@@ -507,7 +507,7 @@ export class Profile implements OnInit {
     if (!payload) {
       return null;
     }
-    const id = payload['id'];
+    const id = payload['id'] ?? payload['user_id'] ?? payload['sub'];
     return typeof id === 'string' && id ? id : null;
   }
 

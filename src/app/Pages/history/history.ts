@@ -165,7 +165,7 @@ export class History implements OnInit {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -220,7 +220,7 @@ export class History implements OnInit {
     }
 
     const payload = this.decodeJwtPayload(token);
-    const id = payload?.['id'] ?? payload?.['user_id'];
+    const id = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
     return typeof id === 'string' && id ? id : null;
   }
 

@@ -15,7 +15,7 @@ export class AuthInterceptor implements HttpInterceptor {
     next: HttpHandler
   ): Observable<HttpEvent<any>> {
 
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
     const isAuthRequest = req.url.includes('/auth/login') || req.url.includes('/users/register');
     const hasAuthHeader = req.headers.has('Authorization');
     const isAdminTokenRequest = req.headers.has('X-Admin-Token-Request') || req.url.includes('/admin-token');
@@ -25,9 +25,14 @@ export class AuthInterceptor implements HttpInterceptor {
       return next.handle(req);
     }
 
+    if (token && !localStorage.getItem('token')) {
+      localStorage.setItem('token', token);
+    }
+
     if (isExpired) {
       localStorage.removeItem('token');
       localStorage.removeItem('refresh_token');
+      localStorage.removeItem('access_token');
     }
 
     let authReq = req;

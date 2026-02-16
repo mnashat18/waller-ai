@@ -24,6 +24,7 @@ export class AuthService {
     ).pipe(
       tap(res => {
         localStorage.setItem('token', res.data.access_token);
+        localStorage.setItem('access_token', res.data.access_token);
         localStorage.setItem('refresh_token', res.data.refresh_token);
         localStorage.setItem('user_email', email);
       })
@@ -45,7 +46,7 @@ signup(data: {
 
 
   isLoggedIn(): boolean {
-    return !!localStorage.getItem('token');
+    return !!(localStorage.getItem('token') || localStorage.getItem('access_token'));
   }
 
   logout() {
@@ -56,7 +57,7 @@ signup(data: {
     if (typeof window === 'undefined') {
       return;
     }
-    window.location.href =
-      'https://dash.conntinuity.com/auth/login/google?redirect=https://conntinuity.com/auth-callback';
+    const redirect = encodeURIComponent(`${window.location.origin}/auth-callback`);
+    window.location.href = `${this.api}/auth/login/google?redirect=${redirect}`;
   }
 }

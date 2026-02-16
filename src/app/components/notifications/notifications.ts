@@ -132,7 +132,6 @@ export class NotificationsComponent implements OnInit, OnDestroy {
     const fields = [
       'id',
       'date_created',
-      'user',
       'title',
       'body',
       'type',
