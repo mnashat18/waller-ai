@@ -103,6 +103,8 @@ export class AuthService {
     if (storedRefreshToken) {
       payload['refresh_token'] = storedRefreshToken;
       payload['mode'] = 'json';
+    } else {
+      payload['mode'] = 'session';
     }
 
     return this.http.post<any>(
