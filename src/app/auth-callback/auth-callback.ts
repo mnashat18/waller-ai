@@ -41,6 +41,13 @@ export class AuthCallbackComponent implements OnInit {
       }
     }
 
-    this.router.navigate(['/dashboard']);
+    this.auth.refreshSession().subscribe({
+      next: () => {
+        this.router.navigate(['/dashboard']);
+      },
+      error: () => {
+        this.router.navigate(['/dashboard']);
+      }
+    });
   }
 }

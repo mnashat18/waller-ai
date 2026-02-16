@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
-import { tap } from 'rxjs/operators';
+import { catchError, map, tap } from 'rxjs/operators';
+import { of } from 'rxjs';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -17,6 +18,10 @@ export class AuthService {
     const url = new URL(window.location.href);
     const hashParams = url.hash ? new URLSearchParams(url.hash.replace('#', '?')) : null;
     const searchParams = url.search ? new URLSearchParams(url.search) : null;
+
+    const hasCode =
+      hashParams?.has('code') === true ||
+      searchParams?.has('code') === true;
 
     const accessToken =
       hashParams?.get('access_token') ??
@@ -47,7 +52,11 @@ export class AuthService {
       }
     }
 
-    if (accessToken || refreshToken || reason || errorDescription) {
+    if (hasCode) {
+      sessionStorage.removeItem('auth_refresh_attempted');
+    }
+
+    if (accessToken || refreshToken || reason || errorDescription || hasCode) {
       const cleaned = new URL(window.location.href);
       const dropKeys = [
         'access_token',
@@ -55,6 +64,8 @@ export class AuthService {
         'refresh_token',
         'expires',
         'expires_in',
+        'code',
+        'state',
         'reason',
         'error',
         'error_description'
@@ -75,8 +86,44 @@ export class AuthService {
       accessToken,
       refreshToken,
       reason,
-      errorDescription
+      errorDescription,
+      hasCode
     };
+  }
+
+  refreshSession() {
+    return this.http.post<any>(
+      `${this.api}/auth/refresh`,
+      {},
+      { withCredentials: true }
+    ).pipe(
+      tap((res) => {
+        const accessToken = res?.data?.access_token;
+        const refreshToken = res?.data?.refresh_token;
+        if (accessToken) {
+          localStorage.setItem('token', accessToken);
+          localStorage.setItem('access_token', accessToken);
+        }
+        if (refreshToken) {
+          localStorage.setItem('refresh_token', refreshToken);
+        }
+      }),
+      map((res) => Boolean(res?.data?.access_token)),
+      catchError(() => of(false))
+    );
+  }
+
+  ensureSessionToken() {
+    const existing = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    if (existing) {
+      return of(true);
+    }
+
+    if (sessionStorage.getItem('auth_refresh_attempted')) {
+      return of(false);
+    }
+    sessionStorage.setItem('auth_refresh_attempted', '1');
+    return this.refreshSession();
   }
 
   login(email: string, password: string) {
@@ -121,6 +168,11 @@ signup(data: {
 
   logout() {
     localStorage.clear();
+    try {
+      sessionStorage.removeItem('auth_refresh_attempted');
+    } catch {
+      // ignore storage errors
+    }
   }
 
   loginWithGoogle() {

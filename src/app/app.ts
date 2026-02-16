@@ -24,6 +24,7 @@ export class App {
       }
 
       this.auth.captureAuthFromUrl();
+      this.auth.ensureSessionToken().subscribe();
     }
   }
 
