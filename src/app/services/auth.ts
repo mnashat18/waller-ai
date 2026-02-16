@@ -1,14 +1,18 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
-import { catchError, map, tap } from 'rxjs/operators';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 import { of } from 'rxjs';
+import { SubscriptionService } from './subscription.service';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   api = environment.API_URL;
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private subscriptions: SubscriptionService
+  ) {}
 
   captureAuthFromUrl() {
     if (typeof window === 'undefined') {
@@ -127,7 +131,16 @@ export class AuthService {
           sessionStorage.removeItem('auth_refresh_attempted');
         }
       }),
-      map((res) => Boolean(res?.data?.access_token)),
+      switchMap((res) => {
+        const hasToken = Boolean(res?.data?.access_token);
+        if (!hasToken) {
+          return of(false);
+        }
+        return this.ensureTrialAccess().pipe(
+          map(() => true),
+          catchError(() => of(true))
+        );
+      }),
       catchError((err) => {
         const detail =
           err?.error?.errors?.[0]?.extensions?.reason ||
@@ -184,7 +197,13 @@ export class AuthService {
         localStorage.removeItem('auth_error');
         sessionStorage.removeItem('auth_callback_pending');
         sessionStorage.removeItem('auth_refresh_attempted');
-      })
+      }),
+      switchMap((res) =>
+        this.ensureTrialAccess().pipe(
+          map(() => res),
+          catchError(() => of(res))
+        )
+      )
     );
   }
 signup(data: {
@@ -221,9 +240,15 @@ signup(data: {
       return;
     }
     const params = new URLSearchParams({
-      redirect: `${window.location.origin}/auth-callback`,
-      mode: 'json'
+      redirect: `${window.location.origin}/auth-callback`
     });
     window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
+  }
+
+  ensureTrialAccess() {
+    return this.subscriptions.ensureBusinessTrial().pipe(
+      map(() => true),
+      catchError(() => of(false))
+    );
   }
 }
