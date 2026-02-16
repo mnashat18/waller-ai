@@ -23,8 +23,11 @@ export class App {
         root.classList.remove('light');
       }
 
-      this.auth.captureAuthFromUrl();
-      this.auth.ensureSessionToken().subscribe();
+      const isAuthCallback = window.location.pathname === '/auth-callback';
+      if (!isAuthCallback) {
+        this.auth.captureAuthFromUrl();
+        this.auth.ensureSessionToken().subscribe();
+      }
     }
   }
 

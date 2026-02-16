@@ -47,13 +47,19 @@ export class AuthService {
     if (accessToken) {
       localStorage.setItem('token', accessToken);
       localStorage.setItem('access_token', accessToken);
+      localStorage.removeItem('auth_error');
       if (refreshToken) {
         localStorage.setItem('refresh_token', refreshToken);
       }
     }
 
-    if (hasCode) {
+    if (hasCode && !reason && !errorDescription) {
       sessionStorage.removeItem('auth_refresh_attempted');
+      sessionStorage.setItem('auth_callback_pending', '1');
+    }
+
+    if (accessToken || refreshToken) {
+      sessionStorage.removeItem('auth_callback_pending');
     }
 
     if (accessToken || refreshToken || reason || errorDescription || hasCode) {
@@ -92,9 +98,16 @@ export class AuthService {
   }
 
   refreshSession() {
+    const storedRefreshToken = localStorage.getItem('refresh_token');
+    const payload: Record<string, string> = {};
+    if (storedRefreshToken) {
+      payload['refresh_token'] = storedRefreshToken;
+      payload['mode'] = 'json';
+    }
+
     return this.http.post<any>(
       `${this.api}/auth/refresh`,
-      {},
+      payload,
       { withCredentials: true }
     ).pipe(
       tap((res) => {
@@ -103,9 +116,14 @@ export class AuthService {
         if (accessToken) {
           localStorage.setItem('token', accessToken);
           localStorage.setItem('access_token', accessToken);
+          localStorage.removeItem('auth_error');
         }
         if (refreshToken) {
           localStorage.setItem('refresh_token', refreshToken);
+        }
+        if (accessToken) {
+          sessionStorage.removeItem('auth_callback_pending');
+          sessionStorage.removeItem('auth_refresh_attempted');
         }
       }),
       map((res) => Boolean(res?.data?.access_token)),
@@ -117,6 +135,12 @@ export class AuthService {
     const existing = localStorage.getItem('token') ?? localStorage.getItem('access_token');
     if (existing) {
       return of(true);
+    }
+
+    const hasStoredRefreshToken = Boolean(localStorage.getItem('refresh_token'));
+    const callbackPending = sessionStorage.getItem('auth_callback_pending') === '1';
+    if (!hasStoredRefreshToken && !callbackPending) {
+      return of(false);
     }
 
     if (sessionStorage.getItem('auth_refresh_attempted')) {
@@ -144,6 +168,9 @@ export class AuthService {
         localStorage.setItem('access_token', res.data.access_token);
         localStorage.setItem('refresh_token', res.data.refresh_token);
         localStorage.setItem('user_email', email);
+        localStorage.removeItem('auth_error');
+        sessionStorage.removeItem('auth_callback_pending');
+        sessionStorage.removeItem('auth_refresh_attempted');
       })
     );
   }
@@ -170,6 +197,7 @@ signup(data: {
     localStorage.clear();
     try {
       sessionStorage.removeItem('auth_refresh_attempted');
+      sessionStorage.removeItem('auth_callback_pending');
     } catch {
       // ignore storage errors
     }
@@ -179,7 +207,10 @@ signup(data: {
     if (typeof window === 'undefined') {
       return;
     }
-    const redirect = encodeURIComponent(`${window.location.origin}/auth-callback`);
-    window.location.href = `${this.api}/auth/login/google?redirect=${redirect}`;
+    const params = new URLSearchParams({
+      redirect: `${window.location.origin}/auth-callback`,
+      mode: 'json'
+    });
+    window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
   }
 }
