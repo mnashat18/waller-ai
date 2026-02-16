@@ -34,12 +34,13 @@ export class AuthCallbackComponent implements OnInit {
       const detail = result.errorDescription || result.reason || 'Login failed.';
       this.status = 'error';
       this.message = `Login failed: ${detail}`;
-      setTimeout(() => {
-        this.router.navigate(['/login'], { queryParams: { auth: 'login' } });
-      }, 1200);
-      return;
+      try {
+        localStorage.setItem('auth_error', detail);
+      } catch {
+        // ignore storage errors
+      }
     }
 
-    this.router.navigate(['/login'], { queryParams: { auth: 'login' } });
+    this.router.navigate(['/dashboard']);
   }
 }
