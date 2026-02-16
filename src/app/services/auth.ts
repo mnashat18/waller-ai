@@ -240,7 +240,8 @@ signup(data: {
       return;
     }
     const params = new URLSearchParams({
-      redirect: `${window.location.origin}/auth-callback`
+      redirect: `${window.location.origin}/auth-callback`,
+      mode: 'json'
     });
     window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
   }
