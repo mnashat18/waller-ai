@@ -246,7 +246,11 @@ signup(data: {
   }
 
   ensureTrialAccess() {
-    return this.subscriptions.ensureBusinessTrial().pipe(
+    const maybeEnsureTrial = (this.subscriptions as any)?.ensureBusinessTrial;
+    if (typeof maybeEnsureTrial !== 'function') {
+      return of(true);
+    }
+    return maybeEnsureTrial.call(this.subscriptions).pipe(
       map(() => true),
       catchError(() => of(false))
     );
