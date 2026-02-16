@@ -99,12 +99,11 @@ export class AuthService {
 
   refreshSession() {
     const storedRefreshToken = localStorage.getItem('refresh_token');
-    const payload: Record<string, string> = {};
+    const payload: Record<string, string> = {
+      mode: 'json'
+    };
     if (storedRefreshToken) {
       payload['refresh_token'] = storedRefreshToken;
-      payload['mode'] = 'json';
-    } else {
-      payload['mode'] = 'session';
     }
 
     return this.http.post<any>(
@@ -129,7 +128,19 @@ export class AuthService {
         }
       }),
       map((res) => Boolean(res?.data?.access_token)),
-      catchError(() => of(false))
+      catchError((err) => {
+        const detail =
+          err?.error?.errors?.[0]?.extensions?.reason ||
+          err?.error?.errors?.[0]?.message ||
+          err?.message ||
+          'Unable to complete login session.';
+        try {
+          localStorage.setItem('auth_error', String(detail));
+        } catch {
+          // ignore storage errors
+        }
+        return of(false);
+      })
     );
   }
 

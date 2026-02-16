@@ -49,10 +49,12 @@ export class AuthCallbackComponent implements OnInit {
           this.router.navigate(['/dashboard']);
           return;
         }
-        this.setAuthError('Unable to complete login session.');
+        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
+        this.setAuthError(detail);
       },
       error: () => {
-        this.setAuthError('Unable to complete login session.');
+        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
+        this.setAuthError(detail);
       }
     });
   }
