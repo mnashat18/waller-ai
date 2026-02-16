@@ -1,5 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { AuthService } from './services/auth';
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -10,7 +11,7 @@ import { RouterOutlet } from '@angular/router';
 export class App {
   protected readonly title = signal('wellar-ui');
 
-  constructor() {
+  constructor(private auth: AuthService) {
     if (typeof window !== 'undefined') {
       const theme = window.localStorage.getItem('theme');
       const root = document.documentElement;
@@ -21,6 +22,8 @@ export class App {
         root.classList.add('dark');
         root.classList.remove('light');
       }
+
+      this.auth.captureAuthFromUrl();
     }
   }
 

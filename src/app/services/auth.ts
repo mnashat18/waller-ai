@@ -9,6 +9,76 @@ export class AuthService {
 
   constructor(private http: HttpClient) {}
 
+  captureAuthFromUrl() {
+    if (typeof window === 'undefined') {
+      return { stored: false };
+    }
+
+    const url = new URL(window.location.href);
+    const hashParams = url.hash ? new URLSearchParams(url.hash.replace('#', '?')) : null;
+    const searchParams = url.search ? new URLSearchParams(url.search) : null;
+
+    const accessToken =
+      hashParams?.get('access_token') ??
+      hashParams?.get('token') ??
+      searchParams?.get('access_token') ??
+      searchParams?.get('token') ??
+      undefined;
+    const refreshToken =
+      hashParams?.get('refresh_token') ??
+      searchParams?.get('refresh_token') ??
+      undefined;
+    const reason =
+      searchParams?.get('reason') ??
+      hashParams?.get('reason') ??
+      searchParams?.get('error') ??
+      hashParams?.get('error') ??
+      undefined;
+    const errorDescription =
+      searchParams?.get('error_description') ??
+      hashParams?.get('error_description') ??
+      undefined;
+
+    if (accessToken) {
+      localStorage.setItem('token', accessToken);
+      localStorage.setItem('access_token', accessToken);
+      if (refreshToken) {
+        localStorage.setItem('refresh_token', refreshToken);
+      }
+    }
+
+    if (accessToken || refreshToken || reason || errorDescription) {
+      const cleaned = new URL(window.location.href);
+      const dropKeys = [
+        'access_token',
+        'token',
+        'refresh_token',
+        'expires',
+        'expires_in',
+        'reason',
+        'error',
+        'error_description'
+      ];
+      dropKeys.forEach((key) => cleaned.searchParams.delete(key));
+      if (cleaned.hash) {
+        cleaned.hash = '';
+      }
+      const next =
+        cleaned.pathname +
+        (cleaned.searchParams.toString() ? `?${cleaned.searchParams.toString()}` : '') +
+        cleaned.hash;
+      window.history.replaceState({}, document.title, next);
+    }
+
+    return {
+      stored: Boolean(accessToken),
+      accessToken,
+      refreshToken,
+      reason,
+      errorDescription
+    };
+  }
+
   login(email: string, password: string) {
     return this.http.post<any>(
       `${this.api}/auth/login`,

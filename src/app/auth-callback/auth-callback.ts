@@ -1,38 +1,45 @@
+import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
+import { AuthService } from '../services/auth';
 
 @Component({
   selector: 'app-auth-callback',
   standalone: true,
-  template: `<p>Logging you in...</p>`
+  imports: [CommonModule],
+  template: `
+    <div class="auth-callback">
+      <p *ngIf="status === 'loading'">Logging you in...</p>
+      <p *ngIf="status === 'error'">{{ message }}</p>
+    </div>
+  `
 })
 export class AuthCallbackComponent implements OnInit {
-  constructor(private router: Router) {}
+  status: 'loading' | 'error' = 'loading';
+  message = '';
+
+  constructor(
+    private router: Router,
+    private auth: AuthService
+  ) {}
 
   ngOnInit(): void {
-    const hash = window.location.hash;
-    const search = window.location.search;
-
-    const hashParams = hash ? new URLSearchParams(hash.replace('#', '?')) : null;
-    const searchParams = search ? new URLSearchParams(search) : null;
-    const accessToken =
-      hashParams?.get('access_token') ??
-      searchParams?.get('access_token') ??
-      searchParams?.get('token');
-    const refreshToken =
-      hashParams?.get('refresh_token') ??
-      searchParams?.get('refresh_token');
-
-    if (accessToken) {
-      localStorage.setItem('access_token', accessToken);
-      localStorage.setItem('token', accessToken);
-      if (refreshToken) {
-        localStorage.setItem('refresh_token', refreshToken);
-      }
+    const result = this.auth.captureAuthFromUrl();
+    if (result.stored) {
       this.router.navigate(['/dashboard']);
       return;
     }
 
-    this.router.navigate(['/dashboard']);
+    if (result.reason || result.errorDescription) {
+      const detail = result.errorDescription || result.reason || 'Login failed.';
+      this.status = 'error';
+      this.message = `Login failed: ${detail}`;
+      setTimeout(() => {
+        this.router.navigate(['/login'], { queryParams: { auth: 'login' } });
+      }, 1200);
+      return;
+    }
+
+    this.router.navigate(['/login'], { queryParams: { auth: 'login' } });
   }
 }
