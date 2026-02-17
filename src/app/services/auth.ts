@@ -210,7 +210,7 @@ signup(data: {
     }
     const params = new URLSearchParams({
       redirect: `${window.location.origin}/auth-callback`,
-      mode: 'json'
+      mode: 'cookie'
     });
     window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
   }
