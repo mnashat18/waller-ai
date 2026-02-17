@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { catchError, map, switchMap, tap } from 'rxjs/operators';
-import { firstValueFrom, from, of } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { SubscriptionService } from './subscription.service';
 
 @Injectable({ providedIn: 'root' })
@@ -15,164 +15,48 @@ export class AuthService {
   ) {}
 
   /**
-   * Captures auth params from callback URL:
-   * - Directus token mode returns: access_token, refresh_token (query or hash)
-   * - Some flows might include: token, code, error, error_description
+   * Session Mode:
+   * We DO NOT parse tokens from URL.
+   * We only clean any leftover query/hash params (code/state/error) for nicer UX.
    */
- captureAuthFromUrl() {
-  if (typeof window === 'undefined') {
+  captureAuthFromUrl() {
+    if (typeof window === 'undefined') {
+      return { stored: false };
+    }
+
+    const url = new URL(window.location.href);
+
+    const hasAuthNoise =
+      url.searchParams.has('code') ||
+      url.searchParams.has('state') ||
+      url.searchParams.has('error') ||
+      url.searchParams.has('error_description') ||
+      Boolean(url.hash);
+
+    // Clean URL (remove oauth noise)
+    if (hasAuthNoise) {
+      const cleaned = new URL(window.location.href);
+      const dropKeys = ['code', 'state', 'error', 'error_description', 'reason'];
+      dropKeys.forEach((k) => cleaned.searchParams.delete(k));
+      if (cleaned.hash) cleaned.hash = '';
+
+      const next =
+        cleaned.pathname +
+        (cleaned.searchParams.toString()
+          ? `?${cleaned.searchParams.toString()}`
+          : '');
+
+      window.history.replaceState({}, document.title, next);
+    }
+
+    // In session mode we don't "store" a token
     return { stored: false };
   }
 
-  const url = new URL(window.location.href);
-
-  // Some apps store a raw callback URL before navigation; keep this logic
-  let sourceUrl = url;
-  const rawCallbackUrl = sessionStorage.getItem('auth_callback_raw_url');
-  if (rawCallbackUrl) {
-    try {
-      const parsed = new URL(rawCallbackUrl);
-      const candidate = `${parsed.search}${parsed.hash}`;
-      if (
-        candidate.includes('access_token=') ||
-        candidate.includes('refresh_token=') ||
-        candidate.includes('code=') ||
-        candidate.includes('error=')
-      ) {
-        sourceUrl = parsed;
-      }
-    } catch {
-      // ignore invalid URL
-    }
-    sessionStorage.removeItem('auth_callback_raw_url');
-  }
-
-  const hashParams = sourceUrl.hash
-    ? new URLSearchParams(sourceUrl.hash.replace('#', '?'))
-    : null;
-
-  const searchParams = sourceUrl.search
-    ? new URLSearchParams(sourceUrl.search)
-    : null;
-
-  const code =
-    searchParams?.get('code') ??
-    hashParams?.get('code') ??
-    undefined;
-
-  const accessToken =
-    hashParams?.get('access_token') ??
-    hashParams?.get('token') ??
-    searchParams?.get('access_token') ??
-    searchParams?.get('token') ??
-    undefined;
-
-  const refreshToken =
-    hashParams?.get('refresh_token') ??
-    searchParams?.get('refresh_token') ??
-    undefined;
-
-  const reason =
-    searchParams?.get('reason') ??
-    hashParams?.get('reason') ??
-    searchParams?.get('error') ??
-    hashParams?.get('error') ??
-    undefined;
-
-  const errorDescription =
-    searchParams?.get('error_description') ??
-    hashParams?.get('error_description') ??
-    undefined;
-
-  // Store tokens if Directus returned them directly
-  if (accessToken) {
-    localStorage.setItem('token', accessToken);
-    localStorage.setItem('access_token', accessToken);
-  }
-  if (refreshToken) {
-    localStorage.setItem('refresh_token', refreshToken);
-  }
-
-  if (accessToken || refreshToken) {
-    localStorage.removeItem('auth_error');
-    sessionStorage.removeItem('auth_refresh_attempted');
-    sessionStorage.removeItem('auth_callback_pending');
-  }
-
-  // If we only got a code => mark pending
-  if (code && !reason && !errorDescription && !accessToken && !refreshToken) {
-    sessionStorage.setItem('auth_callback_pending', '1');
-    sessionStorage.removeItem('auth_refresh_attempted');
-  }
-
-  // Clean URL to remove tokens/codes/errors from address bar
-  if (accessToken || refreshToken || reason || errorDescription || code) {
-    const cleaned = new URL(window.location.href);
-    const dropKeys = [
-      'access_token',
-      'token',
-      'refresh_token',
-      'expires',
-      'expires_in',
-      'code',
-      'state',
-      'reason',
-      'error',
-      'error_description'
-    ];
-    dropKeys.forEach((key) => cleaned.searchParams.delete(key));
-    if (cleaned.hash) cleaned.hash = '';
-
-    const next =
-      cleaned.pathname +
-      (cleaned.searchParams.toString()
-        ? `?${cleaned.searchParams.toString()}`
-        : '');
-
-    window.history.replaceState({}, document.title, next);
-  }
-
-  return {
-    stored: Boolean(accessToken),
-    accessToken,
-    refreshToken,
-    reason,
-    errorDescription,
-    code
-  };
-}
-
   /**
-   * Ensure we have a valid access token:
-   * - If access token exists => true
-   * - Else if refresh token exists => try refresh
+   * Session Mode login (email/password)
+   * Must use withCredentials so Directus can set cookie / session correctly.
    */
-  ensureSessionToken() {
-    const existing =
-      localStorage.getItem('token') ??
-      localStorage.getItem('access_token');
-
-    if (existing) {
-      return of(true);
-    }
-
-    const storedRefreshToken = localStorage.getItem('refresh_token');
-    if (!storedRefreshToken) {
-      return of(false);
-    }
-
-    if (sessionStorage.getItem('auth_refresh_attempted')) {
-      return of(false);
-    }
-    sessionStorage.setItem('auth_refresh_attempted', '1');
-
-    return this.refreshSession();
-  }
-
-  refreshSession() {
-    return from(this.refreshSessionInternal());
-  }
-
   login(email: string, password: string) {
     return this.http.post<any>(
       `${this.api}/auth/login`,
@@ -180,25 +64,21 @@ export class AuthService {
       {
         headers: new HttpHeaders({
           'Content-Type': 'application/json'
-        })
+        }),
+        withCredentials: true
       }
     ).pipe(
-      tap((res) => {
-        const access = res?.data?.access_token;
-        const refresh = res?.data?.refresh_token;
-
-        if (access) {
-          localStorage.setItem('token', access);
-          localStorage.setItem('access_token', access);
-        }
-        if (refresh) {
-          localStorage.setItem('refresh_token', refresh);
-        }
-
+      tap(() => {
         localStorage.setItem('user_email', email);
         localStorage.removeItem('auth_error');
-        sessionStorage.removeItem('auth_callback_pending');
-        sessionStorage.removeItem('auth_refresh_attempted');
+
+        try {
+          sessionStorage.removeItem('auth_callback_pending');
+          sessionStorage.removeItem('auth_refresh_attempted');
+          sessionStorage.removeItem('auth_callback_raw_url');
+        } catch {
+          // ignore
+        }
       }),
       switchMap((res) =>
         this.ensureTrialAccess().pipe(
@@ -215,161 +95,114 @@ export class AuthService {
     first_name: string;
     last_name: string;
   }) {
-    return this.http.post(`${this.api}/users/register`, {
-      email: data.email,
-      password: data.password,
-      first_name: data.first_name,
-      last_name: data.last_name
+    // Register doesn't need credentials, but keeping consistent is fine.
+    return this.http.post(
+      `${this.api}/users/register`,
+      {
+        email: data.email,
+        password: data.password,
+        first_name: data.first_name,
+        last_name: data.last_name
+      },
+      { withCredentials: true }
+    );
+  }
+
+  /**
+   * Session-based logged-in check:
+   * Best-effort sync check (cookie presence can't be read due to HttpOnly),
+   * so we rely on sessionStorage flag (set when /users/me succeeds),
+   * and/or you can always call getCurrentUser() for truth.
+   */
+  isLoggedIn(): boolean {
+    return sessionStorage.getItem('is_logged_in') === '1';
+  }
+
+  /**
+   * Get current user from Directus using cookies.
+   * This is the KEY function for Session Mode.
+   */
+  getCurrentUser(): Observable<any | null> {
+    return this.http.get<any>(`${this.api}/users/me`, { withCredentials: true }).pipe(
+      tap(() => {
+        sessionStorage.setItem('is_logged_in', '1');
+        localStorage.removeItem('auth_error');
+      }),
+      catchError((err) => {
+        sessionStorage.removeItem('is_logged_in');
+        const detail = this.getAuthErrorDetail(err);
+        try {
+          localStorage.setItem('auth_error', detail);
+        } catch {}
+        return of(null);
+      })
+    );
+  }
+
+  /**
+   * Google login via Directus (session/cookie based)
+   * Directus will set directus_refresh_token cookie and redirect back.
+   */
+  loginWithGoogle() {
+    if (typeof window === 'undefined') return;
+
+    const redirect = `${window.location.origin}/auth-callback`;
+    // Use this.api to avoid hardcoding dash.conntinuity.com
+    window.location.href =
+      `${this.api}/auth/login/google?redirect=${encodeURIComponent(redirect)}`;
+  }
+
+  /**
+   * Logout:
+   * Prefer calling Directus /auth/logout so it clears server-side session.
+   * Then clear local flags.
+   */
+  logout() {
+    this.http.post(
+      `${this.api}/auth/logout`,
+      {},
+      {
+        headers: new HttpHeaders({ 'Content-Type': 'application/json' }),
+        withCredentials: true
+      }
+    ).pipe(
+      catchError(() => of(true))
+    ).subscribe(() => {
+      this.clearClientAuthState();
     });
   }
 
-  isLoggedIn(): boolean {
-    return !!(localStorage.getItem('token') || localStorage.getItem('access_token'));
-  }
+  private clearClientAuthState() {
+    // Don't nuke all localStorage blindly (might contain app prefs).
+    localStorage.removeItem('auth_error');
+    localStorage.removeItem('user_email');
 
-  logout() {
-    // Optional: call Directus logout if you want (requires refresh token)
-    // We'll keep it simple: clear local tokens
-    localStorage.clear();
+    sessionStorage.removeItem('is_logged_in');
     try {
       sessionStorage.removeItem('auth_refresh_attempted');
       sessionStorage.removeItem('auth_callback_pending');
       sessionStorage.removeItem('auth_callback_raw_url');
     } catch {
-      // ignore storage errors
+      // ignore
     }
   }
 
   /**
-   * Google login via Directus.
-   *
-   * NOTE:
-   * We do NOT force mode=token here because Directus v11 + openid
-   * may ignore it depending on provider settings.
-   * We just pass redirect and let Directus handle the rest.
+   * Kept for compatibility with old callers.
+   * In Session Mode, there's no token to ensure/refresh here.
+   * If you still call it somewhere, it will validate session by calling /users/me.
    */
-  loginWithGoogle() {
-  if (typeof window === 'undefined') return;
-
-  const redirect = `${window.location.origin}/auth-callback`;
-
-  window.location.href =
-    `https://dash.conntinuity.com/auth/login/google?redirect=${encodeURIComponent(redirect)}`;
-}
-
-
-exchangeGoogleCode(code: string) {
-  const redirect = `${window.location.origin}/auth-callback`;
-
-  return this.http.post<any>(
-    `${this.api}/auth/login/google`,
-    { code, redirect },
-    {
-      headers: new HttpHeaders({
-        'Content-Type': 'application/json'
-      })
-    }
-  ).pipe(
-    tap((res) => {
-      const access = res?.data?.access_token;
-      const refresh = res?.data?.refresh_token;
-
-      if (access) {
-        localStorage.setItem('token', access);
-        localStorage.setItem('access_token', access);
-      }
-      if (refresh) {
-        localStorage.setItem('refresh_token', refresh);
-      }
-
-      if (access || refresh) {
-        localStorage.removeItem('auth_error');
-        sessionStorage.removeItem('auth_callback_pending');
-        sessionStorage.removeItem('auth_refresh_attempted');
-      }
-    }),
-    map((res) => {
-      return Boolean(res?.data?.access_token);
-    }),
-    catchError((err) => {
-      const detail = this.getAuthErrorDetail(err);
-      try {
-        localStorage.setItem('auth_error', detail);
-      } catch {}
-      return of(false);
-    })
-  );
-}
-
-  /**
-   * Directus refresh: MUST send refresh_token in payload
-   * POST /auth/refresh { refresh_token }
-   */
-  private async refreshSessionInternal(): Promise<boolean> {
-    const storedRefreshToken = localStorage.getItem('refresh_token');
-
-    if (!storedRefreshToken) {
-      try {
-        localStorage.setItem('auth_error', 'No refresh token found.');
-      } catch {}
-      return false;
-    }
-
-    try {
-      const res = await firstValueFrom(
-        this.http.post<any>(
-          `${this.api}/auth/refresh`,
-          { refresh_token: storedRefreshToken },
-          {
-            headers: new HttpHeaders({
-              'Content-Type': 'application/json'
-            }),
-            withCredentials: true
-          }
-        )
-      );
-
-      const ok = this.storeTokensFromResponse(res);
-      if (ok) {
-        await firstValueFrom(this.ensureTrialAccess().pipe(catchError(() => of(true))));
-        return true;
-      }
-
-      try {
-        localStorage.setItem('auth_error', 'Refresh succeeded but no access token returned.');
-      } catch {}
-      return false;
-    } catch (err) {
-      const detail = this.getAuthErrorDetail(err);
-      try {
-        localStorage.setItem('auth_error', detail);
-      } catch {}
-      return false;
-    } finally {
-      // allow future attempts if needed
-      sessionStorage.removeItem('auth_refresh_attempted');
-    }
+  ensureSessionToken() {
+    return this.getCurrentUser().pipe(map((u) => Boolean(u)));
   }
 
-  private storeTokensFromResponse(res: any): boolean {
-    const accessToken = res?.data?.access_token;
-    const refreshToken = res?.data?.refresh_token;
-
-    if (accessToken) {
-      localStorage.setItem('token', accessToken);
-      localStorage.setItem('access_token', accessToken);
-    }
-    if (refreshToken) {
-      localStorage.setItem('refresh_token', refreshToken);
-    }
-
-    if (accessToken || refreshToken) {
-      localStorage.removeItem('auth_error');
-      sessionStorage.removeItem('auth_callback_pending');
-      sessionStorage.removeItem('auth_refresh_attempted');
-    }
-
-    return Boolean(accessToken);
+  /**
+   * Kept for compatibility with old callers.
+   * In Session Mode, refresh is handled by cookie + Directus internally.
+   * We just re-check /users/me.
+   */
+  refreshSession() {
+    return this.getCurrentUser().pipe(map((u) => Boolean(u)));
   }
 
   private getAuthErrorDetail(err: any): string {

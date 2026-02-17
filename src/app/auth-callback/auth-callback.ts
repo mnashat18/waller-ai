@@ -24,77 +24,45 @@ export class AuthCallbackComponent implements OnInit {
     private auth: AuthService
   ) {}
 
- ngOnInit(): void {
-  const result = this.auth.captureAuthFromUrl();
+  ngOnInit(): void {
+    const result = this.auth.captureAuthFromUrl() as {
+      stored?: boolean;
+      reason?: string;
+      errorDescription?: string;
+    };
+    const hasStoredToken = Boolean(
+      localStorage.getItem('token') ?? localStorage.getItem('access_token')
+    );
 
-  const hasStoredToken = Boolean(
-    localStorage.getItem('token') ?? localStorage.getItem('access_token')
-  );
+    if (result.stored || hasStoredToken) {
+      this.finishLogin();
+      return;
+    }
 
-  // 1) If token already exists => finish
-  if (result.stored || hasStoredToken) {
-    this.finishLogin();
-    return;
-  }
+    if (result.reason || result.errorDescription) {
+      const detail = result.errorDescription || result.reason || 'Google login failed.';
+      this.setAuthError(detail);
+      return;
+    }
 
-  // 2) If Directus returned error
-  if (result.reason || result.errorDescription) {
-    const detail = result.errorDescription || result.reason || 'Google login failed.';
-    this.setAuthError(detail);
-    return;
-  }
-
-  // 3) If we received a code => exchange it with Directus
-  if (result.code) {
-    this.auth.exchangeGoogleCode(result.code).pipe(
-      timeout(15000)
+    this.auth.refreshSession().pipe(
+      timeout(12000)
     ).subscribe({
       next: (ok) => {
         if (ok) {
           this.finishLogin();
           return;
         }
-        const detail =
-          localStorage.getItem('auth_error') ||
-          'Google login failed: Code exchange did not return access token.';
+
+        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
         this.setAuthError(detail);
       },
-      error: (err) => {
-        const detail =
-          localStorage.getItem('auth_error') ||
-          err?.message ||
-          'Google login failed: Unable to exchange code.';
+      error: () => {
+        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
         this.setAuthError(detail);
       }
     });
-
-    return;
   }
-
-  // 4) fallback: try refresh (old logic)
-  this.auth.refreshSession().pipe(
-    timeout(12000)
-  ).subscribe({
-    next: (ok) => {
-      if (ok) {
-        this.finishLogin();
-        return;
-      }
-
-      const detail =
-        localStorage.getItem('auth_error') ||
-        'Unable to complete login session.';
-      this.setAuthError(detail);
-    },
-    error: () => {
-      const detail =
-        localStorage.getItem('auth_error') ||
-        'Unable to complete login session.';
-      this.setAuthError(detail);
-    }
-  });
-}
-
 
   private finishLogin() {
     this.auth.ensureTrialAccess().subscribe({
