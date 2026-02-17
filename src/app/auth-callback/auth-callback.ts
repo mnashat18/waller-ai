@@ -16,6 +16,7 @@ import { AuthService } from '../services/auth';
   `
 })
 export class AuthCallbackComponent implements OnInit {
+
   status: 'loading' | 'error' = 'loading';
   message = '';
 
@@ -25,69 +26,38 @@ export class AuthCallbackComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    const result = this.auth.captureAuthFromUrl() as {
-      stored?: boolean;
-      reason?: string;
-      errorDescription?: string;
-    };
-    const hasStoredToken = Boolean(
-      localStorage.getItem('token') ?? localStorage.getItem('access_token')
-    );
 
-    if (result.stored || hasStoredToken) {
-      this.finishLogin();
-      return;
-    }
+    // Step 1: force refresh from cookie
+    this.auth.refreshFromCookie()
+      .pipe(timeout(15000))
+      .subscribe({
+        next: () => {
 
-    if (result.reason || result.errorDescription) {
-      const detail = result.errorDescription || result.reason || 'Google login failed.';
-      this.setAuthError(detail);
-      return;
-    }
+          // Step 2: now check current user
+          this.auth.getCurrentUser()
+            .pipe(timeout(15000))
+            .subscribe({
+              next: (user) => {
+                if (user) {
+                  this.router.navigate(['/dashboard']);
+                  return;
+                }
+                this.fail('Unable to verify login session.');
+              },
+              error: () => {
+                this.fail('Unable to verify login session.');
+              }
+            });
 
-    this.auth.refreshSession().pipe(
-      timeout(12000)
-    ).subscribe({
-      next: (ok) => {
-        if (ok) {
-          this.finishLogin();
-          return;
+        },
+        error: () => {
+          this.fail('Unable to refresh session.');
         }
-
-        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
-        this.setAuthError(detail);
-      },
-      error: () => {
-        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
-        this.setAuthError(detail);
-      }
-    });
+      });
   }
 
-  private finishLogin() {
-    this.auth.ensureTrialAccess().subscribe({
-      next: () => {
-        sessionStorage.removeItem('auth_callback_pending');
-        sessionStorage.removeItem('auth_refresh_attempted');
-        this.router.navigate(['/dashboard']);
-      },
-      error: () => {
-        this.router.navigate(['/dashboard']);
-      }
-    });
-  }
-
-  private setAuthError(detail: string) {
+  private fail(msg: string) {
     this.status = 'error';
-    this.message = `Login failed: ${detail}`;
-
-    sessionStorage.removeItem('auth_callback_pending');
-    sessionStorage.removeItem('auth_refresh_attempted');
-
-    try {
-      localStorage.setItem('auth_error', detail);
-    } catch {
-      // ignore storage errors
-    }
+    this.message = msg;
   }
 }

@@ -224,4 +224,15 @@ export class AuthService {
       catchError(() => of(false))
     );
   }
+
+refreshFromCookie() {
+  return this.http.post<any>(
+    `${this.api}/auth/refresh`,
+    {},
+    { withCredentials: true }
+  ).pipe(
+    map(() => true),
+    catchError(() => of(false))
+  );
+}
 }
