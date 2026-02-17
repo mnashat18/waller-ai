@@ -210,7 +210,7 @@ signup(data: {
     }
     const params = new URLSearchParams({
       redirect: `${window.location.origin}/auth-callback`,
-      mode: 'cookie'
+      mode: 'session'
     });
     window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
   }
@@ -219,11 +219,11 @@ signup(data: {
     const storedRefreshToken = localStorage.getItem('refresh_token');
     const attempts: Array<Record<string, string>> = [];
 
+    attempts.push({ mode: 'session' });
     if (storedRefreshToken) {
       attempts.push({ mode: 'json', refresh_token: storedRefreshToken });
     }
     attempts.push({ mode: 'json' });
-    attempts.push({ mode: 'session' });
 
     let lastError: any = null;
 
