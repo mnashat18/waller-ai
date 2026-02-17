@@ -123,34 +123,37 @@ export class AuthService {
    * - OR Authorization Bearer token (if provided)
    */
   getCurrentUser(accessToken?: string): Observable<any | null> {
-    const options = accessToken
-      ? {
-          headers: new HttpHeaders({ Authorization: `Bearer ${accessToken}` }),
-          withCredentials: true
-        }
-      : { withCredentials: true };
+  const options = accessToken
+    ? {
+        headers: new HttpHeaders({ Authorization: `Bearer ${accessToken}` }),
+        withCredentials: true
+      }
+    : { withCredentials: true };
 
-    return this.http.get<any>(
-      `${this.api}/users/me`,
-      options
-    ).pipe(
-      tap(() => {
+  return this.http.get<any>(`${this.api}/users/me`, options).pipe(
+
+    // ✅ أهم سطر
+    map((res) => res?.data ?? null),
+
+    tap((user) => {
+      if (user) {
         sessionStorage.setItem('is_logged_in', '1');
         localStorage.removeItem('auth_error');
-      }),
-      catchError((err) => {
-        sessionStorage.removeItem('is_logged_in');
+      }
+    }),
 
-        const detail = this.getAuthErrorDetail(err);
+    catchError((err) => {
+      sessionStorage.removeItem('is_logged_in');
 
-        try {
-          localStorage.setItem('auth_error', detail);
-        } catch {}
+      const detail = this.getAuthErrorDetail(err);
+      try {
+        localStorage.setItem('auth_error', detail);
+      } catch {}
 
-        return of(null);
-      })
-    );
-  }
+      return of(null);
+    })
+  );
+}
 
   /**
    * Google login via Directus (session/cookie based)
