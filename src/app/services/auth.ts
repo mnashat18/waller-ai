@@ -250,13 +250,13 @@ export class AuthService {
 
   const params = new URLSearchParams({
     redirect,
-    mode: 'token',
-    access_type: 'offline',
-    prompt: 'consent'
+    mode: 'token'
   });
 
-  window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
+  window.location.href =
+    `https://dash.conntinuity.com/auth/login/google?${params.toString()}`;
 }
+
 
 
   /**

@@ -26,35 +26,50 @@ export class AuthCallbackComponent implements OnInit {
 
   ngOnInit(): void {
     const result = this.auth.captureAuthFromUrl();
-    const hasStoredToken = Boolean(
-      localStorage.getItem('token') ?? localStorage.getItem('access_token')
-    );
 
-    if (result.stored || hasStoredToken) {
-      this.router.navigate(['/dashboard']);
+    const accessToken =
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token');
+
+    // ✅ الحالة 1: Directus رجع access_token
+    if (accessToken) {
+      this.finishLogin();
       return;
     }
 
+    // ❌ الحالة 2: Directus رجع code بدل token
+    if (result.hasCode) {
+      this.setAuthError(
+        'Login returned authorization code instead of tokens. Make sure AUTH_GOOGLE_MODE=token and redeploy Directus.'
+      );
+      return;
+    }
+
+    // ❌ الحالة 3: Google رجع error
     if (result.reason || result.errorDescription) {
-      const detail = result.errorDescription || result.reason || 'Login failed.';
+      const detail =
+        result.errorDescription ||
+        result.reason ||
+        'Google login failed.';
       this.setAuthError(detail);
       return;
     }
 
-    this.auth.refreshSession().pipe(
-      timeout(12000)
-    ).subscribe({
-      next: (ok) => {
-        if (ok) {
-          this.router.navigate(['/dashboard']);
-          return;
-        }
-        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
-        this.setAuthError(detail);
+    // ❌ مفيش توكن ومفيش كود
+    this.setAuthError(
+      'No access token received from Directus. Check Google provider configuration.'
+    );
+  }
+
+  private finishLogin() {
+    this.auth.ensureTrialAccess().subscribe({
+      next: () => {
+        sessionStorage.removeItem('auth_callback_pending');
+        sessionStorage.removeItem('auth_refresh_attempted');
+        this.router.navigate(['/dashboard']);
       },
       error: () => {
-        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
-        this.setAuthError(detail);
+        this.router.navigate(['/dashboard']);
       }
     });
   }
@@ -62,8 +77,10 @@ export class AuthCallbackComponent implements OnInit {
   private setAuthError(detail: string) {
     this.status = 'error';
     this.message = `Login failed: ${detail}`;
+
     sessionStorage.removeItem('auth_callback_pending');
     sessionStorage.removeItem('auth_refresh_attempted');
+
     try {
       localStorage.setItem('auth_error', detail);
     } catch {
