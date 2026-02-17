@@ -51,10 +51,12 @@ export class AuthService {
     if (accessToken) {
       localStorage.setItem('token', accessToken);
       localStorage.setItem('access_token', accessToken);
+    }
+    if (refreshToken) {
+      localStorage.setItem('refresh_token', refreshToken);
+    }
+    if (accessToken || refreshToken) {
       localStorage.removeItem('auth_error');
-      if (refreshToken) {
-        localStorage.setItem('refresh_token', refreshToken);
-      }
     }
 
     if (hasCode && !reason && !errorDescription) {
@@ -241,7 +243,7 @@ signup(data: {
     }
     const params = new URLSearchParams({
       redirect: `${window.location.origin}/auth-callback`,
-      mode: 'cookie'
+      mode: 'json'
     });
     window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
   }
