@@ -19,124 +19,128 @@ export class AuthService {
    * - Directus token mode returns: access_token, refresh_token (query or hash)
    * - Some flows might include: token, code, error, error_description
    */
-  captureAuthFromUrl() {
-    if (typeof window === 'undefined') {
-      return { stored: false };
-    }
-
-    const url = new URL(window.location.href);
-
-    // Some apps store a raw callback URL before navigation; keep this logic
-    let sourceUrl = url;
-    const rawCallbackUrl = sessionStorage.getItem('auth_callback_raw_url');
-    if (rawCallbackUrl) {
-      try {
-        const parsed = new URL(rawCallbackUrl);
-        const candidate = `${parsed.search}${parsed.hash}`;
-        if (
-          candidate.includes('access_token=') ||
-          candidate.includes('refresh_token=') ||
-          candidate.includes('code=') ||
-          candidate.includes('error=')
-        ) {
-          sourceUrl = parsed;
-        }
-      } catch {
-        // ignore invalid URL
-      }
-      sessionStorage.removeItem('auth_callback_raw_url');
-    }
-
-    const hashParams = sourceUrl.hash
-      ? new URLSearchParams(sourceUrl.hash.replace('#', '?'))
-      : null;
-    const searchParams = sourceUrl.search
-      ? new URLSearchParams(sourceUrl.search)
-      : null;
-
-    const hasCode =
-      hashParams?.has('code') === true ||
-      searchParams?.has('code') === true;
-
-    const accessToken =
-      hashParams?.get('access_token') ??
-      hashParams?.get('token') ??
-      searchParams?.get('access_token') ??
-      searchParams?.get('token') ??
-      undefined;
-
-    const refreshToken =
-      hashParams?.get('refresh_token') ??
-      searchParams?.get('refresh_token') ??
-      undefined;
-
-    const reason =
-      searchParams?.get('reason') ??
-      hashParams?.get('reason') ??
-      searchParams?.get('error') ??
-      hashParams?.get('error') ??
-      undefined;
-
-    const errorDescription =
-      searchParams?.get('error_description') ??
-      hashParams?.get('error_description') ??
-      undefined;
-
-    if (accessToken) {
-      localStorage.setItem('token', accessToken);
-      localStorage.setItem('access_token', accessToken);
-    }
-    if (refreshToken) {
-      localStorage.setItem('refresh_token', refreshToken);
-    }
-    if (accessToken || refreshToken) {
-      localStorage.removeItem('auth_error');
-      sessionStorage.removeItem('auth_refresh_attempted');
-      sessionStorage.removeItem('auth_callback_pending');
-    }
-
-    // If we got a code only, mark callback pending (optional)
-    if (hasCode && !reason && !errorDescription && !accessToken && !refreshToken) {
-      sessionStorage.setItem('auth_callback_pending', '1');
-      sessionStorage.removeItem('auth_refresh_attempted');
-    }
-
-    // Clean URL to remove tokens/codes/errors from address bar
-    if (accessToken || refreshToken || reason || errorDescription || hasCode) {
-      const cleaned = new URL(window.location.href);
-      const dropKeys = [
-        'access_token',
-        'token',
-        'refresh_token',
-        'expires',
-        'expires_in',
-        'code',
-        'state',
-        'reason',
-        'error',
-        'error_description'
-      ];
-      dropKeys.forEach((key) => cleaned.searchParams.delete(key));
-      if (cleaned.hash) cleaned.hash = '';
-
-      const next =
-        cleaned.pathname +
-        (cleaned.searchParams.toString()
-          ? `?${cleaned.searchParams.toString()}`
-          : '');
-
-      window.history.replaceState({}, document.title, next);
-    }
-
-    return {
-      stored: Boolean(accessToken),
-      accessToken,
-      refreshToken,
-      reason,
-      errorDescription,
-      hasCode
-    };
+ captureAuthFromUrl() {
+  if (typeof window === 'undefined') {
+    return { stored: false };
   }
+
+  const url = new URL(window.location.href);
+
+  // Some apps store a raw callback URL before navigation; keep this logic
+  let sourceUrl = url;
+  const rawCallbackUrl = sessionStorage.getItem('auth_callback_raw_url');
+  if (rawCallbackUrl) {
+    try {
+      const parsed = new URL(rawCallbackUrl);
+      const candidate = `${parsed.search}${parsed.hash}`;
+      if (
+        candidate.includes('access_token=') ||
+        candidate.includes('refresh_token=') ||
+        candidate.includes('code=') ||
+        candidate.includes('error=')
+      ) {
+        sourceUrl = parsed;
+      }
+    } catch {
+      // ignore invalid URL
+    }
+    sessionStorage.removeItem('auth_callback_raw_url');
+  }
+
+  const hashParams = sourceUrl.hash
+    ? new URLSearchParams(sourceUrl.hash.replace('#', '?'))
+    : null;
+
+  const searchParams = sourceUrl.search
+    ? new URLSearchParams(sourceUrl.search)
+    : null;
+
+  const code =
+    searchParams?.get('code') ??
+    hashParams?.get('code') ??
+    undefined;
+
+  const accessToken =
+    hashParams?.get('access_token') ??
+    hashParams?.get('token') ??
+    searchParams?.get('access_token') ??
+    searchParams?.get('token') ??
+    undefined;
+
+  const refreshToken =
+    hashParams?.get('refresh_token') ??
+    searchParams?.get('refresh_token') ??
+    undefined;
+
+  const reason =
+    searchParams?.get('reason') ??
+    hashParams?.get('reason') ??
+    searchParams?.get('error') ??
+    hashParams?.get('error') ??
+    undefined;
+
+  const errorDescription =
+    searchParams?.get('error_description') ??
+    hashParams?.get('error_description') ??
+    undefined;
+
+  // Store tokens if Directus returned them directly
+  if (accessToken) {
+    localStorage.setItem('token', accessToken);
+    localStorage.setItem('access_token', accessToken);
+  }
+  if (refreshToken) {
+    localStorage.setItem('refresh_token', refreshToken);
+  }
+
+  if (accessToken || refreshToken) {
+    localStorage.removeItem('auth_error');
+    sessionStorage.removeItem('auth_refresh_attempted');
+    sessionStorage.removeItem('auth_callback_pending');
+  }
+
+  // If we only got a code => mark pending
+  if (code && !reason && !errorDescription && !accessToken && !refreshToken) {
+    sessionStorage.setItem('auth_callback_pending', '1');
+    sessionStorage.removeItem('auth_refresh_attempted');
+  }
+
+  // Clean URL to remove tokens/codes/errors from address bar
+  if (accessToken || refreshToken || reason || errorDescription || code) {
+    const cleaned = new URL(window.location.href);
+    const dropKeys = [
+      'access_token',
+      'token',
+      'refresh_token',
+      'expires',
+      'expires_in',
+      'code',
+      'state',
+      'reason',
+      'error',
+      'error_description'
+    ];
+    dropKeys.forEach((key) => cleaned.searchParams.delete(key));
+    if (cleaned.hash) cleaned.hash = '';
+
+    const next =
+      cleaned.pathname +
+      (cleaned.searchParams.toString()
+        ? `?${cleaned.searchParams.toString()}`
+        : '');
+
+    window.history.replaceState({}, document.title, next);
+  }
+
+  return {
+    stored: Boolean(accessToken),
+    accessToken,
+    refreshToken,
+    reason,
+    errorDescription,
+    code
+  };
+}
 
   /**
    * Ensure we have a valid access token:
@@ -245,17 +249,57 @@ export class AuthService {
    * We just pass redirect and let Directus handle the rest.
    */
   loginWithGoogle() {
-    if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return;
 
-    const redirect = `${window.location.origin}/auth-callback`;
+  const redirect = `${window.location.origin}/auth-callback`;
 
-    const params = new URLSearchParams({
-      redirect
-    });
+  window.location.href =
+    `https://dash.conntinuity.com/auth/login/google?redirect=${encodeURIComponent(redirect)}`;
+}
 
-    window.location.href =
-      `${this.api}/auth/login/google?${params.toString()}`;
-  }
+
+exchangeGoogleCode(code: string) {
+  const redirect = `${window.location.origin}/auth-callback`;
+
+  return this.http.post<any>(
+    `${this.api}/auth/login/google`,
+    { code, redirect },
+    {
+      headers: new HttpHeaders({
+        'Content-Type': 'application/json'
+      })
+    }
+  ).pipe(
+    tap((res) => {
+      const access = res?.data?.access_token;
+      const refresh = res?.data?.refresh_token;
+
+      if (access) {
+        localStorage.setItem('token', access);
+        localStorage.setItem('access_token', access);
+      }
+      if (refresh) {
+        localStorage.setItem('refresh_token', refresh);
+      }
+
+      if (access || refresh) {
+        localStorage.removeItem('auth_error');
+        sessionStorage.removeItem('auth_callback_pending');
+        sessionStorage.removeItem('auth_refresh_attempted');
+      }
+    }),
+    map((res) => {
+      return Boolean(res?.data?.access_token);
+    }),
+    catchError((err) => {
+      const detail = this.getAuthErrorDetail(err);
+      try {
+        localStorage.setItem('auth_error', detail);
+      } catch {}
+      return of(false);
+    })
+  );
+}
 
   /**
    * Directus refresh: MUST send refresh_token in payload
