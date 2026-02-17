@@ -26,39 +26,38 @@ export class AuthCallbackComponent implements OnInit {
 
   ngOnInit(): void {
     const result = this.auth.captureAuthFromUrl();
+    const hasStoredToken = Boolean(
+      localStorage.getItem('token') ?? localStorage.getItem('access_token')
+    );
 
-    const accessToken =
-      localStorage.getItem('token') ??
-      localStorage.getItem('access_token');
-
-    // ✅ الحالة 1: Directus رجع access_token
-    if (accessToken) {
+    if (result.stored || hasStoredToken) {
       this.finishLogin();
       return;
     }
 
-    // ❌ الحالة 2: Directus رجع code بدل token
-    if (result.hasCode) {
-      this.setAuthError(
-        'Login returned authorization code instead of tokens. Make sure AUTH_GOOGLE_MODE=token and redeploy Directus.'
-      );
-      return;
-    }
-
-    // ❌ الحالة 3: Google رجع error
     if (result.reason || result.errorDescription) {
-      const detail =
-        result.errorDescription ||
-        result.reason ||
-        'Google login failed.';
+      const detail = result.errorDescription || result.reason || 'Google login failed.';
       this.setAuthError(detail);
       return;
     }
 
-    // ❌ مفيش توكن ومفيش كود
-    this.setAuthError(
-      'No access token received from Directus. Check Google provider configuration.'
-    );
+    this.auth.refreshSession().pipe(
+      timeout(12000)
+    ).subscribe({
+      next: (ok) => {
+        if (ok) {
+          this.finishLogin();
+          return;
+        }
+
+        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
+        this.setAuthError(detail);
+      },
+      error: () => {
+        const detail = localStorage.getItem('auth_error') || 'Unable to complete login session.';
+        this.setAuthError(detail);
+      }
+    });
   }
 
   private finishLogin() {

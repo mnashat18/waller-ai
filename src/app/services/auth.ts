@@ -239,25 +239,23 @@ export class AuthService {
   /**
    * Google login via Directus.
    *
-   * IMPORTANT:
-   * Use mode=token so Directus returns access_token + refresh_token
-   * to the redirect URL, avoiding cross-domain cookie/session issues.
+   * NOTE:
+   * We do NOT force mode=token here because Directus v11 + openid
+   * may ignore it depending on provider settings.
+   * We just pass redirect and let Directus handle the rest.
    */
   loginWithGoogle() {
-  if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined') return;
 
-  const redirect = `${window.location.origin}/auth-callback`;
+    const redirect = `${window.location.origin}/auth-callback`;
 
-  const params = new URLSearchParams({
-    redirect,
-    mode: 'token'
-  });
+    const params = new URLSearchParams({
+      redirect
+    });
 
-  window.location.href =
-    `https://dash.conntinuity.com/auth/login/google?${params.toString()}`;
-}
-
-
+    window.location.href =
+      `${this.api}/auth/login/google?${params.toString()}`;
+  }
 
   /**
    * Directus refresh: MUST send refresh_token in payload
@@ -281,7 +279,8 @@ export class AuthService {
           {
             headers: new HttpHeaders({
               'Content-Type': 'application/json'
-            })
+            }),
+            withCredentials: true
           }
         )
       );
