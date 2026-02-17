@@ -95,7 +95,6 @@ export class AuthService {
     first_name: string;
     last_name: string;
   }) {
-    // Register doesn't need credentials, but keeping consistent is fine.
     return this.http.post(
       `${this.api}/users/register`,
       {
@@ -119,21 +118,35 @@ export class AuthService {
   }
 
   /**
-   * Get current user from Directus using cookies.
-   * This is the KEY function for Session Mode.
+   * Get current user from Directus using:
+   * - Cookie session
+   * - OR Authorization Bearer token (if provided)
    */
-  getCurrentUser(): Observable<any | null> {
-    return this.http.get<any>(`${this.api}/users/me`, { withCredentials: true }).pipe(
+  getCurrentUser(accessToken?: string): Observable<any | null> {
+    const options = accessToken
+      ? {
+          headers: new HttpHeaders({ Authorization: `Bearer ${accessToken}` }),
+          withCredentials: true
+        }
+      : { withCredentials: true };
+
+    return this.http.get<any>(
+      `${this.api}/users/me`,
+      options
+    ).pipe(
       tap(() => {
         sessionStorage.setItem('is_logged_in', '1');
         localStorage.removeItem('auth_error');
       }),
       catchError((err) => {
         sessionStorage.removeItem('is_logged_in');
+
         const detail = this.getAuthErrorDetail(err);
+
         try {
           localStorage.setItem('auth_error', detail);
         } catch {}
+
         return of(null);
       })
     );
@@ -147,9 +160,34 @@ export class AuthService {
     if (typeof window === 'undefined') return;
 
     const redirect = `${window.location.origin}/auth-callback`;
-    // Use this.api to avoid hardcoding dash.conntinuity.com
+
     window.location.href =
       `${this.api}/auth/login/google?redirect=${encodeURIComponent(redirect)}`;
+  }
+
+  /**
+   * Refresh session from cookie.
+   * IMPORTANT:
+   * We return the full response (not true/false),
+   * because we need res.data.access_token for /users/me.
+   */
+  refreshFromCookie(): Observable<any | null> {
+    return this.http.post<any>(
+      `${this.api}/auth/refresh`,
+      {},
+      { withCredentials: true }
+    ).pipe(
+      tap(() => {
+        localStorage.removeItem('auth_error');
+      }),
+      catchError((err) => {
+        const detail = this.getAuthErrorDetail(err);
+        try {
+          localStorage.setItem('auth_error', detail);
+        } catch {}
+        return of(null);
+      })
+    );
   }
 
   /**
@@ -173,11 +211,11 @@ export class AuthService {
   }
 
   private clearClientAuthState() {
-    // Don't nuke all localStorage blindly (might contain app prefs).
     localStorage.removeItem('auth_error');
     localStorage.removeItem('user_email');
 
     sessionStorage.removeItem('is_logged_in');
+
     try {
       sessionStorage.removeItem('auth_refresh_attempted');
       sessionStorage.removeItem('auth_callback_pending');
@@ -188,21 +226,25 @@ export class AuthService {
   }
 
   /**
-   * Kept for compatibility with old callers.
-   * In Session Mode, there's no token to ensure/refresh here.
-   * If you still call it somewhere, it will validate session by calling /users/me.
+   * Compatibility:
+   * Validate session by calling /users/me
    */
   ensureSessionToken() {
     return this.getCurrentUser().pipe(map((u) => Boolean(u)));
   }
 
   /**
-   * Kept for compatibility with old callers.
-   * In Session Mode, refresh is handled by cookie + Directus internally.
-   * We just re-check /users/me.
+   * Compatibility:
+   * Refresh then check /users/me (cookie flow)
    */
   refreshSession() {
-    return this.getCurrentUser().pipe(map((u) => Boolean(u)));
+    return this.refreshFromCookie().pipe(
+      switchMap((res) => {
+        const accessToken = res?.data?.access_token;
+        return this.getCurrentUser(accessToken);
+      }),
+      map((u) => Boolean(u))
+    );
   }
 
   private getAuthErrorDetail(err: any): string {
@@ -224,15 +266,4 @@ export class AuthService {
       catchError(() => of(false))
     );
   }
-
-refreshFromCookie() {
-  return this.http.post<any>(
-    `${this.api}/auth/refresh`,
-    {},
-    { withCredentials: true }
-  ).pipe(
-    map(() => true),
-    catchError(() => of(false))
-  );
-}
 }
