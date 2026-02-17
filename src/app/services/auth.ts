@@ -244,17 +244,20 @@ export class AuthService {
    * to the redirect URL, avoiding cross-domain cookie/session issues.
    */
   loginWithGoogle() {
-    if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return;
 
-    const redirect = `${window.location.origin}/auth-callback`;
+  const redirect = `${window.location.origin}/auth-callback`;
 
-    const params = new URLSearchParams({
-      redirect,
-      mode: 'token'
-    });
+  const params = new URLSearchParams({
+    redirect,
+    mode: 'token',
+    access_type: 'offline',
+    prompt: 'consent'
+  });
 
-    window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
-  }
+  window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
+}
+
 
   /**
    * Directus refresh: MUST send refresh_token in payload
