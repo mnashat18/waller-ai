@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { catchError, map, switchMap, tap } from 'rxjs/operators';
-import { of } from 'rxjs';
+import { firstValueFrom, from, of } from 'rxjs';
 import { SubscriptionService } from './subscription.service';
 
 @Injectable({ providedIn: 'root' })
@@ -20,8 +20,27 @@ export class AuthService {
     }
 
     const url = new URL(window.location.href);
-    const hashParams = url.hash ? new URLSearchParams(url.hash.replace('#', '?')) : null;
-    const searchParams = url.search ? new URLSearchParams(url.search) : null;
+    let sourceUrl = url;
+    const rawCallbackUrl = sessionStorage.getItem('auth_callback_raw_url');
+    if (rawCallbackUrl) {
+      try {
+        const parsed = new URL(rawCallbackUrl);
+        const candidate = `${parsed.search}${parsed.hash}`;
+        if (
+          candidate.includes('access_token=') ||
+          candidate.includes('refresh_token=') ||
+          candidate.includes('code=') ||
+          candidate.includes('error=')
+        ) {
+          sourceUrl = parsed;
+        }
+      } catch {
+        // ignore invalid URL
+      }
+      sessionStorage.removeItem('auth_callback_raw_url');
+    }
+    const hashParams = sourceUrl.hash ? new URLSearchParams(sourceUrl.hash.replace('#', '?')) : null;
+    const searchParams = sourceUrl.search ? new URLSearchParams(sourceUrl.search) : null;
 
     const hasCode =
       hashParams?.has('code') === true ||
@@ -104,59 +123,7 @@ export class AuthService {
   }
 
   refreshSession() {
-    const storedRefreshToken = localStorage.getItem('refresh_token');
-    const payload: Record<string, string> = {
-      mode: 'json'
-    };
-    if (storedRefreshToken) {
-      payload['refresh_token'] = storedRefreshToken;
-    }
-
-    return this.http.post<any>(
-      `${this.api}/auth/refresh`,
-      payload,
-      { withCredentials: true }
-    ).pipe(
-      tap((res) => {
-        const accessToken = res?.data?.access_token;
-        const refreshToken = res?.data?.refresh_token;
-        if (accessToken) {
-          localStorage.setItem('token', accessToken);
-          localStorage.setItem('access_token', accessToken);
-          localStorage.removeItem('auth_error');
-        }
-        if (refreshToken) {
-          localStorage.setItem('refresh_token', refreshToken);
-        }
-        if (accessToken) {
-          sessionStorage.removeItem('auth_callback_pending');
-          sessionStorage.removeItem('auth_refresh_attempted');
-        }
-      }),
-      switchMap((res) => {
-        const hasToken = Boolean(res?.data?.access_token);
-        if (!hasToken) {
-          return of(false);
-        }
-        return this.ensureTrialAccess().pipe(
-          map(() => true),
-          catchError(() => of(true))
-        );
-      }),
-      catchError((err) => {
-        const detail =
-          err?.error?.errors?.[0]?.extensions?.reason ||
-          err?.error?.errors?.[0]?.message ||
-          err?.message ||
-          'Unable to complete login session.';
-        try {
-          localStorage.setItem('auth_error', String(detail));
-        } catch {
-          // ignore storage errors
-        }
-        return of(false);
-      })
-    );
+    return from(this.refreshSessionInternal());
   }
 
   ensureSessionToken() {
@@ -246,6 +213,88 @@ signup(data: {
       mode: 'json'
     });
     window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
+  }
+
+  private async refreshSessionInternal(): Promise<boolean> {
+    const storedRefreshToken = localStorage.getItem('refresh_token');
+    const attempts: Array<Record<string, string>> = [];
+
+    if (storedRefreshToken) {
+      attempts.push({ mode: 'json', refresh_token: storedRefreshToken });
+    }
+    attempts.push({ mode: 'json' });
+    attempts.push({ mode: 'session' });
+
+    let lastError: any = null;
+
+    for (const payload of attempts) {
+      try {
+        const res = await firstValueFrom(
+          this.http.post<any>(`${this.api}/auth/refresh`, payload, { withCredentials: true })
+        );
+
+        const hasToken = this.storeTokensFromRefresh(res);
+        if (hasToken) {
+          await firstValueFrom(this.ensureTrialAccess().pipe(catchError(() => of(true))));
+          return true;
+        }
+
+        // Some Directus setups keep session in cookies first. Try converting to JSON token once.
+        if (payload['mode'] === 'session') {
+          try {
+            const jsonRes = await firstValueFrom(
+              this.http.post<any>(`${this.api}/auth/refresh`, { mode: 'json' }, { withCredentials: true })
+            );
+            const hasJsonToken = this.storeTokensFromRefresh(jsonRes);
+            if (hasJsonToken) {
+              await firstValueFrom(this.ensureTrialAccess().pipe(catchError(() => of(true))));
+              return true;
+            }
+          } catch (err) {
+            lastError = err;
+          }
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    const detail = this.getAuthErrorDetail(lastError);
+    try {
+      localStorage.setItem('auth_error', detail);
+    } catch {
+      // ignore storage errors
+    }
+    return false;
+  }
+
+  private storeTokensFromRefresh(res: any): boolean {
+    const accessToken = res?.data?.access_token;
+    const refreshToken = res?.data?.refresh_token;
+
+    if (accessToken) {
+      localStorage.setItem('token', accessToken);
+      localStorage.setItem('access_token', accessToken);
+      sessionStorage.removeItem('auth_callback_pending');
+      sessionStorage.removeItem('auth_refresh_attempted');
+    }
+    if (refreshToken) {
+      localStorage.setItem('refresh_token', refreshToken);
+    }
+    if (accessToken || refreshToken) {
+      localStorage.removeItem('auth_error');
+    }
+
+    return Boolean(accessToken);
+  }
+
+  private getAuthErrorDetail(err: any): string {
+    return (
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.message ||
+      'Unable to complete login session.'
+    );
   }
 
   ensureTrialAccess() {

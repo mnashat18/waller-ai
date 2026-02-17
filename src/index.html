@@ -2,11 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>WellarAi</title>
+  <title>Conntinuity</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/png" href="assets/logo/app_icon.png?v=20260215">
   <link rel="icon" type="image/x-icon" href="favicon.ico?v=20260215">
+  <script>
+    (function () {
+      try {
+        if (window.location.pathname === '/auth-callback') {
+          sessionStorage.setItem('auth_callback_raw_url', window.location.href);
+        }
+      } catch (_) {
+        // ignore storage errors
+      }
+    })();
+  </script>
 </head>
 <body>
   <app-root></app-root>
