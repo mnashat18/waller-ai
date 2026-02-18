@@ -26,36 +26,29 @@ export class AuthCallbackComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
+    this.auth.captureAuthFromUrl();
 
     this.auth.refreshFromCookie()
       .pipe(
         timeout(15000),
-
-        // Step 2: extract access token
-        switchMap((res: any) => {
-
-          const accessToken = res?.data?.access_token;
-
-          if (!accessToken) {
-            this.fail('No access token returned from refresh.');
+        switchMap((accessToken) => {
+          const token = accessToken ?? this.auth.getStoredAccessToken();
+          if (!token) {
             return of(null);
           }
-
-          // Step 3: call /users/me with Bearer token
-          return this.auth.getCurrentUser(accessToken);
+          return this.auth.getCurrentUser(token);
         }),
-
         timeout(15000)
       )
       .subscribe({
         next: (user) => {
-
           if (user) {
             this.router.navigate(['/dashboard']);
-          } else {
-            this.fail('Unable to verify login session.');
+            return;
           }
 
+          const backendError = localStorage.getItem('auth_error');
+          this.fail(backendError || 'Unable to verify login session.');
         },
         error: (err) => {
           this.fail(
