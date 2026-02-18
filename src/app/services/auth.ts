@@ -359,7 +359,15 @@ export class AuthService {
   }
 
   ensureTrialAccess() {
-    return this.subscriptions.ensureBusinessTrial().pipe(
+    const maybeEnsureTrial = (
+      this.subscriptions as { ensureBusinessTrial?: () => Observable<unknown> }
+    ).ensureBusinessTrial;
+
+    if (typeof maybeEnsureTrial !== 'function') {
+      return of(true);
+    }
+
+    return maybeEnsureTrial.call(this.subscriptions).pipe(
       map(() => true),
       catchError(() => of(false))
     );
