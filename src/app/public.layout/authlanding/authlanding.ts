@@ -20,11 +20,12 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     'Daily mobile scans with real-time alerts.',
     'Operational risk insights for managers.',
     'Secure dashboards for clinics and factories.',
-    'Upgrade to Admin or Business to scale.'
+    'New users unlock 14 days of Business after completing setup.',
+    'Activate Admin or Business to scale.'
   ];
 
   showAuthModal = false;
-  authMode: 'signup' | 'login' | 'mobile' = 'signup';
+  authMode: 'signup' | 'login' = 'signup';
   submitting = false;
   feedback = '';
 
@@ -38,10 +39,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   login = {
     email: '',
     password: ''
-  };
-
-  mobile = {
-    phone: ''
   };
 
   private routeSub?: Subscription;
@@ -69,7 +66,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.routeSub?.unsubscribe();
   }
 
-  openAuth(mode: 'signup' | 'login' | 'mobile' = 'signup') {
+  openAuth(mode: 'signup' | 'login' = 'signup') {
     this.authMode = mode;
     this.showAuthModal = true;
     this.feedback = '';
@@ -84,7 +81,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     }
   }
 
-  switchAuth(mode: 'signup' | 'login' | 'mobile') {
+  switchAuth(mode: 'signup' | 'login') {
     this.authMode = mode;
     this.feedback = '';
   }
@@ -103,7 +100,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       last_name: this.signup.lastName.trim()
     }).subscribe({
       next: () => {
-        this.feedback = 'Account created. Please log in to continue.';
+        this.feedback = 'Account created. Log in now and complete Business setup to unlock your 14-day trial.';
         this.submitting = false;
         this.switchAuth('login');
       },
@@ -138,17 +135,12 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.auth.loginWithGoogle();
   }
 
-  continueWithMobile() {
-    this.closeAuth();
-    this.router.navigateByUrl('/download-app');
-  }
-
   private applyRouteAuthMode() {
     const dataMode = this.route.snapshot.data?.['authMode'];
     const queryMode = this.route.snapshot.queryParamMap.get('auth');
     const mode = queryMode ?? dataMode;
 
-    if (mode === 'signup' || mode === 'login' || mode === 'mobile') {
+    if (mode === 'signup' || mode === 'login') {
       this.openAuth(mode);
     }
   }

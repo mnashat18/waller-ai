@@ -31,7 +31,9 @@ export class HeaderComponent {
       history: 'History',
       'audit-logs': 'Audit Logs',
       requests: 'Requests',
-      profile: 'Profile'
+      'requests/create': 'Create Request',
+      profile: 'Profile',
+      'business-center': 'Business Center'
     };
 
     this.title = titles[path] || 'Wellar';

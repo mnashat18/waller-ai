@@ -4,6 +4,7 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "start:admin-token-proxy": "node server/admin-token-proxy.js",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"

@@ -22,7 +22,7 @@ import { SidebarComponent } from './sidebar/sidebar';
         </aside>
 
         <!-- MAIN -->
-        <div class="flex flex-col flex-1">
+        <div class="app-main flex flex-col flex-1">
 
           <!-- HEADER (Desktop only) -->
           <div class="hidden md:block">
@@ -47,7 +47,7 @@ export class LayoutComponent implements OnDestroy {
   constructor(private router: Router) {
     this.navSub = this.router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
-        this.triggerTransition();
+        setTimeout(() => this.triggerTransition(), 0);
       }
     });
   }

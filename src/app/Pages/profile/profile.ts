@@ -18,6 +18,7 @@ import { AdminTokenService } from '../../services/admin-token';
 export class Profile implements OnInit {
   loading = true;
   errorMessage = '';
+  profileSkeletonPanels = [0, 1, 2];
   profile: ProfileView | null = null;
   editing = false;
   saving = false;
@@ -596,6 +597,10 @@ export class Profile implements OnInit {
       URL.revokeObjectURL(this.avatarPreviewUrl);
     }
     this.avatarPreviewUrl = null;
+  }
+
+  trackByIndex(index: number): number {
+    return index;
   }
 }
 

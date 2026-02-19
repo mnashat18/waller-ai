@@ -1,4 +1,6 @@
-import { CanMatchFn, Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { CanActivateFn, CanMatchFn, Router, Routes } from '@angular/router';
+import { catchError, map, of } from 'rxjs';
 
 import { PublicLayout } from './public.layout/public.layout';
 import { Authlanding } from './public.layout/authlanding/authlanding';
@@ -12,6 +14,7 @@ import { RequestsMobileComponent } from './Pages/mobile/requests-mobile.componen
 import { HistoryMobileComponent } from './Pages/mobile/history-mobile.component';
 import { ProfileMobileComponent } from './Pages/mobile/profile-mobile.component';
 import { AuditLogsMobileComponent } from './Pages/mobile/audit-logs-mobile.component';
+import { SubscriptionService } from './services/subscription.service';
 
 const isMobileViewport = () =>
   typeof window !== 'undefined' &&
@@ -20,9 +23,96 @@ const isMobileViewport = () =>
 
 const mobileDashboardMatch: CanMatchFn = () => isMobileViewport();
 const mobileRequestsMatch: CanMatchFn = () => isMobileViewport();
+const mobileCreateRequestMatch: CanMatchFn = () => isMobileViewport();
 const mobileHistoryMatch: CanMatchFn = () => isMobileViewport();
 const mobileProfileMatch: CanMatchFn = () => isMobileViewport();
 const mobileAuditLogsMatch: CanMatchFn = () => isMobileViewport();
+const mobileBusinessCenterMatch: CanMatchFn = () => isMobileViewport();
+
+const hasAdminAccess = (): boolean => {
+  if (typeof localStorage === 'undefined') {
+    return false;
+  }
+
+  const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+  if (!token) {
+    return false;
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return false;
+  }
+
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload?.['admin_access'] === true;
+  } catch {
+    return false;
+  }
+};
+
+const paidBusinessGuard: CanActivateFn = () => {
+  if (hasAdminAccess()) {
+    return true;
+  }
+
+  const subscriptions = inject(SubscriptionService);
+  const router = inject(Router);
+
+  return subscriptions.ensureBusinessTrial().pipe(
+    map((subscription) => {
+      const code = (subscription?.plan?.code ?? '').toLowerCase();
+      if (code === 'business') {
+        return true;
+      }
+      return router.createUrlTree(['/payment']);
+    }),
+    catchError(() => of(router.createUrlTree(['/payment'])))
+  );
+};
+
+const businessOnboardingGuard: CanActivateFn = (_, state) => {
+  if (typeof localStorage === 'undefined') {
+    return true;
+  }
+
+  const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+  if (!token) {
+    return true;
+  }
+
+  const targetPath = state.url.split('?')[0];
+  if (
+    targetPath === '/payment' ||
+    targetPath === '/upgrade-plan' ||
+    targetPath === '/login' ||
+    targetPath === '/signup' ||
+    targetPath === '/auth-callback'
+  ) {
+    return true;
+  }
+
+  const subscriptions = inject(SubscriptionService);
+  const router = inject(Router);
+
+  return subscriptions.isBusinessOnboardingComplete().pipe(
+    map((completed) =>
+      completed
+        ? true
+        : router.createUrlTree(['/payment'], {
+          queryParams: { onboarding: 'required' }
+        })
+    ),
+    catchError(() =>
+      of(
+        router.createUrlTree(['/payment'], {
+          queryParams: { onboarding: 'required' }
+        })
+      )
+    )
+  );
+};
 
 
 export const routes: Routes = [
@@ -31,27 +121,48 @@ export const routes: Routes = [
 {
   path: 'dashboard',
   canMatch: [mobileDashboardMatch],
+  canActivate: [businessOnboardingGuard],
   component: DashboardMobileComponent
 },
 {
   path: 'audit-logs',
   canMatch: [mobileAuditLogsMatch],
+  canActivate: [businessOnboardingGuard],
   component: AuditLogsMobileComponent
+},
+{
+  path: 'requests/create',
+  canMatch: [mobileCreateRequestMatch],
+  canActivate: [businessOnboardingGuard, paidBusinessGuard],
+  loadComponent: () =>
+    import('./Pages/create-request/create-request')
+      .then(m => m.CreateRequestComponent)
 },
 {
   path: 'requests',
   canMatch: [mobileRequestsMatch],
+  canActivate: [businessOnboardingGuard],
   component: RequestsMobileComponent
 },
 {
   path: 'history',
   canMatch: [mobileHistoryMatch],
+  canActivate: [businessOnboardingGuard],
   component: HistoryMobileComponent
 },
 {
   path: 'profile',
   canMatch: [mobileProfileMatch],
+  canActivate: [businessOnboardingGuard],
   component: ProfileMobileComponent
+},
+{
+  path: 'business-center',
+  canMatch: [mobileBusinessCenterMatch],
+  canActivate: [businessOnboardingGuard, paidBusinessGuard],
+  loadComponent: () =>
+    import('./Pages/business-center/business-center')
+      .then(m => m.BusinessCenterComponent)
 },
 
   /* ================= PUBLIC ================= */
@@ -104,6 +215,18 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./public.layout/pricing/pricing')
             .then(m => m.PricingComponent)
+      },
+      {
+        path: 'upgrade-plan',
+        loadComponent: () =>
+          import('./public.layout/upgrade-plan/upgrade-plan')
+            .then(m => m.UpgradePlanComponent)
+      },
+      {
+        path: 'payment',
+        loadComponent: () =>
+          import('./public.layout/upgrade-plan/upgrade-plan')
+            .then(m => m.UpgradePlanComponent)
       }
     ]
   },
@@ -112,6 +235,7 @@ export const routes: Routes = [
   {
     path: '',
     component: LayoutComponent,
+    canActivate: [businessOnboardingGuard],
     children: [
       {
         path: 'dashboard',
@@ -133,6 +257,13 @@ export const routes: Routes = [
             .then(m => m.AuditLogs)
       },
       {
+        path: 'requests/create',
+        canActivate: [businessOnboardingGuard, paidBusinessGuard],
+        loadComponent: () =>
+          import('./Pages/create-request/create-request')
+            .then(m => m.CreateRequestComponent)
+      },
+      {
         path: 'requests',
         loadComponent: () =>
           import('./Pages/requests/requests')
@@ -143,6 +274,13 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./Pages/profile/profile')
             .then(m => m.Profile)
+      },
+      {
+        path: 'business-center',
+        canActivate: [businessOnboardingGuard, paidBusinessGuard],
+        loadComponent: () =>
+          import('./Pages/business-center/business-center')
+            .then(m => m.BusinessCenterComponent)
       }
     ]
   },

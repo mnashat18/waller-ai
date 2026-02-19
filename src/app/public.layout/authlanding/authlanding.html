@@ -10,12 +10,13 @@
     </h1>
 
     <p class="description">
-      Run daily cognitive scans from mobile, monitor risk in real time, and keep teams safe.
+      Create your account, complete Business setup, then unlock 14 days of Business access to run daily cognitive scans from mobile,
+      monitor risk in real time, and keep teams safe.
       Built for transport fleets, factories, clinics, and modern enterprises.
     </p>
 
     <div class="actions">
-      <button type="button" class="btn-primary" (click)="openAuth('signup')">Start Free</button>
+      <button type="button" class="btn-primary" (click)="openAuth('signup')">Create Account</button>
       <a routerLink="/pricing" class="btn-ghost">View Plans</a>
     </div>
   </div>
@@ -58,8 +59,7 @@
         alt="Wellar app icon" />
       <h2 *ngIf="authMode === 'signup'">Create a free account</h2>
       <h2 *ngIf="authMode === 'login'">Log in to your account</h2>
-      <h2 *ngIf="authMode === 'mobile'">Continue with mobile</h2>
-      <p>Enterprise access for teams that run daily scans.</p>
+      <p>Every new account must complete Business setup before the 14-day Business trial starts.</p>
     </div>
 
     <form *ngIf="authMode === 'signup'" (ngSubmit)="submitSignup()" class="auth-form">
@@ -67,6 +67,7 @@
       <input class="auth-input" placeholder="Last name" [(ngModel)]="signup.lastName" name="lastName" />
       <input class="auth-input" placeholder="Email address" [(ngModel)]="signup.email" name="email" type="email" />
       <input class="auth-input" placeholder="Password" [(ngModel)]="signup.password" name="password" type="password" />
+      <p class="trial-note">After login, you will be redirected to Business setup to activate your 14-day trial.</p>
       <button class="auth-primary" type="submit" [disabled]="submitting">Create account</button>
     </form>
 
@@ -75,11 +76,6 @@
       <input class="auth-input" placeholder="Password" [(ngModel)]="login.password" name="loginPassword" type="password" />
       <button class="auth-primary" type="submit" [disabled]="submitting">Log in</button>
     </form>
-
-    <div *ngIf="authMode === 'mobile'" class="auth-form">
-      <input class="auth-input" placeholder="+20 10 0000 0000" [(ngModel)]="mobile.phone" name="mobilePhone" type="tel" />
-      <button class="auth-primary" type="button" (click)="continueWithMobile()">Get the mobile app</button>
-    </div>
 
     <div class="auth-divider">
       <span>OR</span>
@@ -93,10 +89,6 @@
         <path fill="#FBBC05" d="M24 47.5c5.7 0 10.6-1.9 14.1-5.1l-7-5.4c-2 1.3-4.5 2.1-7.1 2.1-6.6 0-12.3-4-14.1-9.7l-7.3 4.7c3.8 8 12 13.4 21.4 13.4z"/>
       </svg>
       Continue with Google
-    </button>
-
-    <button class="auth-secondary" type="button" (click)="continueWithMobile()">
-      Continue with Mobile
     </button>
 
     <p class="auth-feedback" *ngIf="feedback">{{ feedback }}</p>
@@ -165,7 +157,7 @@
       <h2>Security, governance, and control from day one</h2>
       <p class="muted">
         Plans are built for teams that need audit trails, secure access, and structured workflows.
-        Upgrade to Admin or Business to unlock requests, team management, and advanced reporting.
+        Activate Admin or Business to unlock requests, team management, and advanced reporting.
       </p>
     </div>
     <a routerLink="/pricing" class="btn-primary">Compare Plans</a>

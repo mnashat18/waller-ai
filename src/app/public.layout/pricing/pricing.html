@@ -3,8 +3,11 @@
     <span class="pill">Enterprise Plans</span>
     <h1>Choose the plan that scales with your team.</h1>
     <p>
-      Start free, unlock admin tools, or upgrade to Business for full team orchestration.
+      Every new account starts with a 14-day Business trial, then you can continue on a paid plan.
       Every plan includes secure mobile scans and real-time dashboards.
+    </p>
+    <p class="new-user-offer">
+      New user offer: Business is shown at normal price, then discounted up to -$200 at activation.
     </p>
 
     <div class="billing-toggle">
@@ -22,6 +25,16 @@
         (click)="toggleBilling('yearly')">
         Yearly
         <span class="discount">30% off</span>
+      </button>
+    </div>
+
+    <div class="trial-banner" *ngIf="isBusinessTrial">
+      <div>
+        <p class="trial-title">{{ trialBannerTitle() }}</p>
+        <p class="trial-message">{{ trialBannerMessage() }}</p>
+      </div>
+      <button type="button" class="trial-cta" (click)="upgradeToBusinessNow()">
+        Keep Business Access
       </button>
     </div>
   </div>
@@ -46,6 +59,11 @@
         <span class="cycle">{{ billingLabel(plan) }}</span>
       </div>
 
+      <div class="plan-discount" *ngIf="hasNewUserDiscount(plan)">
+        <p class="discount-line">New user discount: -${{ discountFor(plan) }}</p>
+        <p class="discount-total">Total today: ${{ totalDueToday(plan) }}</p>
+      </div>
+
       <button
         type="button"
         class="plan-cta"
@@ -63,6 +81,10 @@
           {{ feature }}
         </li>
       </ul>
+
+      <p class="plan-flow-note" *ngIf="plan.code.toLowerCase() === 'business' && !isCurrentPlan(plan)">
+        Activation flow: open Payment, fill company/business details, then activate.
+      </p>
     </article>
   </div>
 
@@ -90,7 +112,7 @@
     <div class="comparison">
       <div class="comparison-head">
         <h3>Feature comparison</h3>
-        <p>See exactly what you unlock when you upgrade to Business.</p>
+        <p>See exactly what you unlock when you activate Business.</p>
       </div>
       <div class="comparison-table">
         <div class="comparison-row comparison-header">
@@ -100,13 +122,13 @@
         </div>
         <div class="comparison-row">
           <span>Daily mobile scans</span>
-          <span class="yes">&check;</span>
-          <span class="yes">&check;</span>
+          <span class="yes" aria-label="Included in Free">&check;</span>
+          <span class="yes" aria-label="Included in Business">&check;</span>
         </div>
         <div class="comparison-row">
           <span>Personal scan history</span>
-          <span class="yes">&check;</span>
-          <span class="yes">&check;</span>
+          <span class="yes" aria-label="Included in Free">&check;</span>
+          <span class="yes" aria-label="Included in Business">&check;</span>
         </div>
         <div class="comparison-row">
           <span>Create requests from dashboard</span>
@@ -115,6 +137,26 @@
         </div>
         <div class="comparison-row">
           <span>Invite team by email or phone</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>WhatsApp/SMS invite center</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>CSV/PDF export center (scheduled)</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Automation rules & escalation</span>
+          <span class="no">&times;</span>
+          <span class="yes">&check;</span>
+        </div>
+        <div class="comparison-row">
+          <span>Business billing portal</span>
           <span class="no">&times;</span>
           <span class="yes">&check;</span>
         </div>

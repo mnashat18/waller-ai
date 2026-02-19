@@ -157,12 +157,6 @@ export class AuthService {
           map(() => res)
         )
       ),
-      switchMap((res) =>
-        this.ensureTrialAccess().pipe(
-          map(() => res),
-          catchError(() => of(res))
-        )
-      ),
       catchError((err) => {
         this.storeAuthError(err);
         return throwError(() => err);
@@ -295,6 +289,13 @@ export class AuthService {
       }),
       catchError((err) => {
         sessionStorage.removeItem('is_logged_in');
+        // Invalid/unauthorized token: clear stale auth state so the app
+        // does not keep retrying /users/me on every public-page load.
+        if (err?.status === 401 || err?.status === 403) {
+          this.clearAuthState();
+          return of(null);
+        }
+
         this.storeAuthError(err);
         return of(null);
       })
@@ -381,13 +382,20 @@ export class AuthService {
 
   private async refreshFromCookieInternal(): Promise<string | null> {
     const storedRefreshToken = this.getStoredRefreshToken();
+    const sameOriginApi = this.isSameOriginApi();
     const attempts: Array<Record<string, string>> = [];
 
     if (storedRefreshToken) {
       attempts.push({ mode: 'json', refresh_token: storedRefreshToken });
     }
-    attempts.push({ mode: 'json' });
-    attempts.push({});
+    if (sameOriginApi) {
+      attempts.push({ mode: 'json' });
+      attempts.push({});
+    }
+
+    if (!attempts.length) {
+      return null;
+    }
 
     let lastErr: any = null;
 
@@ -457,6 +465,18 @@ export class AuthService {
       localStorage.setItem('auth_error', String(detail));
     } catch {
       // ignore storage errors
+    }
+  }
+
+  private isSameOriginApi(): boolean {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    try {
+      return new URL(this.api, window.location.origin).origin === window.location.origin;
+    } catch {
+      return false;
     }
   }
 }

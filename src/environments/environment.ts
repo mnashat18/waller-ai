@@ -3,5 +3,7 @@ export const environment = {
   API_URL: 'https://dash.conntinuity.com',
   ADMIN_TOKEN_ENDPOINT: 'http://127.0.0.1:3001/admin-token',
   ADMIN_TOKEN_SECRET: '',
-  AUDIT_LOG_REVIEW_ROLE_IDS: [] as string[]
+  AUDIT_LOG_REVIEW_ROLE_IDS: [] as string[],
+  BUSINESS_ROLE_ID: '',
+  FREE_ROLE_ID: ''
 };

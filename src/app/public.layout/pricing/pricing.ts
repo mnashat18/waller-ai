@@ -16,6 +16,10 @@ export class PricingComponent implements OnInit {
   plans: Plan[] = [];
   loading = true;
   currentSubscription: UserSubscription | null = null;
+  isTrialOfferEligible = false;
+  isBusinessTrial = false;
+  trialDaysRemaining: number | null = null;
+  trialEndsAt: string | null = null;
   feedback = '';
   selectedPlanCode = 'free';
 
@@ -27,10 +31,10 @@ export class PricingComponent implements OnInit {
 
   ngOnInit() {
     this.loadPlans();
-    this.subscriptionService.getActiveSubscription().subscribe((subscription) => {
-      this.currentSubscription = subscription;
-      this.selectedPlanCode = subscription?.plan?.code ?? 'free';
+    this.subscriptionService.ensureBusinessTrial().subscribe((subscription) => {
+      this.setSubscription(subscription);
     });
+    this.loadTrialOfferEligibility();
   }
 
   private loadPlans() {
@@ -68,18 +72,23 @@ export class PricingComponent implements OnInit {
   }
 
   isCurrentPlan(plan: Plan): boolean {
-    const currentCode = this.currentSubscription?.plan?.code;
+    const planCode = this.normalizePlanCode(plan.code);
+    const currentCode = this.normalizePlanCode(this.currentSubscription?.plan?.code ?? '');
     if (!currentCode) {
-      return plan.code === 'free';
+      return planCode === 'free';
     }
-    return currentCode === plan.code;
+    if (this.isBusinessTrial && planCode === 'business' && currentCode === 'business') {
+      return false;
+    }
+    return currentCode === planCode;
   }
 
   selectPlan(plan: Plan) {
     this.feedback = '';
-    this.selectedPlanCode = plan.code;
+    this.selectedPlanCode = this.normalizePlanCode(plan.code);
 
-    if (plan.code === 'free') {
+    const code = this.normalizePlanCode(plan.code);
+    if (code === 'free') {
       return;
     }
 
@@ -88,14 +97,22 @@ export class PricingComponent implements OnInit {
       return;
     }
 
-    this.subscriptionService.activatePlan(plan, this.billingCycle).subscribe({
-      next: () => {
-        this.feedback = 'Plan activated. Refreshing your access...';
-      },
-      error: () => {
-        this.feedback = 'We saved your request. A team member will confirm your upgrade.';
-      }
-    });
+    if (code === 'business') {
+      this.router.navigate(['/payment'], {
+        queryParams: { plan: 'business', cycle: this.billingCycle }
+      });
+      return;
+    }
+  }
+
+  upgradeToBusinessNow() {
+    const businessPlan = this.plans.find(
+      (plan) => this.normalizePlanCode(plan.code) === 'business'
+    );
+    if (!businessPlan) {
+      return;
+    }
+    this.selectPlan(businessPlan);
   }
 
   trackByPlan(_: number, plan: Plan) {
@@ -103,13 +120,92 @@ export class PricingComponent implements OnInit {
   }
 
   ctaLabel(plan: Plan): string {
-    if (plan.code === 'free' && this.isCurrentPlan(plan)) {
+    const code = this.normalizePlanCode(plan.code);
+    if (this.isBusinessTrial && code === 'business') {
+      return 'Keep Business Access';
+    }
+    if (this.hasNewUserDiscount(plan)) {
+      return 'Activate Business (Free Today)';
+    }
+    if (code === 'free' && this.isCurrentPlan(plan)) {
       return 'Your current plan';
     }
     if (this.isCurrentPlan(plan)) {
       return 'Current Plan';
     }
-    return 'Upgrade Plan';
+    return 'Activate Business';
+  }
+
+  trialBannerTitle(): string {
+    if (!this.isBusinessTrial) {
+      return '';
+    }
+    if (typeof this.trialDaysRemaining !== 'number') {
+      return 'Business trial is active';
+    }
+    if (this.trialDaysRemaining <= 1) {
+      return 'Your Business trial ends today';
+    }
+    return `Your Business trial ends in ${this.trialDaysRemaining} days`;
+  }
+
+  trialBannerMessage(): string {
+    if (!this.isBusinessTrial) {
+      return '';
+    }
+    if (!this.trialEndsAt) {
+      return 'Keep requests, team invites, and analytics active by upgrading now.';
+    }
+    return `Keep requests, team invites, and analytics active after ${this.formatDate(this.trialEndsAt)} by upgrading now.`;
+  }
+
+  hasNewUserDiscount(plan: Plan): boolean {
+    const code = this.normalizePlanCode(plan.code);
+    return code === 'business' && this.isTrialOfferEligible && !this.isBusinessTrial;
+  }
+
+  discountFor(plan: Plan): number {
+    if (!this.hasNewUserDiscount(plan)) {
+      return 0;
+    }
+    return this.priceFor(plan);
+  }
+
+  totalDueToday(plan: Plan): number {
+    const total = this.priceFor(plan) - this.discountFor(plan);
+    return total > 0 ? total : 0;
+  }
+
+  private setSubscription(subscription: UserSubscription | null) {
+    this.currentSubscription = subscription;
+    this.selectedPlanCode = this.normalizePlanCode(subscription?.plan?.code ?? 'free');
+    this.isBusinessTrial = Boolean(subscription?.is_trial);
+    this.trialDaysRemaining =
+      typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
+    this.trialEndsAt = subscription?.expires_at ?? null;
+  }
+
+  private loadTrialOfferEligibility() {
+    if (!this.auth.isLoggedIn()) {
+      this.isTrialOfferEligible = true;
+      return;
+    }
+
+    this.subscriptionService.isBusinessTrialEligible().subscribe((eligible) => {
+      this.isTrialOfferEligible = eligible;
+    });
+  }
+
+  private formatDate(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleDateString('en-CA');
+  }
+
+  private normalizePlanCode(code: string): string {
+    return (code ?? '').toLowerCase();
   }
 
   private getDefaultPlans(): Plan[] {
@@ -136,11 +232,15 @@ export class PricingComponent implements OnInit {
         name: 'Business',
         code: 'business',
         description: 'For enterprise teams running daily scans across departments.',
-        monthly_price: 199,
-        yearly_price: 1672,
+        monthly_price: 200,
+        yearly_price: 1680,
         features: [
           'Everything in Free',
           'Bulk invites by email or phone',
+          'WhatsApp/SMS invite center',
+          'CSV/PDF export center with scheduling',
+          'Automation rules and escalation flows',
+          'Business billing portal and renewal requests',
           'WhatsApp onboarding messages',
           'Organization-level dashboards',
           'Advanced analytics and trends',

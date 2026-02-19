@@ -1,0 +1,124 @@
+<section class="upgrade-shell">
+  <div class="upgrade-header">
+    <span class="pill">Payment</span>
+    <h1>Business Payment Activation</h1>
+    <p>
+      Fill in your business details to activate Business access. New users get a 14-day Business trial,
+      and paid features are locked after the trial ends unless payment is completed.
+    </p>
+  </div>
+
+  <div class="upgrade-grid">
+    <article class="upgrade-card">
+      <h2>Business details</h2>
+
+      <div class="field-grid">
+        <label class="field">
+          <span>Your name *</span>
+          <input [(ngModel)]="form.ownerName" placeholder="Example: Ahmed Ali" />
+        </label>
+
+        <label class="field">
+          <span>Company name *</span>
+          <input [(ngModel)]="form.companyName" placeholder="Example: Delta Logistics" />
+        </label>
+
+        <label class="field">
+          <span>Business name *</span>
+          <input [(ngModel)]="form.businessName" placeholder="Example: Delta Fleet Wellness" />
+        </label>
+
+        <label class="field">
+          <span>Work email *</span>
+          <input [(ngModel)]="form.workEmail" type="email" placeholder="name@company.com" />
+        </label>
+
+        <label class="field">
+          <span>Phone number *</span>
+          <input [(ngModel)]="form.phone" placeholder="+201234567890" />
+          <small>Required. This number is saved to your account profile.</small>
+        </label>
+
+        <label class="field">
+          <span>Industry</span>
+          <input [(ngModel)]="form.industry" placeholder="Transport / Factory / Clinic ..." />
+        </label>
+
+        <label class="field">
+          <span>Team size</span>
+          <input [(ngModel)]="form.teamSize" placeholder="Example: 120" />
+        </label>
+
+        <label class="field">
+          <span>Country</span>
+          <input [(ngModel)]="form.country" placeholder="Egypt" />
+        </label>
+
+        <label class="field">
+          <span>City</span>
+          <input [(ngModel)]="form.city" placeholder="Cairo" />
+        </label>
+
+        <label class="field">
+          <span>Address</span>
+          <input [(ngModel)]="form.address" placeholder="Company HQ address" />
+        </label>
+
+        <label class="field">
+          <span>Website</span>
+          <input [(ngModel)]="form.website" placeholder="https://example.com" />
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Additional notes</span>
+        <textarea [(ngModel)]="form.notes" rows="4" placeholder="Any additional operational details..."></textarea>
+      </label>
+
+      <label class="accept-line">
+        <input type="checkbox" [(ngModel)]="form.acceptTerms" />
+        <span>I agree to submit these business details for account setup and required backend collections.</span>
+      </label>
+
+      <div class="actions">
+        <button
+          type="button"
+          class="primary-btn"
+          [disabled]="submitting || loading"
+          (click)="submitUpgradeRequest()">
+          {{ submitting ? 'Submitting...' : 'Continue To Payment' }}
+        </button>
+        <a routerLink="/pricing" class="ghost-btn">Back to Pricing</a>
+      </div>
+
+      <p *ngIf="feedback" class="feedback" [ngClass]="feedbackType">{{ feedback }}</p>
+      <p *ngIf="requestId" class="request-id">Request ID: {{ requestId }}</p>
+    </article>
+
+    <article class="summary-card">
+      <h3>Pricing summary</h3>
+
+      <div class="summary-row">
+        <span>Business price</span>
+        <strong>${{ basePriceUsd }}</strong>
+      </div>
+
+      <div class="summary-row discount" *ngIf="isTrialEligible">
+        <span>New user offer</span>
+        <strong>-${{ discountUsd }}</strong>
+      </div>
+
+      <div class="summary-row total">
+        <span>Total today</span>
+        <strong>${{ totalTodayUsd }}</strong>
+      </div>
+
+      <p class="summary-note" *ngIf="isTrialEligible">
+        New user offer: Business access is free today with a 14-day trial window.
+      </p>
+      <p class="summary-note" *ngIf="!isTrialEligible">
+        New user offer already used. Your payment request will be reviewed for paid activation.
+      </p>
+    </article>
+  </div>
+</section>

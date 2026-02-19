@@ -24,8 +24,8 @@
       <span class="hero-orb"></span>
       <span class="hero-orb gold"></span>
       <span class="hero-orb indigo"></span>
-      <span class="sparkle" style="top: 18px; left: 34px;"></span>
-      <span class="sparkle gold" style="bottom: 20px; right: 34px;"></span>
+      <span class="sparkle sparkle-top-left"></span>
+      <span class="sparkle gold sparkle-bottom-right"></span>
       <svg viewBox="0 0 220 160" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="28" y="24" width="164" height="112" rx="18" stroke="rgba(125,211,252,0.6)" stroke-width="2"/>
         <circle class="pulse-dot" cx="110" cy="70" r="24" stroke="#7dd3fc" stroke-width="3"/>
@@ -40,9 +40,10 @@
   </div>
 
   <div *ngIf="loading" class="profile-grid">
-    <div class="panel skeleton-card"></div>
-    <div class="panel skeleton-card"></div>
-    <div class="panel skeleton-card"></div>
+    <div
+      class="panel skeleton-card"
+      *ngFor="let panel of profileSkeletonPanels; trackBy: trackByIndex">
+    </div>
   </div>
 
   <div *ngIf="!loading && errorMessage" class="panel">
@@ -60,24 +61,25 @@
 
     <div class="profile-form">
       <div class="profile-field">
-        <label>First Name</label>
-        <input class="profile-input" name="firstName" [(ngModel)]="form.firstName" />
+        <label for="profile-first-name">First Name</label>
+        <input id="profile-first-name" class="profile-input" name="firstName" [(ngModel)]="form.firstName" />
       </div>
       <div class="profile-field">
-        <label>Last Name</label>
-        <input class="profile-input" name="lastName" [(ngModel)]="form.lastName" />
+        <label for="profile-last-name">Last Name</label>
+        <input id="profile-last-name" class="profile-input" name="lastName" [(ngModel)]="form.lastName" />
       </div>
       <div class="profile-field">
-        <label>Title (locked)</label>
-        <input class="profile-input" [value]="profile.title" disabled />
+        <label for="profile-title">Title (locked)</label>
+        <input id="profile-title" class="profile-input" [value]="profile.title" disabled />
       </div>
       <div class="profile-field">
-        <label>Email (locked)</label>
-        <input class="profile-input" [value]="profile.email" disabled />
+        <label for="profile-email">Email (locked)</label>
+        <input id="profile-email" class="profile-input" [value]="profile.email" disabled />
       </div>
       <div class="profile-field">
-        <label>New Password</label>
+        <label for="profile-password">New Password</label>
         <input
+          id="profile-password"
           class="profile-input"
           type="password"
           name="password"
@@ -85,8 +87,8 @@
           [(ngModel)]="form.password" />
       </div>
       <div class="profile-field">
-        <label>Profile Photo</label>
-        <input class="profile-input" type="file" (change)="onAvatarSelected($event)" />
+        <label for="profile-photo">Profile Photo</label>
+        <input id="profile-photo" class="profile-input" type="file" (change)="onAvatarSelected($event)" />
       </div>
     </div>
 

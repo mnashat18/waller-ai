@@ -51,6 +51,12 @@
   line-height: 1.6;
 }
 
+.new-user-offer {
+  margin-top: 10px;
+  color: #86efac;
+  font-size: 0.9rem;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -73,6 +79,40 @@
   border-radius: 999px;
   padding: 6px;
   border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.trial-banner {
+  margin-top: 22px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(245, 196, 81, 0.5);
+  background: linear-gradient(135deg, rgba(245, 196, 81, 0.2), rgba(15, 23, 42, 0.6));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.trial-title {
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.trial-message {
+  color: rgba(226, 232, 240, 0.78);
+  margin-top: 4px;
+  font-size: 0.88rem;
+}
+
+.trial-cta {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  background: #f5c451;
+  color: #1f2937;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .toggle-btn {
@@ -168,6 +208,25 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+
+.plan-discount {
+  margin-top: -4px;
+  border: 1px dashed rgba(134, 239, 172, 0.45);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.discount-line {
+  color: #86efac;
+  font-size: 0.85rem;
+}
+
+.discount-total {
+  margin-top: 4px;
+  color: #f8fafc;
+  font-size: 0.86rem;
 }
 
 .amount {
@@ -277,6 +336,13 @@
   height: 6px;
   border-radius: 50%;
   background: #f5c451;
+}
+
+.plan-flow-note {
+  margin-top: -4px;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .plan-details {
@@ -430,6 +496,11 @@
   }
 
   .pricing-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .trial-banner {
     flex-direction: column;
     align-items: flex-start;
   }

@@ -15,6 +15,12 @@
         <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Request Center</p>
         <h1 class="text-2xl font-semibold mt-2">Requests</h1>
         <p class="text-xs text-slate-400 mt-1">Plan: {{ currentPlanName }}</p>
+        <a
+          *ngIf="isBusinessTrial"
+          routerLink="/pricing"
+          class="inline-flex mt-2 text-[11px] text-amber-300 underline decoration-dotted underline-offset-4">
+          {{ trialDaysLabel() }}
+        </a>
       </div>
       <div class="flex items-center gap-3">
         <app-notifications></app-notifications>
@@ -30,20 +36,24 @@
     </div>
 
     <div class="mt-5 flex gap-3">
-      <button
+      <a
         *ngIf="canCreateRequests"
-        class="flex-1 bg-[#f5c451] text-slate-900 py-3 rounded-2xl font-semibold shadow-lg"
-        (click)="openCreateModal()">
+        routerLink="/requests/create"
+        class="flex-1 bg-[#f5c451] text-slate-900 py-3 rounded-2xl font-semibold shadow-lg text-center">
         Create Request
-      </button>
+      </a>
       <a
         *ngIf="!canCreateRequests"
-        routerLink="/pricing"
+        routerLink="/payment"
         class="flex-1 bg-white/10 text-white py-3 rounded-2xl text-center">
-        Upgrade Plan
+        Open Billing
       </a>
     </div>
-
+    <a
+      routerLink="/business-center"
+      class="mt-3 w-full inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 transition text-white py-3 rounded-2xl border border-white/15">
+      <span class="text-sm font-semibold">Open Business Center</span>
+    </a>
     <div class="grid grid-cols-2 gap-3 mt-6">
       <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
         <p class="text-xs text-slate-400">Total</p>
@@ -99,18 +109,20 @@
     [feedback]="submitFeedback"
     [submitting]="submittingRequest"
     [requestedByDefault]="requestedByDefault"
+    [businessTrialNotice]="businessTrialNotice"
+    [businessInviteTrialNotice]="businessInviteTrialNotice"
     (submitRequest)="handleCreateRequest($event)"
     (close)="showCreateModal = false">
   </app-create-request-modal>
 
   <div
     *ngIf="showPermissionNotice"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-6">
+    class="fixed inset-0 z-[1250] flex items-center justify-center bg-slate-950/40 px-6">
     <div class="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
       <div class="flex items-start justify-between">
         <div>
           <p class="text-xs uppercase tracking-wide text-slate-400">Permission Required</p>
-          <h2 class="mt-2 text-xl font-semibold text-slate-100">لازم تترقى لباقة Business</h2>
+          <h2 class="mt-2 text-xl font-semibold text-slate-100">Business Paid Feature</h2>
         </div>
         <button
           class="text-slate-400 hover:text-slate-200"
@@ -119,21 +131,22 @@
         </button>
       </div>
       <p class="mt-3 text-sm text-slate-400">
-        ميزة إنشاء الطلبات متاحة لخطط Business فقط. اضغط على Upgrade لاختيار الخطة المناسبة.
+        Creating requests is part of Business paid features.
+        If your account is new, your first 14 days are unlocked for free, then paid features are locked.
       </p>
       <div class="mt-6 flex justify-end gap-3">
-        <a routerLink="/pricing" class="bg-[#f5c451] text-slate-900 px-4 py-2 rounded-full">Upgrade</a>
+        <a routerLink="/payment" class="bg-[#f5c451] text-slate-900 px-4 py-2 rounded-full">Open Billing</a>
         <button
           class="px-4 py-2 rounded-full border border-slate-700 text-slate-300"
           (click)="dismissPermissionNotice()">
-          فهمت
+          Got it
         </button>
       </div>
     </div>
   </div>
 
   <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
-    <div class="grid grid-cols-5 text-[10px] text-slate-400">
+    <div class="grid grid-cols-6 text-[10px] text-slate-400">
       <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M9 12h6"></path>
@@ -143,8 +156,7 @@
         <span>Audit logs</span>
       </a>
       <a
-        routerLink="/requests"
-        [queryParams]="{ create: 1 }"
+        routerLink="/requests/create"
         class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M12 5v14"></path>
@@ -168,6 +180,15 @@
           <path d="M4 17h16"></path>
         </svg>
         <span>Requests</span>
+      </a>
+      <a routerLink="/business-center" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 20V8l8-4 8 4v12"></path>
+          <path d="M8 20v-5h8v5"></path>
+          <path d="M9 10h.01"></path>
+          <path d="M15 10h.01"></path>
+        </svg>
+        <span>Business</span>
       </a>
       <a routerLink="/history" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">

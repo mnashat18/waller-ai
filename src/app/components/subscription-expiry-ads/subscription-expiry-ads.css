@@ -1,0 +1,131 @@
+.expiry-ad-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1280;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(2, 6, 23, 0.56);
+  backdrop-filter: blur(6px);
+}
+
+.expiry-ad-card {
+  width: min(520px, 100%);
+  border-radius: 22px;
+  border: 1px solid rgba(245, 196, 81, 0.44);
+  background:
+    radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.18), transparent 55%),
+    radial-gradient(circle at 100% 0%, rgba(245, 196, 81, 0.2), transparent 40%),
+    linear-gradient(140deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.97));
+  box-shadow: 0 30px 70px rgba(2, 6, 23, 0.55);
+  color: #e2e8f0;
+  padding: 18px;
+}
+
+.ad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ad-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(245, 196, 81, 0.52);
+  background: rgba(245, 196, 81, 0.13);
+  color: #fde68a;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  padding: 5px 10px;
+}
+
+.icon-btn {
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.expiry-ad-card h3 {
+  margin: 10px 0 6px;
+  font-size: 24px;
+  line-height: 1.2;
+  color: #f8fafc;
+}
+
+.expiry-ad-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.ad-points {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.ad-points span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.ad-points span::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(130deg, #f5c451, #38bdf8);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
+}
+
+.ad-actions {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.pay-btn,
+.dismiss-btn {
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pay-btn {
+  border: 0;
+  background: linear-gradient(130deg, #f5c451, #f59e0b);
+  color: #0f172a;
+}
+
+.dismiss-btn {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: transparent;
+  color: #e2e8f0;
+}
+
+@media (max-width: 640px) {
+  .expiry-ad-card {
+    padding: 16px;
+  }
+
+  .expiry-ad-card h3 {
+    font-size: 20px;
+  }
+}

@@ -1,9 +1,9 @@
 <!-- Skeleton Stats -->
 <div class="kpi-grid" *ngIf="loading">
-  <div class="skeleton-card"></div>
-  <div class="skeleton-card"></div>
-  <div class="skeleton-card"></div>
-  <div class="skeleton-card"></div>
+  <div
+    class="skeleton-card"
+    *ngFor="let card of skeletonCards; trackBy: trackByIndex">
+  </div>
 </div>
 
 <div class="page-shell fade-in" *ngIf="!loading">
@@ -24,6 +24,8 @@
         Start New Scan
       </button>
       <a routerLink="/history" class="chip">View History</a>
+      <a routerLink="/business-center" class="chip">Business Center</a>
+      <a *ngIf="!hasBusinessAccess" routerLink="/payment" class="chip">Billing</a>
     </div>
 
     <div class="hero-visual">

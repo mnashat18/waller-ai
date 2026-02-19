@@ -1,22 +1,21 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import {
+import type {
   CreateRequestForm,
-  CreateRequestModalComponent,
   SubmitFeedback
 } from '../../components/create-request-modal/create-request-modal';
 import { AdminTokenService } from '../../services/admin-token';
 import { Organization, OrganizationService } from '../../services/organization.service';
-import { SubscriptionService } from '../../services/subscription.service';
+import { SubscriptionService, UserSubscription } from '../../services/subscription.service';
 import { environment } from 'src/environments/environment';
 
 @Component({
   selector: 'app-requests',
-  imports: [CommonModule, RouterModule, CreateRequestModalComponent],
+  imports: [CommonModule, RouterModule],
   templateUrl: './requests.html',
   styleUrl: './requests.css',
 })
@@ -30,6 +29,11 @@ export class Requests implements OnInit {
   canCreateRequests = false;
   currentPlanName = 'Free';
   currentPlanCode = 'free';
+  currentSubscription: UserSubscription | null = null;
+  isBusinessTrial = false;
+  trialDaysRemaining: number | null = null;
+  businessTrialNotice = '';
+  businessInviteTrialNotice = '';
   org: Organization | null = null;
   requestedByDefault = '';
   pendingCreateModal = false;
@@ -44,6 +48,7 @@ export class Requests implements OnInit {
     private http: HttpClient,
     private adminTokens: AdminTokenService,
     private route: ActivatedRoute,
+    private router: Router,
     private subscriptionService: SubscriptionService,
     private organizationService: OrganizationService,
     private cdr: ChangeDetectorRef
@@ -76,9 +81,7 @@ export class Requests implements OnInit {
 
   handleCreateRequest(form: CreateRequestForm) {
     if (!this.canCreateRequests) {
-      this.submitFeedback = { type: 'error', message: 'Upgrade to Admin or Business to send requests.' };
-      this.showPermissionNotice = true;
-      this.cdr.detectChanges();
+      this.router.navigate(['/payment']);
       return;
     }
 
@@ -86,6 +89,7 @@ export class Requests implements OnInit {
     const requestedFor = form.requestedFor.trim();
     const requiredState = form.requiredState.trim();
     const notes = form.notes.trim();
+    const inviteChannel = this.normalizeInviteChannel(form.inviteChannel);
 
     if (!requestedBy) {
       this.submitFeedback = { type: 'error', message: 'Requested by is required.' };
@@ -113,7 +117,10 @@ export class Requests implements OnInit {
     const canInvite = this.currentPlanCode === 'business' || this.isAdminUser;
 
     if ((contact.email || contact.phone) && !canInvite) {
-      this.submitFeedback = { type: 'error', message: 'Business plan required to invite by email or phone.' };
+      this.submitFeedback = {
+        type: 'error',
+        message: 'Email/phone invites are paid Business features. Open Billing to activate Business.'
+      };
       this.submittingRequest = false;
       this.cdr.detectChanges();
       return;
@@ -134,17 +141,41 @@ export class Requests implements OnInit {
             this.submitRequestPayload(requestedBy, { userId: resolvedUserId }, requiredState, notes, token);
             return;
           }
-          this.submitRequestPayload(requestedBy, contact, requiredState, notes, token, true);
+          this.submitRequestPayload(
+            requestedBy,
+            contact,
+            requiredState,
+            notes,
+            token,
+            true,
+            inviteChannel
+          );
         },
         error: (err) => {
           console.error('[requests] resolve user error:', err);
-          this.submitRequestPayload(requestedBy, contact, requiredState, notes, token, true);
+          this.submitRequestPayload(
+            requestedBy,
+            contact,
+            requiredState,
+            notes,
+            token,
+            true,
+            inviteChannel
+          );
         }
       });
       return;
     }
 
-    this.submitRequestPayload(requestedBy, contact, requiredState, notes, token, Boolean(contact.phone));
+    this.submitRequestPayload(
+      requestedBy,
+      contact,
+      requiredState,
+      notes,
+      token,
+      Boolean(contact.phone),
+      inviteChannel
+    );
   }
 
   private loadRequests() {
@@ -369,7 +400,7 @@ export class Requests implements OnInit {
   }
 
   private checkAdminAccess(): boolean {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
     if (!token) {
       return false;
     }
@@ -407,7 +438,7 @@ export class Requests implements OnInit {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -438,11 +469,35 @@ export class Requests implements OnInit {
     this.cdr.detectChanges();
   }
 
+  trialDaysLabel(): string {
+    if (!this.isBusinessTrial) {
+      return '';
+    }
+    if (typeof this.trialDaysRemaining !== 'number') {
+      return 'Paid Business features are currently unlocked for your trial.';
+    }
+    if (this.trialDaysRemaining <= 1) {
+      return 'Paid Business features are free today only (last trial day).';
+    }
+    return `Paid Business features are free for now - ${this.trialDaysRemaining} day(s) left.`;
+  }
+
+  businessPaidFeatureNotice(featureLabel: string): string {
+    if (!this.isBusinessTrial) {
+      return '';
+    }
+    if (typeof this.trialDaysRemaining !== 'number') {
+      return `${featureLabel} is a paid Business feature, currently unlocked in your trial.`;
+    }
+    if (this.trialDaysRemaining <= 1) {
+      return `${featureLabel} is a paid Business feature, free for today only.`;
+    }
+    return `${featureLabel} is a paid Business feature, free for ${this.trialDaysRemaining} day(s) left.`;
+  }
+
   openCreateModal() {
     if (!this.canCreateRequests) {
-      this.submitFeedback = { type: 'error', message: 'Upgrade to Admin or Business to send requests.' };
-      this.showPermissionNotice = true;
-      this.cdr.detectChanges();
+      this.router.navigate(['/payment']);
       return;
     }
 
@@ -452,9 +507,15 @@ export class Requests implements OnInit {
   }
 
   private loadPlanAccess() {
-    this.subscriptionService.getActiveSubscription().subscribe((subscription) => {
+    this.subscriptionService.ensureBusinessTrial().subscribe((subscription) => {
+      this.currentSubscription = subscription;
       this.currentPlanName = subscription?.plan?.name ?? 'Free';
       this.currentPlanCode = subscription?.plan?.code ?? 'free';
+      this.isBusinessTrial = Boolean(subscription?.is_trial);
+      this.trialDaysRemaining =
+        typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
+      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
       this.canCreateRequests = ['admin', 'business'].includes(this.currentPlanCode) || this.isAdminUser;
       if (!this.requestedByDefault) {
         this.requestedByDefault = this.currentPlanName;
@@ -480,7 +541,8 @@ export class Requests implements OnInit {
     requiredState: string,
     notes: string,
     token: string | null,
-    createInvite = false
+    createInvite = false,
+    inviteChannel: InviteChannel = 'auto'
   ) {
     const payload: CreateRequestPayload = {
       Target: requestedBy,
@@ -501,7 +563,7 @@ export class Requests implements OnInit {
       next: (res) => {
         console.info('[requests] request created');
         if (createInvite && res?.data?.id) {
-          this.createInvite(res.data.id, contact, token);
+          this.createInvite(res.data.id, contact, token, inviteChannel);
         }
         this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
         this.submittingRequest = false;
@@ -535,17 +597,20 @@ export class Requests implements OnInit {
   private createInvite(
     requestId: string | number,
     contact: { email?: string; phone?: string },
-    token: string | null
+    token: string | null,
+    inviteChannel: InviteChannel
   ) {
     const inviteToken = this.buildInviteToken();
     const now = new Date();
     const expiresAt = new Date(now);
     expiresAt.setDate(expiresAt.getDate() + 7);
 
+    const channel = this.resolveInviteChannel(contact, inviteChannel);
     const payload = {
       request: requestId,
       email: contact.email ?? undefined,
       phone: contact.phone ?? undefined,
+      channel,
       token: inviteToken,
       status: 'Sent',
       sent_at: now.toISOString(),
@@ -566,6 +631,37 @@ export class Requests implements OnInit {
     const random = Math.random().toString(36).slice(2, 12);
     const time = Date.now().toString(36);
     return `${time}${random}`.slice(0, 20);
+  }
+
+  private normalizeInviteChannel(value: string): InviteChannel {
+    const normalized = (value ?? '').toLowerCase();
+    if (normalized === 'email' || normalized === 'whatsapp' || normalized === 'sms') {
+      return normalized;
+    }
+    return 'auto';
+  }
+
+  private resolveInviteChannel(
+    contact: { email?: string; phone?: string },
+    inviteChannel: InviteChannel
+  ): 'email' | 'whatsapp' | 'sms' {
+    if (inviteChannel === 'email' && contact.email) {
+      return 'email';
+    }
+    if (inviteChannel === 'whatsapp' && contact.phone) {
+      return 'whatsapp';
+    }
+    if (inviteChannel === 'sms' && contact.phone) {
+      return 'sms';
+    }
+
+    if (contact.email) {
+      return 'email';
+    }
+    if (contact.phone) {
+      return inviteChannel === 'sms' ? 'sms' : 'whatsapp';
+    }
+    return 'email';
   }
 
   private formatRequestTarget(request: RequestRecord): string {
@@ -598,9 +694,7 @@ export class Requests implements OnInit {
     const createParam = this.route.snapshot.queryParamMap.get('create');
     if (createParam === '1' || createParam === 'true') {
       this.pendingCreateModal = true;
-      if (this.canCreateRequests) {
-        this.openCreateModal();
-      }
+      this.openCreateModal();
     }
   }
 
@@ -642,3 +736,7 @@ type CreateRequestPayload = {
   response_payload?: unknown;
   timestamp: string;
 };
+
+type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';
+
+

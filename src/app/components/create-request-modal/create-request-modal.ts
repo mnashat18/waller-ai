@@ -13,18 +13,22 @@ export class CreateRequestModalComponent {
   @Input() feedback: SubmitFeedback | null = null;
   @Input() submitting = false;
   @Input() requestedByDefault = '';
+  @Input() businessTrialNotice = '';
+  @Input() businessInviteTrialNotice = '';
 
   onSubmit(
     requestedBy: string,
     requestedFor: string,
     requiredState: string,
-    notes: string
+    notes: string,
+    inviteChannel: string
   ): void {
     this.submitRequest.emit({
       requestedBy,
       requestedFor,
       requiredState,
-      notes
+      notes,
+      inviteChannel
     });
   }
 }
@@ -34,6 +38,7 @@ export type CreateRequestForm = {
   requestedFor: string;
   requiredState: string;
   notes: string;
+  inviteChannel: string;
 };
 
 export type SubmitFeedback = {

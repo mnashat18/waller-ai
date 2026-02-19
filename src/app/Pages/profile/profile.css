@@ -52,6 +52,16 @@
   flex-wrap: wrap;
 }
 
+.sparkle-top-left {
+  top: 18px;
+  left: 34px;
+}
+
+.sparkle-bottom-right {
+  bottom: 20px;
+  right: 34px;
+}
+
 .profile-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

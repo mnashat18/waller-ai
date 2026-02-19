@@ -14,7 +14,7 @@ export class VerifyEmailComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    // مجرد صفحة انتظار / UX
+    // Simple waiting UX page
     setTimeout(() => {
       this.router.navigate(['/login']);
     }, 3000);

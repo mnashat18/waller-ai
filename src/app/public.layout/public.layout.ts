@@ -14,7 +14,8 @@ export class PublicLayout implements AfterViewInit {
 
   ngAfterViewInit() {
     this.startSnow();
-    this.updateScrollTop();
+    // Defer first check to the next tick to avoid NG0100 during first render cycle.
+    setTimeout(() => this.updateScrollTop(), 0);
   }
 
   @HostListener('window:scroll')

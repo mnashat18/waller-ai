@@ -1,0 +1,959 @@
+import { CommonModule } from '@angular/common';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { Component, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { Router, RouterModule } from '@angular/router';
+import { Observable, from, of, throwError } from 'rxjs';
+import { catchError, concatMap, map, switchMap, toArray } from 'rxjs/operators';
+import { Organization, OrganizationService } from '../../services/organization.service';
+import { SubscriptionService, UserSubscription } from '../../services/subscription.service';
+import { AdminTokenService } from '../../services/admin-token';
+import { environment } from 'src/environments/environment';
+
+type Feedback = {
+  type: 'success' | 'error' | 'info';
+  message: string;
+};
+
+type RecipientKind = 'email' | 'phone';
+
+type RequestRecipient = {
+  id: string;
+  kind: RecipientKind;
+  value: string;
+  display: string;
+};
+
+type PhoneCountry = {
+  name: string;
+  dial: string;
+};
+
+@Component({
+  selector: 'app-create-request',
+  standalone: true,
+  imports: [CommonModule, FormsModule, RouterModule],
+  templateUrl: './create-request.html',
+  styleUrl: './create-request.css'
+})
+export class CreateRequestComponent implements OnInit {
+  isAdminUser = false;
+  canCreateRequests = false;
+  currentPlanName = 'Free';
+  currentPlanCode = 'free';
+  currentSubscription: UserSubscription | null = null;
+  isBusinessTrial = false;
+  trialDaysRemaining: number | null = null;
+  businessTrialNotice = '';
+  businessInviteTrialNotice = '';
+  org: Organization | null = null;
+  requestedByDefault = '';
+  submittingRequest = false;
+  submitFeedback: Feedback | null = null;
+  recipientMode: RecipientKind = 'email';
+  recipientInput = '';
+  selectedCountryCode = '+20';
+  recipientError = '';
+  recipients: RequestRecipient[] = [];
+  private lastSubmitError = '';
+  readonly phoneCountries: PhoneCountry[] = [
+    { name: 'Afghanistan', dial: '+93' },
+    { name: 'Albania', dial: '+355' },
+    { name: 'Algeria', dial: '+213' },
+    { name: 'Andorra', dial: '+376' },
+    { name: 'Angola', dial: '+244' },
+    { name: 'Antigua and Barbuda', dial: '+1' },
+    { name: 'Argentina', dial: '+54' },
+    { name: 'Armenia', dial: '+374' },
+    { name: 'Aruba', dial: '+297' },
+    { name: 'Australia', dial: '+61' },
+    { name: 'Austria', dial: '+43' },
+    { name: 'Azerbaijan', dial: '+994' },
+    { name: 'Bahamas', dial: '+1' },
+    { name: 'Bahrain', dial: '+973' },
+    { name: 'Bangladesh', dial: '+880' },
+    { name: 'Barbados', dial: '+1' },
+    { name: 'Belarus', dial: '+375' },
+    { name: 'Belgium', dial: '+32' },
+    { name: 'Belize', dial: '+501' },
+    { name: 'Benin', dial: '+229' },
+    { name: 'Bermuda', dial: '+1' },
+    { name: 'Bhutan', dial: '+975' },
+    { name: 'Bolivia', dial: '+591' },
+    { name: 'Bosnia and Herzegovina', dial: '+387' },
+    { name: 'Botswana', dial: '+267' },
+    { name: 'Brazil', dial: '+55' },
+    { name: 'Brunei', dial: '+673' },
+    { name: 'Bulgaria', dial: '+359' },
+    { name: 'Burkina Faso', dial: '+226' },
+    { name: 'Burundi', dial: '+257' },
+    { name: 'Cambodia', dial: '+855' },
+    { name: 'Cameroon', dial: '+237' },
+    { name: 'Canada', dial: '+1' },
+    { name: 'Cape Verde', dial: '+238' },
+    { name: 'Cayman Islands', dial: '+1' },
+    { name: 'Central African Republic', dial: '+236' },
+    { name: 'Chad', dial: '+235' },
+    { name: 'Chile', dial: '+56' },
+    { name: 'China', dial: '+86' },
+    { name: 'Colombia', dial: '+57' },
+    { name: 'Comoros', dial: '+269' },
+    { name: 'Congo (Brazzaville)', dial: '+242' },
+    { name: 'Congo (Kinshasa)', dial: '+243' },
+    { name: 'Costa Rica', dial: '+506' },
+    { name: 'Croatia', dial: '+385' },
+    { name: 'Cuba', dial: '+53' },
+    { name: 'Cyprus', dial: '+357' },
+    { name: 'Czech Republic', dial: '+420' },
+    { name: 'Denmark', dial: '+45' },
+    { name: 'Djibouti', dial: '+253' },
+    { name: 'Dominica', dial: '+1' },
+    { name: 'Dominican Republic', dial: '+1' },
+    { name: 'Ecuador', dial: '+593' },
+    { name: 'Egypt', dial: '+20' },
+    { name: 'El Salvador', dial: '+503' },
+    { name: 'Equatorial Guinea', dial: '+240' },
+    { name: 'Eritrea', dial: '+291' },
+    { name: 'Estonia', dial: '+372' },
+    { name: 'Eswatini', dial: '+268' },
+    { name: 'Ethiopia', dial: '+251' },
+    { name: 'Fiji', dial: '+679' },
+    { name: 'Finland', dial: '+358' },
+    { name: 'France', dial: '+33' },
+    { name: 'French Guiana', dial: '+594' },
+    { name: 'French Polynesia', dial: '+689' },
+    { name: 'Gabon', dial: '+241' },
+    { name: 'Gambia', dial: '+220' },
+    { name: 'Georgia', dial: '+995' },
+    { name: 'Germany', dial: '+49' },
+    { name: 'Ghana', dial: '+233' },
+    { name: 'Gibraltar', dial: '+350' },
+    { name: 'Greece', dial: '+30' },
+    { name: 'Greenland', dial: '+299' },
+    { name: 'Grenada', dial: '+1' },
+    { name: 'Guadeloupe', dial: '+590' },
+    { name: 'Guam', dial: '+1' },
+    { name: 'Guatemala', dial: '+502' },
+    { name: 'Guernsey', dial: '+44' },
+    { name: 'Guinea', dial: '+224' },
+    { name: 'Guinea-Bissau', dial: '+245' },
+    { name: 'Guyana', dial: '+592' },
+    { name: 'Haiti', dial: '+509' },
+    { name: 'Honduras', dial: '+504' },
+    { name: 'Hong Kong', dial: '+852' },
+    { name: 'Hungary', dial: '+36' },
+    { name: 'Iceland', dial: '+354' },
+    { name: 'India', dial: '+91' },
+    { name: 'Indonesia', dial: '+62' },
+    { name: 'Iran', dial: '+98' },
+    { name: 'Iraq', dial: '+964' },
+    { name: 'Ireland', dial: '+353' },
+    { name: 'Isle of Man', dial: '+44' },
+    { name: 'Israel', dial: '+972' },
+    { name: 'Italy', dial: '+39' },
+    { name: 'Ivory Coast', dial: '+225' },
+    { name: 'Jamaica', dial: '+1' },
+    { name: 'Japan', dial: '+81' },
+    { name: 'Jersey', dial: '+44' },
+    { name: 'Jordan', dial: '+962' },
+    { name: 'Kazakhstan', dial: '+7' },
+    { name: 'Kenya', dial: '+254' },
+    { name: 'Kiribati', dial: '+686' },
+    { name: 'Korea, North', dial: '+850' },
+    { name: 'Korea, South', dial: '+82' },
+    { name: 'Kuwait', dial: '+965' },
+    { name: 'Kyrgyzstan', dial: '+996' },
+    { name: 'Laos', dial: '+856' },
+    { name: 'Latvia', dial: '+371' },
+    { name: 'Lebanon', dial: '+961' },
+    { name: 'Lesotho', dial: '+266' },
+    { name: 'Liberia', dial: '+231' },
+    { name: 'Libya', dial: '+218' },
+    { name: 'Liechtenstein', dial: '+423' },
+    { name: 'Lithuania', dial: '+370' },
+    { name: 'Luxembourg', dial: '+352' },
+    { name: 'Macao', dial: '+853' },
+    { name: 'Madagascar', dial: '+261' },
+    { name: 'Malawi', dial: '+265' },
+    { name: 'Malaysia', dial: '+60' },
+    { name: 'Maldives', dial: '+960' },
+    { name: 'Mali', dial: '+223' },
+    { name: 'Malta', dial: '+356' },
+    { name: 'Marshall Islands', dial: '+692' },
+    { name: 'Martinique', dial: '+596' },
+    { name: 'Mauritania', dial: '+222' },
+    { name: 'Mauritius', dial: '+230' },
+    { name: 'Mayotte', dial: '+262' },
+    { name: 'Mexico', dial: '+52' },
+    { name: 'Micronesia', dial: '+691' },
+    { name: 'Moldova', dial: '+373' },
+    { name: 'Monaco', dial: '+377' },
+    { name: 'Mongolia', dial: '+976' },
+    { name: 'Montenegro', dial: '+382' },
+    { name: 'Morocco', dial: '+212' },
+    { name: 'Mozambique', dial: '+258' },
+    { name: 'Myanmar', dial: '+95' },
+    { name: 'Namibia', dial: '+264' },
+    { name: 'Nauru', dial: '+674' },
+    { name: 'Nepal', dial: '+977' },
+    { name: 'Netherlands', dial: '+31' },
+    { name: 'New Caledonia', dial: '+687' },
+    { name: 'New Zealand', dial: '+64' },
+    { name: 'Nicaragua', dial: '+505' },
+    { name: 'Niger', dial: '+227' },
+    { name: 'Nigeria', dial: '+234' },
+    { name: 'North Macedonia', dial: '+389' },
+    { name: 'Norway', dial: '+47' },
+    { name: 'Oman', dial: '+968' },
+    { name: 'Pakistan', dial: '+92' },
+    { name: 'Palau', dial: '+680' },
+    { name: 'Palestine', dial: '+970' },
+    { name: 'Panama', dial: '+507' },
+    { name: 'Papua New Guinea', dial: '+675' },
+    { name: 'Paraguay', dial: '+595' },
+    { name: 'Peru', dial: '+51' },
+    { name: 'Philippines', dial: '+63' },
+    { name: 'Poland', dial: '+48' },
+    { name: 'Portugal', dial: '+351' },
+    { name: 'Puerto Rico', dial: '+1' },
+    { name: 'Qatar', dial: '+974' },
+    { name: 'Reunion', dial: '+262' },
+    { name: 'Romania', dial: '+40' },
+    { name: 'Russia', dial: '+7' },
+    { name: 'Rwanda', dial: '+250' },
+    { name: 'Saint Kitts and Nevis', dial: '+1' },
+    { name: 'Saint Lucia', dial: '+1' },
+    { name: 'Saint Vincent and the Grenadines', dial: '+1' },
+    { name: 'Samoa', dial: '+685' },
+    { name: 'San Marino', dial: '+378' },
+    { name: 'Sao Tome and Principe', dial: '+239' },
+    { name: 'Saudi Arabia', dial: '+966' },
+    { name: 'Senegal', dial: '+221' },
+    { name: 'Serbia', dial: '+381' },
+    { name: 'Seychelles', dial: '+248' },
+    { name: 'Sierra Leone', dial: '+232' },
+    { name: 'Singapore', dial: '+65' },
+    { name: 'Slovakia', dial: '+421' },
+    { name: 'Slovenia', dial: '+386' },
+    { name: 'Solomon Islands', dial: '+677' },
+    { name: 'Somalia', dial: '+252' },
+    { name: 'South Africa', dial: '+27' },
+    { name: 'South Sudan', dial: '+211' },
+    { name: 'Spain', dial: '+34' },
+    { name: 'Sri Lanka', dial: '+94' },
+    { name: 'Sudan', dial: '+249' },
+    { name: 'Suriname', dial: '+597' },
+    { name: 'Sweden', dial: '+46' },
+    { name: 'Switzerland', dial: '+41' },
+    { name: 'Syria', dial: '+963' },
+    { name: 'Taiwan', dial: '+886' },
+    { name: 'Tajikistan', dial: '+992' },
+    { name: 'Tanzania', dial: '+255' },
+    { name: 'Thailand', dial: '+66' },
+    { name: 'Timor-Leste', dial: '+670' },
+    { name: 'Togo', dial: '+228' },
+    { name: 'Tonga', dial: '+676' },
+    { name: 'Trinidad and Tobago', dial: '+1' },
+    { name: 'Tunisia', dial: '+216' },
+    { name: 'Turkey', dial: '+90' },
+    { name: 'Turkmenistan', dial: '+993' },
+    { name: 'Tuvalu', dial: '+688' },
+    { name: 'Uganda', dial: '+256' },
+    { name: 'Ukraine', dial: '+380' },
+    { name: 'UAE', dial: '+971' },
+    { name: 'United Arab Emirates', dial: '+971' },
+    { name: 'United Kingdom', dial: '+44' },
+    { name: 'United States', dial: '+1' },
+    { name: 'Uruguay', dial: '+598' },
+    { name: 'Uzbekistan', dial: '+998' },
+    { name: 'Vanuatu', dial: '+678' },
+    { name: 'Venezuela', dial: '+58' },
+    { name: 'Vietnam', dial: '+84' },
+    { name: 'Yemen', dial: '+967' },
+    { name: 'Zambia', dial: '+260' },
+    { name: 'Zimbabwe', dial: '+263' }
+  ];
+
+  form = {
+    requestedBy: '',
+    inviteChannel: 'auto' as InviteChannel,
+    requiredState: 'Stable',
+    notes: ''
+  };
+
+  constructor(
+    private http: HttpClient,
+    private router: Router,
+    private subscriptionService: SubscriptionService,
+    private organizationService: OrganizationService,
+    private adminTokens: AdminTokenService
+  ) {}
+
+  ngOnInit() {
+    this.isAdminUser = this.checkAdminAccess();
+    this.loadPlanAccess();
+    this.loadOrganization();
+  }
+
+  trialDaysLabel(): string {
+    if (!this.isBusinessTrial) {
+      return '';
+    }
+    if (typeof this.trialDaysRemaining !== 'number') {
+      return 'Paid Business features are currently unlocked for your trial.';
+    }
+    if (this.trialDaysRemaining <= 1) {
+      return 'Paid Business features are free today only (last trial day).';
+    }
+    return `Paid Business features are free for now - ${this.trialDaysRemaining} day(s) left.`;
+  }
+
+  businessPaidFeatureNotice(featureLabel: string): string {
+    if (!this.isBusinessTrial) {
+      return '';
+    }
+    if (typeof this.trialDaysRemaining !== 'number') {
+      return `${featureLabel} is a paid Business feature, currently unlocked in your trial.`;
+    }
+    if (this.trialDaysRemaining <= 1) {
+      return `${featureLabel} is a paid Business feature, free for today only.`;
+    }
+    return `${featureLabel} is a paid Business feature, free for ${this.trialDaysRemaining} day(s) left.`;
+  }
+
+  setRecipientMode(mode: RecipientKind) {
+    this.recipientMode = mode;
+    this.recipientError = '';
+  }
+
+  recipientInputPlaceholder(): string {
+    return this.recipientMode === 'email'
+      ? 'user@example.com'
+      : 'Phone number without country code, e.g. 1012345678';
+  }
+
+  recipientEntryHint(): string {
+    if (this.recipientMode === 'email') {
+      return 'Add one or more emails with +. Each email will receive a Business request invitation.';
+    }
+    return 'Choose country code, type number, then press +. We will use this number for WhatsApp/SMS invite.';
+  }
+
+  trackRecipientById(_: number, item: RequestRecipient) {
+    return item.id;
+  }
+
+  addRecipient() {
+    this.recipientError = '';
+    const raw = this.recipientInput.trim();
+
+    if (!raw) {
+      this.recipientError = 'Enter email or phone number first.';
+      return;
+    }
+
+    if (this.recipientMode === 'email') {
+      const email = raw.toLowerCase();
+      if (!this.isValidEmail(email)) {
+        this.recipientError = 'Please enter a valid email format.';
+        return;
+      }
+      if (this.hasRecipient('email', email)) {
+        this.recipientError = 'This email is already added.';
+        return;
+      }
+
+      this.recipients = [
+        ...this.recipients,
+        {
+          id: this.newRecipientId(),
+          kind: 'email',
+          value: email,
+          display: email
+        }
+      ];
+      this.recipientInput = '';
+      return;
+    }
+
+    const phone = this.normalizePhone(raw);
+    if (!phone) {
+      this.recipientError = 'Please enter a valid phone number.';
+      return;
+    }
+    if (this.hasRecipient('phone', phone)) {
+      this.recipientError = 'This phone number is already added.';
+      return;
+    }
+
+    this.recipients = [
+      ...this.recipients,
+      {
+        id: this.newRecipientId(),
+        kind: 'phone',
+        value: phone,
+        display: phone
+      }
+    ];
+    this.recipientInput = '';
+  }
+
+  removeRecipient(id: string) {
+    this.recipients = this.recipients.filter((item) => item.id !== id);
+  }
+
+  submitRequest() {
+    if (!this.canCreateRequests) {
+      this.router.navigate(['/payment']);
+      return;
+    }
+
+    const requestedBy = this.form.requestedBy.trim() || this.requestedByDefault;
+    const requiredState = this.form.requiredState.trim();
+    const notes = this.form.notes.trim();
+    const inviteChannel = this.normalizeInviteChannel(this.form.inviteChannel);
+
+    if (!requestedBy) {
+      this.submitFeedback = { type: 'error', message: 'Requested by is required.' };
+      return;
+    }
+    if (!requiredState) {
+      this.submitFeedback = { type: 'error', message: 'Required scan state is required.' };
+      return;
+    }
+    if (!this.consumePendingRecipientInput()) {
+      this.submitFeedback = { type: 'error', message: this.recipientError || 'Please fix recipient entry first.' };
+      return;
+    }
+    if (!this.recipients.length) {
+      this.submitFeedback = { type: 'error', message: 'Add at least one recipient (email or phone).' };
+      return;
+    }
+
+    const token = this.getUserToken();
+    if (!token) {
+      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+      return;
+    }
+
+    this.submittingRequest = true;
+    this.submitFeedback = { type: 'info', message: 'Sending request(s)...' };
+    this.lastSubmitError = '';
+
+    const canInvite = this.currentPlanCode === 'business' || this.isAdminUser;
+
+    if (!canInvite) {
+      this.submitFeedback = {
+        type: 'error',
+        message: 'Email/phone invites are paid Business features. Open Billing to activate Business.'
+      };
+      this.submittingRequest = false;
+      return;
+    }
+
+    const recipientsSnapshot = [...this.recipients];
+    from(recipientsSnapshot).pipe(
+      concatMap((recipient) =>
+        this.submitRecipientWorkflow(
+          requestedBy,
+          recipient,
+          requiredState,
+          notes,
+          token,
+          inviteChannel
+        )
+      ),
+      toArray()
+    ).subscribe({
+      next: (results) => {
+        const successCount = results.filter(Boolean).length;
+        this.submittingRequest = false;
+
+        if (!successCount) {
+          this.submitFeedback = {
+            type: 'error',
+            message: this.lastSubmitError || 'Failed to send requests.'
+          };
+          return;
+        }
+
+        if (successCount < recipientsSnapshot.length) {
+          this.submitFeedback = {
+            type: 'info',
+            message: `Sent ${successCount} of ${recipientsSnapshot.length} request(s). Some recipients failed.`
+          };
+        } else {
+          this.submitFeedback = {
+            type: 'success',
+            message: `Request(s) sent successfully to ${successCount} recipient(s).`
+          };
+        }
+
+        this.recipients = [];
+        this.recipientInput = '';
+        this.form.notes = '';
+        this.form.inviteChannel = 'auto';
+        this.form.requiredState = 'Stable';
+      },
+      error: () => {
+        this.submittingRequest = false;
+        this.submitFeedback = { type: 'error', message: 'Failed to send requests.' };
+      }
+    });
+  }
+
+  private submitRecipientWorkflow(
+    requestedBy: string,
+    recipient: RequestRecipient,
+    requiredState: string,
+    notes: string,
+    token: string,
+    inviteChannel: InviteChannel
+  ): Observable<boolean> {
+    const contact = recipient.kind === 'email'
+      ? { email: recipient.value }
+      : { phone: recipient.value };
+
+    return this.resolveRecipientUserId(contact, token).pipe(
+      switchMap((resolvedUserId) =>
+        this.submitRequestPayload(
+          requestedBy,
+          {
+            ...contact,
+            userId: resolvedUserId ?? undefined
+          },
+          requiredState,
+          notes,
+          token,
+          Boolean(contact.email || contact.phone),
+          inviteChannel
+        )
+      ),
+      catchError(() =>
+        this.submitRequestPayload(
+          requestedBy,
+          contact,
+          requiredState,
+          notes,
+          token,
+          Boolean(contact.email || contact.phone),
+          inviteChannel
+        )
+      )
+    );
+  }
+
+  private consumePendingRecipientInput(): boolean {
+    if (!this.recipientInput.trim()) {
+      return true;
+    }
+
+    this.addRecipient();
+    return !this.recipientError;
+  }
+
+  private normalizePhone(raw: string): string | null {
+    const cleaned = raw.trim();
+    if (!cleaned) {
+      return null;
+    }
+
+    if (cleaned.startsWith('+')) {
+      const digits = cleaned.replace(/[^\d]/g, '');
+      if (digits.length < 8) {
+        return null;
+      }
+      return `+${digits}`;
+    }
+
+    const localDigits = cleaned.replace(/[^\d]/g, '');
+    const withoutLeadingZero = localDigits.replace(/^0+/, '');
+    if (withoutLeadingZero.length < 7) {
+      return null;
+    }
+
+    const countryCode = this.selectedCountryCode.startsWith('+')
+      ? this.selectedCountryCode
+      : `+${this.selectedCountryCode}`;
+
+    return `${countryCode}${withoutLeadingZero}`;
+  }
+
+  private isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  private hasRecipient(kind: RecipientKind, value: string): boolean {
+    return this.recipients.some((item) => item.kind === kind && item.value === value);
+  }
+
+  private newRecipientId(): string {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  private loadPlanAccess() {
+    this.subscriptionService.ensureBusinessTrial().subscribe((subscription) => {
+      this.currentSubscription = subscription;
+      this.currentPlanName = subscription?.plan?.name ?? 'Free';
+      this.currentPlanCode = subscription?.plan?.code ?? 'free';
+      this.isBusinessTrial = Boolean(subscription?.is_trial);
+      this.trialDaysRemaining =
+        typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
+      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
+      this.canCreateRequests = ['admin', 'business'].includes(this.currentPlanCode) || this.isAdminUser;
+      if (!this.requestedByDefault) {
+        this.requestedByDefault = this.currentPlanName;
+      }
+      if (!this.form.requestedBy.trim()) {
+        this.form.requestedBy = this.requestedByDefault;
+      }
+    });
+  }
+
+  private loadOrganization() {
+    this.organizationService.getUserOrganization().subscribe((org) => {
+      this.org = org;
+      this.requestedByDefault = org?.name ?? this.requestedByDefault;
+      if (!this.form.requestedBy.trim()) {
+        this.form.requestedBy = this.requestedByDefault;
+      }
+    });
+  }
+
+  private resolveRecipientUserId(
+    contact: { email?: string; phone?: string },
+    userToken: string | null
+  ): Observable<string | null> {
+    const email = contact.email?.trim().toLowerCase();
+    const phone = contact.phone?.trim();
+    const field: 'email' | 'phone' | null = email
+      ? 'email'
+      : phone
+        ? 'phone'
+        : null;
+    const value = email ?? phone ?? null;
+
+    if (!field || !value) {
+      return of(null);
+    }
+
+    return this.lookupUserIdByField(field, value, userToken).pipe(
+      switchMap((userId) => {
+        if (userId) {
+          return of(userId);
+        }
+        return this.adminTokens.getToken().pipe(
+          switchMap((adminToken) => this.lookupUserIdByField(field, value, adminToken)),
+          catchError(() => of(null))
+        );
+      }),
+      catchError(() =>
+        this.adminTokens.getToken().pipe(
+          switchMap((adminToken) => this.lookupUserIdByField(field, value, adminToken)),
+          catchError(() => of(null))
+        )
+      )
+    );
+  }
+
+  private lookupUserIdByField(
+    field: 'email' | 'phone',
+    value: string,
+    token: string | null
+  ): Observable<string | null> {
+    if (!value) {
+      return of(null);
+    }
+
+    const headers = this.buildAuthHeaders(token);
+    const params = new URLSearchParams({
+      [`filter[${field}][_eq]`]: value,
+      fields: 'id',
+      limit: '1'
+    });
+    const url = `${environment.API_URL}/users?${params.toString()}`;
+
+    return this.http.get<{ data?: Array<{ id?: string }> }>(
+      url,
+      headers ? { headers } : {}
+    ).pipe(
+      map((res) => res?.data?.[0]?.id ?? null),
+      catchError(() => of(null))
+    );
+  }
+
+  private submitRequestPayload(
+    requestedBy: string,
+    contact: { userId?: string; email?: string; phone?: string },
+    requiredState: string,
+    notes: string,
+    token: string | null,
+    createInvite = false,
+    inviteChannel: InviteChannel = 'auto'
+  ): Observable<boolean> {
+    const payload: CreateRequestPayload = {
+      Target: requestedBy,
+      requested_by_user: this.getUserIdFromToken(token) ?? undefined,
+      requested_by_org: this.org?.id ?? undefined,
+      requested_for_user: contact.userId,
+      requested_for_email: contact.email,
+      requested_for_phone: contact.phone,
+      requested_for: contact.userId ?? contact.email ?? contact.phone,
+      required_state: requiredState,
+      status: 'Pending',
+      response_status: undefined,
+      response_payload: this.parseResponsePayload(notes),
+      timestamp: new Date().toISOString()
+    };
+
+    return this.createRequest(payload, token).pipe(
+      map((res) => {
+        if (createInvite && res?.data?.id) {
+          this.createInvite(res.data.id, contact, token, inviteChannel);
+        }
+        return true;
+      }),
+      catchError((err) => {
+        this.lastSubmitError = this.readApiError(err);
+        return of(false);
+      })
+    );
+  }
+
+  private createRequest(payload: CreateRequestPayload, token: string | null) {
+    const headers = this.buildAuthHeaders(token);
+    return this.http.post<{ data?: { id?: string } }>(
+      `${environment.API_URL}/items/requests`,
+      payload,
+      headers ? { headers } : {}
+    ).pipe(
+      catchError((err) => {
+        if (!this.shouldRetryWithLowercaseTarget(err)) {
+          return throwError(() => err);
+        }
+
+        const fallbackPayload = this.createTargetFallbackPayload(payload);
+        if (!fallbackPayload) {
+          return throwError(() => err);
+        }
+
+        return this.http.post<{ data?: { id?: string } }>(
+          `${environment.API_URL}/items/requests`,
+          fallbackPayload,
+          headers ? { headers } : {}
+        );
+      })
+    );
+  }
+
+  private createInvite(
+    requestId: string | number,
+    contact: { email?: string; phone?: string },
+    token: string | null,
+    inviteChannel: InviteChannel
+  ) {
+    const inviteToken = this.buildInviteToken();
+    const now = new Date();
+    const expiresAt = new Date(now);
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const channel = this.resolveInviteChannel(contact, inviteChannel);
+    const payload = {
+      request: requestId,
+      email: contact.email ?? undefined,
+      phone: contact.phone ?? undefined,
+      channel,
+      token: inviteToken,
+      status: 'Sent',
+      sent_at: now.toISOString(),
+      expires_at: expiresAt.toISOString()
+    };
+
+    const headers = this.buildAuthHeaders(token);
+    this.http.post(
+      `${environment.API_URL}/items/request_invites`,
+      payload,
+      headers ? { headers } : {}
+    ).pipe(
+      catchError(() => of(null))
+    ).subscribe();
+  }
+
+  private buildAuthHeaders(token: string | null): HttpHeaders | null {
+    if (!token || this.isTokenExpired(token)) {
+      return null;
+    }
+
+    return new HttpHeaders({
+      Authorization: `Bearer ${token}`
+    });
+  }
+
+  private normalizeInviteChannel(value: string): InviteChannel {
+    const normalized = (value ?? '').toLowerCase();
+    if (normalized === 'email' || normalized === 'whatsapp' || normalized === 'sms') {
+      return normalized;
+    }
+    return 'auto';
+  }
+
+  private resolveInviteChannel(
+    contact: { email?: string; phone?: string },
+    inviteChannel: InviteChannel
+  ): 'email' | 'whatsapp' | 'sms' {
+    if (inviteChannel === 'email' && contact.email) {
+      return 'email';
+    }
+    if (inviteChannel === 'whatsapp' && contact.phone) {
+      return 'whatsapp';
+    }
+    if (inviteChannel === 'sms' && contact.phone) {
+      return 'sms';
+    }
+    if (contact.email) {
+      return 'email';
+    }
+    if (contact.phone) {
+      return inviteChannel === 'sms' ? 'sms' : 'whatsapp';
+    }
+    return 'email';
+  }
+
+  private parseResponsePayload(notes: string): string | Record<string, unknown> | undefined {
+    if (!notes) {
+      return undefined;
+    }
+    if (notes.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(notes);
+        if (parsed && typeof parsed === 'object') {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        return notes;
+      }
+    }
+    return notes;
+  }
+
+  private buildInviteToken() {
+    const random = Math.random().toString(36).slice(2, 12);
+    const time = Date.now().toString(36);
+    return `${time}${random}`.slice(0, 20);
+  }
+
+  private checkAdminAccess(): boolean {
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    if (!token) {
+      return false;
+    }
+
+    const payload = this.decodeJwtPayload(token);
+    return payload?.['admin_access'] === true;
+  }
+
+  private decodeJwtPayload(token: string): Record<string, unknown> | null {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return null;
+    }
+
+    try {
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return typeof payload === 'object' && payload ? (payload as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private getUserIdFromToken(token: string | null): string | null {
+    if (!token) {
+      return null;
+    }
+
+    const payload = this.decodeJwtPayload(token);
+    if (!payload) {
+      return null;
+    }
+
+    const id = payload['id'] ?? payload['user_id'] ?? payload['sub'];
+    if (typeof id === 'string') {
+      return id;
+    }
+    if (typeof id === 'number' && !Number.isNaN(id)) {
+      return String(id);
+    }
+    return null;
+  }
+
+  private getUserToken(): string | null {
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    if (!userToken || this.isTokenExpired(userToken)) {
+      return null;
+    }
+    return userToken;
+  }
+
+  private isTokenExpired(token: string): boolean {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const exp = payload?.exp;
+      if (typeof exp !== 'number') {
+        return false;
+      }
+      return Math.floor(Date.now() / 1000) >= exp;
+    } catch {
+      return false;
+    }
+  }
+
+  private shouldRetryWithLowercaseTarget(err: any): boolean {
+    const message = this.readApiError(err).toLowerCase();
+    return message.includes('target') && (message.includes('field') || message.includes('payload'));
+  }
+
+  private createTargetFallbackPayload(payload: CreateRequestPayload): Record<string, unknown> | null {
+    if (!payload.Target) {
+      return null;
+    }
+
+    const { Target, ...rest } = payload;
+    return {
+      ...rest,
+      target: Target
+    };
+  }
+
+  private readApiError(err: any, fallback = 'Failed to send request.'): string {
+    return (
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.message ||
+      err?.message ||
+      fallback
+    );
+  }
+}
+
+type CreateRequestPayload = {
+  Target: string;
+  requested_by_user?: string;
+  requested_by_org?: string;
+  requested_for?: string;
+  requested_for_user?: string;
+  requested_for_email?: string;
+  requested_for_phone?: string;
+  required_state: string;
+  status: string;
+  response_status?: string;
+  response_payload?: unknown;
+  timestamp: string;
+};
+
+type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';

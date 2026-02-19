@@ -3,6 +3,7 @@ import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { WeeklyChartComponent } from '../../components/weekly-chart/weekly-chart';
 import { DashboardService, DashboardStats, ScanResult } from '../../services/dashboard.service';
+import { SubscriptionService } from '../../services/subscription.service';
 
 @Component({
   standalone: true,
@@ -13,6 +14,8 @@ import { DashboardService, DashboardStats, ScanResult } from '../../services/das
 export class Dashboard implements OnInit {
   loading = false;
   showScanModal = false;
+  hasBusinessAccess = false;
+  skeletonCards = [0, 1, 2, 3];
 
   stats: DashboardStats = {
     stable: 0,
@@ -25,11 +28,13 @@ export class Dashboard implements OnInit {
 
   constructor(
     private dashboardService: DashboardService,
+    private subscriptions: SubscriptionService,
     private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
     this.loadDashboard();
+    this.loadPlanState();
   }
 
   loadDashboard() {
@@ -53,5 +58,16 @@ export class Dashboard implements OnInit {
 
   closeScanModal() {
     this.showScanModal = false;
+  }
+
+  private loadPlanState() {
+    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
+      this.hasBusinessAccess = snapshot.hasBusinessAccess;
+      this.cdr.detectChanges();
+    });
+  }
+
+  trackByIndex(index: number): number {
+    return index;
   }
 }

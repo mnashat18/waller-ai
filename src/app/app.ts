@@ -1,10 +1,12 @@
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { AuthService } from './services/auth';
+import { NewUserGuideComponent } from './components/new-user-guide/new-user-guide';
+import { SubscriptionExpiryAdsComponent } from './components/subscription-expiry-ads/subscription-expiry-ads';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, NewUserGuideComponent, SubscriptionExpiryAdsComponent],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })

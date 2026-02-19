@@ -100,7 +100,7 @@
   </div>
 
   <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
-    <div class="grid grid-cols-5 text-[10px] text-slate-400">
+    <div class="grid grid-cols-6 text-[10px] text-slate-400">
       <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M9 12h6"></path>
@@ -110,8 +110,7 @@
         <span>Audit logs</span>
       </a>
       <a
-        routerLink="/requests"
-        [queryParams]="{ create: 1 }"
+        routerLink="/requests/create"
         class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M12 5v14"></path>
@@ -135,6 +134,15 @@
           <path d="M4 17h16"></path>
         </svg>
         <span>Requests</span>
+      </a>
+      <a routerLink="/business-center" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 20V8l8-4 8 4v12"></path>
+          <path d="M8 20v-5h8v5"></path>
+          <path d="M9 10h.01"></path>
+          <path d="M15 10h.01"></path>
+        </svg>
+        <span>Business</span>
       </a>
       <a routerLink="/history" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">

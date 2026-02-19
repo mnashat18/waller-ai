@@ -1,0 +1,217 @@
+<div class="page-shell fade-in">
+  <div class="page-hero">
+    <div class="hero-left">
+      <span class="hero-chip">Business Request Studio</span>
+      <h1 class="page-title">Create Scan Request</h1>
+      <p class="page-subtitle">
+        Create a request, choose invite channel, and push the workflow to your team from one business form.
+      </p>
+    </div>
+
+    <div class="hero-actions">
+      <span class="chip">Plan: {{ currentPlanName }}</span>
+      <span *ngIf="isBusinessTrial" class="chip">{{ trialDaysLabel() }}</span>
+      <a routerLink="/requests" class="chip">Back to Requests</a>
+      <a routerLink="/business-center" class="chip">Business Center</a>
+    </div>
+  </div>
+
+  <div *ngIf="submitFeedback as feedback" class="panel feedback-card" [ngClass]="feedback.type">
+    {{ feedback.message }}
+  </div>
+
+  <div *ngIf="!canCreateRequests" class="panel">
+    <div class="panel-header">
+      <h3 class="panel-title">Business Access Required</h3>
+      <span class="chip">Paid Feature</span>
+    </div>
+    <p class="text-slate-300">
+      Create requests is a paid Business feature. Open Billing to unlock request creation and invite channels.
+    </p>
+    <div class="mt-5 flex gap-3">
+      <a routerLink="/payment" class="btn-primary px-5 py-2 rounded-full">Open Billing</a>
+      <a routerLink="/requests" class="chip">View Requests</a>
+    </div>
+  </div>
+
+  <div *ngIf="canCreateRequests" class="create-layout">
+    <section class="panel form-panel">
+      <div class="panel-header">
+        <h3 class="panel-title">Request Form</h3>
+        <span class="chip">Business</span>
+      </div>
+
+      <p *ngIf="isBusinessTrial" class="section-note">{{ businessTrialNotice }}</p>
+
+      <form class="form-grid" (ngSubmit)="submitRequest()">
+        <label for="requested-by">Requested By</label>
+        <input
+          id="requested-by"
+          name="requestedBy"
+          [(ngModel)]="form.requestedBy"
+          class="input"
+          placeholder="Company or admin name"
+          required />
+
+        <div class="recipient-box">
+          <div class="recipient-box-head">
+            <label for="recipient-input">Requested For (Email or Phone)</label>
+            <div class="recipient-mode-toggle">
+              <button
+                type="button"
+                class="mode-btn"
+                [class.active]="recipientMode === 'email'"
+                (click)="setRecipientMode('email')">
+                Email
+              </button>
+              <button
+                type="button"
+                class="mode-btn"
+                [class.active]="recipientMode === 'phone'"
+                (click)="setRecipientMode('phone')">
+                Phone
+              </button>
+            </div>
+          </div>
+
+          <div class="recipient-entry-row" [class.email-only]="recipientMode === 'email'">
+            <select
+              *ngIf="recipientMode === 'phone'"
+              id="recipient-country"
+              name="recipientCountry"
+              [(ngModel)]="selectedCountryCode"
+              class="input country-select">
+              <option *ngFor="let country of phoneCountries" [value]="country.dial">
+                {{ country.name }} ({{ country.dial }})
+              </option>
+            </select>
+
+            <input
+              id="recipient-input"
+              name="recipientInput"
+              [(ngModel)]="recipientInput"
+              class="input recipient-input"
+              [placeholder]="recipientInputPlaceholder()"
+              (keydown.enter)="addRecipient(); $event.preventDefault()" />
+
+            <button
+              type="button"
+              class="add-recipient-btn"
+              aria-label="Add recipient"
+              (click)="addRecipient()">
+              +
+            </button>
+          </div>
+
+          <p class="field-help">{{ recipientEntryHint() }}</p>
+          <p *ngIf="recipientError" class="field-error">{{ recipientError }}</p>
+          <p *ngIf="recipientMode === 'phone' && recipientInput.trim()" class="field-help invite-hint">
+            Hint: if this number has WhatsApp, the invite can be sent to this number after submission.
+          </p>
+          <p *ngIf="recipientMode === 'email' && recipientInput.trim()" class="field-help invite-hint">
+            Hint: this email will receive a scan request from {{ form.requestedBy || 'your business' }} with a
+            "Scan now" message.
+          </p>
+          <p *ngIf="isBusinessTrial" class="section-note small">{{ businessInviteTrialNotice }}</p>
+
+          <div *ngIf="recipients.length" class="recipient-list">
+            <p class="recipient-list-title">Added Recipients ({{ recipients.length }})</p>
+            <div class="recipient-list-grid">
+              <div class="recipient-item" *ngFor="let recipient of recipients; trackBy: trackRecipientById">
+                <div class="recipient-item-main">
+                  <span class="recipient-kind">{{ recipient.kind === 'email' ? 'Email' : 'Phone' }}</span>
+                  <span class="recipient-value">{{ recipient.display }}</span>
+                </div>
+                <p class="recipient-item-hint" *ngIf="recipient.kind === 'phone'">
+                  WhatsApp/SMS invite will target this number.
+                </p>
+                <p class="recipient-item-hint" *ngIf="recipient.kind === 'email'">
+                  Email invite with scan link will target this address.
+                </p>
+                <button type="button" class="recipient-remove" (click)="removeRecipient(recipient.id)">
+                  Remove
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <label for="invite-channel">Invite Channel</label>
+        <select
+          id="invite-channel"
+          name="inviteChannel"
+          [(ngModel)]="form.inviteChannel"
+          class="input">
+          <option value="auto">Auto (Email for email, WhatsApp for phone)</option>
+          <option value="email">Email</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="sms">SMS</option>
+        </select>
+
+        <label for="required-state">Required Scan State</label>
+        <select
+          id="required-state"
+          name="requiredState"
+          [(ngModel)]="form.requiredState"
+          class="input">
+          <option value="Stable">Stable</option>
+          <option value="Low Focus">Low Focus</option>
+          <option value="Elevated Fatigue">Elevated Fatigue</option>
+          <option value="High Risk">High Risk</option>
+        </select>
+
+        <label for="request-notes">Notes (Optional)</label>
+        <textarea
+          id="request-notes"
+          name="notes"
+          [(ngModel)]="form.notes"
+          class="input"
+          rows="4"
+          placeholder="Why is this scan required?"></textarea>
+
+        <div class="form-actions">
+          <button
+            type="submit"
+            class="btn-primary px-5 py-2 rounded-full disabled:opacity-60 disabled:cursor-not-allowed"
+            [disabled]="submittingRequest">
+            {{ submittingRequest ? 'Sending...' : 'Create Request' }}
+          </button>
+          <a routerLink="/requests" class="chip">Cancel</a>
+        </div>
+      </form>
+    </section>
+
+    <aside class="panel side-panel">
+      <div class="panel-header">
+        <h3 class="panel-title">Execution Guide</h3>
+        <span class="chip">Ops</span>
+      </div>
+
+      <ul class="guide-list">
+        <li>
+          <strong>Step 1:</strong> add team/manager name in Requested By.
+        </li>
+        <li>
+          <strong>Step 2:</strong> add one or more recipients using + (email, phone, or both).
+        </li>
+        <li>
+          <strong>Step 3:</strong> define required state and submit.
+        </li>
+      </ul>
+
+      <div class="mini-card">
+        <p class="mini-title">What happens next</p>
+        <p class="mini-text">
+          A request is stored for each recipient in `requests`, and invite records are added to `request_invites`.
+        </p>
+      </div>
+
+      <div class="mini-card">
+        <p class="mini-title">Business Benefit</p>
+        <p class="mini-text">
+          You keep request tracking and invite delivery in one place with clear response status follow-up.
+        </p>
+      </div>
+    </aside>
+  </div>
+</div>

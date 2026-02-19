@@ -151,11 +151,7 @@
       <div class="qr">
         <div class="qr-label">Scan to install</div>
         <div class="qr-grid">
-          <span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span><span></span><span></span>
-          <span></span><span></span><span></span><span></span><span></span>
+          <span *ngFor="let cell of qrCells; trackBy: trackByIndex"></span>
         </div>
       </div>
     </section>

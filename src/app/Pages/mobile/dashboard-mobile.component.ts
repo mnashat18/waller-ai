@@ -3,6 +3,7 @@ import { Component, OnInit } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import { DashboardService, DashboardSnapshot, DashboardStats, ScanResult } from '../../services/dashboard.service';
+import { SubscriptionService } from '../../services/subscription.service';
 import { of } from 'rxjs';
 import { catchError, delay, finalize, timeout } from 'rxjs/operators';
 
@@ -31,12 +32,17 @@ export class DashboardMobileComponent implements OnInit {
     fatigue: 6,
     high_risk: 6
   };
+  hasBusinessAccess = false;
+  planLabel = 'Free';
 
   private readonly cacheKey = 'dashboard_snapshot_v1';
   private readonly cacheTsKey = 'dashboard_snapshot_ts';
   private readonly cacheTtlMs = 1000 * 60 * 15;
 
-  constructor(private dashboardService: DashboardService) {}
+  constructor(
+    private dashboardService: DashboardService,
+    private subscriptions: SubscriptionService
+  ) {}
 
   ngOnInit() {
     const cached = this.readCachedSnapshot();
@@ -44,6 +50,7 @@ export class DashboardMobileComponent implements OnInit {
       this.applySnapshot(cached);
     }
     this.loadDashboard(!cached);
+    this.loadPlanState();
   }
 
   private loadDashboard(showLoading: boolean) {
@@ -126,5 +133,12 @@ export class DashboardMobileComponent implements OnInit {
     } catch {
       // Ignore cache write errors
     }
+  }
+
+  private loadPlanState() {
+    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
+      this.hasBusinessAccess = snapshot.hasBusinessAccess;
+      this.planLabel = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+    });
   }
 }

@@ -1,0 +1,29 @@
+<div class="guide-overlay" *ngIf="visible && guide">
+  <article class="guide-card">
+    <div class="guide-header">
+      <span class="guide-pill">New User Guide</span>
+      <button type="button" class="icon-btn" (click)="dismiss()" aria-label="Close guide">
+        x
+      </button>
+    </div>
+
+    <h3 class="guide-title">{{ guide.title }}</h3>
+    <p class="guide-summary">{{ guide.summary }}</p>
+
+    <ul class="guide-list">
+      <li *ngFor="let point of guide.points">{{ point }}</li>
+    </ul>
+
+    <p class="guide-trial" *ngIf="trialDaysRemaining !== null">
+      Business trial active: {{ trialDaysRemaining }} day{{ trialDaysRemaining === 1 ? '' : 's' }} left.
+    </p>
+
+    <div class="guide-actions">
+      <a *ngIf="guide.ctaLink && guide.ctaLabel" [routerLink]="guide.ctaLink" class="btn-primary">
+        {{ guide.ctaLabel }}
+      </a>
+      <button type="button" class="btn-secondary" (click)="dismiss()">Got it</button>
+      <button type="button" class="btn-muted" (click)="skipAll()">Hide all guides</button>
+    </div>
+  </article>
+</div>

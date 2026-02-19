@@ -1,0 +1,22 @@
+<div class="expiry-ad-overlay" *ngIf="visible">
+  <article class="expiry-ad-card">
+    <div class="ad-head">
+      <span class="ad-pill">BUSINESS ACCESS ENDED</span>
+      <button type="button" class="icon-btn" (click)="dismiss()" aria-label="Close ad">x</button>
+    </div>
+
+    <h3>{{ adTitle() }}</h3>
+    <p>{{ adMessage() }}</p>
+
+    <div class="ad-points">
+      <span>Re-open Business Center tools</span>
+      <span>Keep create-request and invites</span>
+      <span>Continue exports and automation</span>
+    </div>
+
+    <div class="ad-actions">
+      <button type="button" class="pay-btn" (click)="openPayment()">Go To Payment</button>
+      <button type="button" class="dismiss-btn" (click)="dismiss()">Later</button>
+    </div>
+  </article>
+</div>

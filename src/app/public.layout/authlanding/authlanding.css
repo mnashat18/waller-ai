@@ -393,6 +393,12 @@
   gap: 12px;
 }
 
+.trial-note {
+  margin: 2px 2px 0;
+  font-size: 0.78rem;
+  color: #f5c451;
+}
+
 .auth-input {
   width: 100%;
   padding: 12px 14px;
