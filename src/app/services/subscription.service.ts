@@ -61,6 +61,7 @@ export class SubscriptionService {
   private freeRoleId: string | null = environment.FREE_ROLE_ID || null;
   private plansEndpointForbidden = false;
   private subscriptionsEndpointForbidden = false;
+  private businessUpgradeRequestsEndpointForbidden = false;
   private readonly subscriptionFields = [
     'id',
     'status',
@@ -484,6 +485,11 @@ export class SubscriptionService {
   }
 
   private fetchLatestBusinessUpgradeRequest(userId: string): Observable<boolean> {
+    if (this.businessUpgradeRequestsEndpointForbidden) {
+      // If role cannot read this collection, do not block onboarding flow.
+      return of(true);
+    }
+
     const token = this.getUserToken();
     const headers = token
       ? new HttpHeaders({
@@ -503,7 +509,13 @@ export class SubscriptionService {
       headers ? { headers } : {}
     ).pipe(
       map((res) => Array.isArray(res?.data) && res.data.length > 0),
-      catchError(() => of(false))
+      catchError((err) => {
+        if (this.isForbiddenError(err)) {
+          this.businessUpgradeRequestsEndpointForbidden = true;
+          return of(true);
+        }
+        return of(false);
+      })
     );
   }
 
@@ -585,8 +597,8 @@ export class SubscriptionService {
       return of([]);
     }
 
-    const primaryOwnerField: SubscriptionOwnerField = 'user_created';
-    const fallbackOwnerField: SubscriptionOwnerField = 'user';
+    const primaryOwnerField: SubscriptionOwnerField = 'user';
+    const fallbackOwnerField: SubscriptionOwnerField = 'user_created';
 
     return this.fetchSubscriptionRecordsByOwnerField(userId, primaryOwnerField, status, limit).pipe(
       catchError((err) => {

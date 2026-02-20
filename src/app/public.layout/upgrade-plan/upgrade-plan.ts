@@ -3,9 +3,9 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { of } from 'rxjs';
-import { switchMap } from 'rxjs/operators';
+import { catchError, switchMap, timeout } from 'rxjs/operators';
 import { AuthService } from '../../services/auth';
-import { BusinessUpgradeService } from '../../services/business-upgrade.service';
+import { BusinessUpgradeService, BusinessUpgradeSubmitResult } from '../../services/business-upgrade.service';
 import { Plan, SubscriptionService } from '../../services/subscription.service';
 
 @Component({
@@ -16,6 +16,7 @@ import { Plan, SubscriptionService } from '../../services/subscription.service';
   styleUrl: './upgrade-plan.css'
 })
 export class UpgradePlanComponent implements OnInit {
+  private readonly submitTimeoutMs = 30000;
   loading = true;
   submitting = false;
   feedback = '';
@@ -110,7 +111,14 @@ export class UpgradePlanComponent implements OnInit {
           finalPriceUsd: this.totalTodayUsd,
           isNewUserOffer: this.isTrialEligible
         });
-      })
+      }),
+      timeout(this.submitTimeoutMs),
+      catchError((err) =>
+        of<BusinessUpgradeSubmitResult>({
+          ok: false,
+          reason: this.resolveSubmitError(err)
+        })
+      )
     ).subscribe((result) => {
       if (!result) {
         return;
@@ -232,5 +240,33 @@ export class UpgradePlanComponent implements OnInit {
     } catch {
       return null;
     }
+  }
+
+  private resolveSubmitError(err: any): string {
+    const message =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.message ||
+      '';
+
+    const normalized = String(message).toLowerCase();
+    if (
+      err?.status === 403 ||
+      normalized.includes('forbidden') ||
+      normalized.includes('permission')
+    ) {
+      return 'Your account role cannot submit payment activation requests right now. Please contact support to enable business_upgrade_requests access.';
+    }
+
+    if (err?.status === 401 || normalized.includes('unauthorized')) {
+      return 'Session expired. Please login again before payment activation.';
+    }
+
+    if (normalized.includes('timeout')) {
+      return 'Submitting request took too long. Please retry in a moment.';
+    }
+
+    return 'Failed to submit payment activation request. Please retry shortly.';
   }
 }

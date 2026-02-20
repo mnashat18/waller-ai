@@ -376,7 +376,12 @@ export class AuthService {
 
   private refreshUserFromCookie(): Observable<any | null> {
     return this.refreshFromCookie().pipe(
-      switchMap((token) => this.getCurrentUser(token ?? undefined))
+      switchMap((token) => {
+        if (!token) {
+          return of(null);
+        }
+        return this.getCurrentUser(token);
+      })
     );
   }
 

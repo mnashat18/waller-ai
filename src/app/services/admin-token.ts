@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { Observable, of } from 'rxjs';
-import { catchError, finalize, map, tap } from 'rxjs/operators';
+import { catchError, finalize, map, tap, timeout } from 'rxjs/operators';
 
 type AdminTokenResponse = {
   access_token?: string;
@@ -15,6 +15,7 @@ export class AdminTokenService {
   private cachedExp = 0;
   private blockedUntilTs = 0;
   private readonly errorCooldownMs = 2 * 60 * 1000;
+  private readonly requestTimeoutMs = 5000;
   private inflight?: Observable<string | null>;
 
   constructor(private http: HttpClient) {}
@@ -46,6 +47,7 @@ export class AdminTokenService {
     }
 
     this.inflight = this.http.get<AdminTokenResponse>(endpoint, headers ? { headers } : {}).pipe(
+      timeout(this.requestTimeoutMs),
       map(res => res?.access_token ?? null),
       tap(token => {
         this.cachedToken = token;

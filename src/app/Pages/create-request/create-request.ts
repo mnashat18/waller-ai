@@ -4,7 +4,7 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { Observable, from, of, throwError } from 'rxjs';
-import { catchError, concatMap, map, switchMap, toArray } from 'rxjs/operators';
+import { catchError, concatMap, finalize, map, switchMap, timeout, toArray } from 'rxjs/operators';
 import { Organization, OrganizationService } from '../../services/organization.service';
 import { SubscriptionService, UserSubscription } from '../../services/subscription.service';
 import { AdminTokenService } from '../../services/admin-token';
@@ -56,6 +56,7 @@ export class CreateRequestComponent implements OnInit {
   recipientError = '';
   recipients: RequestRecipient[] = [];
   private lastSubmitError = '';
+  private readonly submitTimeoutMs = 30000;
   readonly phoneCountries: PhoneCountry[] = [
     { name: 'Afghanistan', dial: '+93' },
     { name: 'Albania', dial: '+355' },
@@ -461,13 +462,24 @@ export class CreateRequestComponent implements OnInit {
           notes,
           token,
           inviteChannel
+        ).pipe(
+          timeout(this.submitTimeoutMs),
+          catchError((err) => {
+            this.lastSubmitError = this.readApiError(
+              err,
+              'Request timed out. Please try again.'
+            );
+            return of(false);
+          })
         )
       ),
-      toArray()
+      toArray(),
+      finalize(() => {
+        this.submittingRequest = false;
+      })
     ).subscribe({
       next: (results) => {
         const successCount = results.filter(Boolean).length;
-        this.submittingRequest = false;
 
         if (!successCount) {
           this.submitFeedback = {
@@ -495,9 +507,11 @@ export class CreateRequestComponent implements OnInit {
         this.form.inviteChannel = 'auto';
         this.form.requiredState = 'Stable';
       },
-      error: () => {
-        this.submittingRequest = false;
-        this.submitFeedback = { type: 'error', message: 'Failed to send requests.' };
+      error: (err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.readApiError(err, 'Failed to send requests.')
+        };
       }
     });
   }
@@ -539,7 +553,11 @@ export class CreateRequestComponent implements OnInit {
           Boolean(contact.email || contact.phone),
           inviteChannel
         )
-      )
+      ),
+      catchError((err) => {
+        this.lastSubmitError = this.readApiError(err);
+        return of(false);
+      })
     );
   }
 

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map, switchMap, timeout } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
 import { AdminTokenService } from './admin-token';
 
@@ -34,6 +34,7 @@ export type BusinessUpgradeSubmitResult = {
 @Injectable({ providedIn: 'root' })
 export class BusinessUpgradeService {
   private api = environment.API_URL;
+  private readonly requestTimeoutMs = 15000;
 
   constructor(
     private http: HttpClient,
@@ -65,6 +66,7 @@ export class BusinessUpgradeService {
       { phone: normalizedPhone },
       { headers }
     ).pipe(
+      timeout(this.requestTimeoutMs),
       map(() => ({ ok: true })),
       catchError((primaryErr) =>
         this.adminTokens.getToken().pipe(
@@ -85,6 +87,7 @@ export class BusinessUpgradeService {
               { phone: normalizedPhone },
               { headers: adminHeaders }
             ).pipe(
+              timeout(this.requestTimeoutMs),
               map(() => ({ ok: true })),
               catchError((adminErr) =>
                 of({
@@ -109,6 +112,12 @@ export class BusinessUpgradeService {
     const token = this.getToken();
     const headers = this.buildAuthHeaders(token);
     const userId = this.getUserIdFromToken(token);
+    if (!headers) {
+      return of({
+        ok: false,
+        reason: 'Session expired. Please login again before payment activation.'
+      });
+    }
 
     const payload = {
       company_name: input.companyName,
@@ -138,17 +147,47 @@ export class BusinessUpgradeService {
     return this.http.post<{ data?: { id?: string | number } }>(
       `${this.api}/items/business_upgrade_requests`,
       payload,
-      headers ? { headers } : {}
+      { headers }
     ).pipe(
+      timeout(this.requestTimeoutMs),
       map((res) => ({ ok: true, id: res?.data?.id })),
-      catchError((err) => {
-        const reason =
-          err?.error?.errors?.[0]?.message ||
-          err?.error?.errors?.[0]?.extensions?.reason ||
-          err?.message ||
-          'Failed to submit payment request.';
-        return of({ ok: false, reason } as BusinessUpgradeSubmitResult);
-      })
+      catchError((primaryErr) =>
+        this.adminTokens.getToken().pipe(
+          switchMap((adminToken) => {
+            if (!adminToken) {
+              return of({
+                ok: false,
+                reason: this.resolveUpgradeSubmitError(primaryErr)
+              } as BusinessUpgradeSubmitResult);
+            }
+
+            const adminHeaders = new HttpHeaders({
+              Authorization: `Bearer ${adminToken}`
+            });
+
+            return this.http.post<{ data?: { id?: string | number } }>(
+              `${this.api}/items/business_upgrade_requests`,
+              payload,
+              { headers: adminHeaders }
+            ).pipe(
+              timeout(this.requestTimeoutMs),
+              map((res) => ({ ok: true, id: res?.data?.id })),
+              catchError((adminErr) =>
+                of({
+                  ok: false,
+                  reason: this.resolveUpgradeSubmitError(adminErr, primaryErr)
+                } as BusinessUpgradeSubmitResult)
+              )
+            );
+          }),
+          catchError((adminTokenErr) =>
+            of({
+              ok: false,
+              reason: this.resolveUpgradeSubmitError(adminTokenErr, primaryErr)
+            } as BusinessUpgradeSubmitResult)
+          )
+        )
+      )
     );
   }
 
@@ -237,6 +276,38 @@ export class BusinessUpgradeService {
     }
 
     return 'Could not save phone number to your account profile right now. Please try again shortly.';
+  }
+
+  private resolveUpgradeSubmitError(err: any, originalErr?: any): string {
+    const message = this.readErrorMessage(err, this.readErrorMessage(originalErr, ''));
+    const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes('permission') ||
+      normalized.includes("doesn't have permission") ||
+      normalized.includes('forbidden')
+    ) {
+      return 'Your account role cannot create Business activation requests. In Directus, allow Create on business_upgrade_requests for this role, or configure admin token proxy.';
+    }
+
+    if (
+      normalized.includes('unauthorized') ||
+      normalized.includes('invalid token') ||
+      normalized.includes('token')
+    ) {
+      return 'Session expired. Please login again before payment activation.';
+    }
+
+    if (
+      normalized.includes('connection refused') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('networkerror') ||
+      normalized.includes('timeout')
+    ) {
+      return 'Could not reach backend services while submitting payment activation request. Please retry shortly.';
+    }
+
+    return 'Failed to submit payment activation request.';
   }
 
   private readErrorMessage(err: any, fallback: string): string {

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy } from '@angular/core';
+import { AfterViewInit, Component, OnDestroy } from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { HeaderComponent } from './header/header';
@@ -39,12 +39,14 @@ import { SidebarComponent } from './sidebar/sidebar';
     </div>
   `
 })
-export class LayoutComponent implements OnDestroy {
+export class LayoutComponent implements OnDestroy, AfterViewInit {
   isTransitioning = false;
-  private navSub: Subscription;
+  private navSub?: Subscription;
   private transitionTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private router: Router) {
+  constructor(private router: Router) {}
+
+  ngAfterViewInit() {
     this.navSub = this.router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
         setTimeout(() => this.triggerTransition(), 0);
@@ -63,7 +65,7 @@ export class LayoutComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
-    this.navSub.unsubscribe();
+    this.navSub?.unsubscribe();
     if (this.transitionTimer) {
       clearTimeout(this.transitionTimer);
     }

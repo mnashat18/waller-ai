@@ -3,8 +3,8 @@ import { Component, AfterViewInit, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../services/auth';
-import { filter } from 'rxjs/operators';
-import { Subscription } from 'rxjs';
+import { of, Subscription } from 'rxjs';
+import { catchError, filter, timeout } from 'rxjs/operators';
 
 @Component({
   selector: 'app-authlanding',
@@ -14,6 +14,7 @@ import { Subscription } from 'rxjs';
   styleUrls: ['./authlanding.css']
 })
 export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
+  private readonly authTimeoutMs = 20000;
 
   texts = [
     'Enterprise wellness intelligence for every team.',
@@ -98,16 +99,21 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       password: this.signup.password,
       first_name: this.signup.firstName.trim(),
       last_name: this.signup.lastName.trim()
-    }).subscribe({
-      next: () => {
-        this.feedback = 'Account created. Log in now and complete Business setup to unlock your 14-day trial.';
+    }).pipe(
+      timeout(this.authTimeoutMs),
+      catchError((err) => {
+        this.feedback = this.resolveSignupError(err);
         this.submitting = false;
-        this.switchAuth('login');
-      },
-      error: () => {
-        this.feedback = 'Unable to create account right now.';
-        this.submitting = false;
+        return of(null);
+      })
+    ).subscribe((result) => {
+      if (!result) {
+        return;
       }
+
+      this.feedback = 'Account created. Log in now and complete Business setup to unlock your 14-day trial.';
+      this.submitting = false;
+      this.switchAuth('login');
     });
   }
 
@@ -118,16 +124,21 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
     this.submitting = true;
     this.feedback = 'Signing you in...';
-    this.auth.login(this.login.email.trim(), this.login.password).subscribe({
-      next: () => {
+    this.auth.login(this.login.email.trim(), this.login.password).pipe(
+      timeout(this.authTimeoutMs),
+      catchError((err) => {
+        this.feedback = this.resolveLoginError(err);
         this.submitting = false;
-        this.closeAuth();
-        this.router.navigateByUrl('/dashboard');
-      },
-      error: () => {
-        this.feedback = 'Invalid email or password.';
-        this.submitting = false;
+        return of(null);
+      })
+    ).subscribe((result) => {
+      if (!result) {
+        return;
       }
+
+      this.submitting = false;
+      this.closeAuth();
+      this.router.navigateByUrl('/dashboard');
     });
   }
 
@@ -149,6 +160,45 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     const path = this.route.snapshot.routeConfig?.path;
     const hasAuthQuery = this.route.snapshot.queryParamMap.has('auth');
     return path === 'login' || path === 'signup' || hasAuthQuery;
+  }
+
+  private resolveSignupError(err: any): string {
+    const message =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.message ||
+      '';
+    const normalized = String(message).toLowerCase();
+
+    if (normalized.includes('timeout')) {
+      return 'Signup is taking too long. Please try again.';
+    }
+    if (err?.status === 409 || normalized.includes('already')) {
+      return 'This email is already registered. Try logging in instead.';
+    }
+    if (err?.status === 400) {
+      return 'Signup data is invalid. Please check your input.';
+    }
+    return 'Unable to create account right now.';
+  }
+
+  private resolveLoginError(err: any): string {
+    const message =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.message ||
+      '';
+    const normalized = String(message).toLowerCase();
+
+    if (normalized.includes('timeout')) {
+      return 'Login is taking too long. Please try again.';
+    }
+    if (err?.status === 401 || normalized.includes('invalid')) {
+      return 'Invalid email or password.';
+    }
+    return 'Unable to login right now.';
   }
 
   /* ===== TEXT ROTATION ===== */
