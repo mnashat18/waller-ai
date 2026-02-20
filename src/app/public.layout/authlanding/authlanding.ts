@@ -4,7 +4,7 @@ import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/ro
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../services/auth';
 import { of, Subscription } from 'rxjs';
-import { catchError, filter, timeout } from 'rxjs/operators';
+import { catchError, filter, switchMap, timeout } from 'rxjs/operators';
 
 @Component({
   selector: 'app-authlanding',
@@ -92,15 +92,31 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       return;
     }
 
+    const email = this.signup.email.trim();
+    const password = this.signup.password;
+
     this.submitting = true;
     this.feedback = 'Creating your account...';
     this.auth.signup({
-      email: this.signup.email.trim(),
-      password: this.signup.password,
+      email,
+      password,
       first_name: this.signup.firstName.trim(),
       last_name: this.signup.lastName.trim()
     }).pipe(
       timeout(this.authTimeoutMs),
+      switchMap(() => {
+        this.feedback = 'Account created. Signing you in...';
+        return this.auth.login(email, password).pipe(
+          timeout(this.authTimeoutMs),
+          catchError((err) => {
+            this.authMode = 'login';
+            this.login.email = email;
+            this.feedback = this.resolvePostSignupLoginError(err);
+            this.submitting = false;
+            return of(null);
+          })
+        );
+      }),
       catchError((err) => {
         this.feedback = this.resolveSignupError(err);
         this.submitting = false;
@@ -111,9 +127,9 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         return;
       }
 
-      this.feedback = 'Account created. Log in now and complete Business setup to unlock your 14-day trial.';
       this.submitting = false;
-      this.switchAuth('login');
+      this.closeAuth();
+      this.router.navigateByUrl('/dashboard');
     });
   }
 
@@ -199,6 +215,24 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       return 'Invalid email or password.';
     }
     return 'Unable to login right now.';
+  }
+
+  private resolvePostSignupLoginError(err: any): string {
+    const message =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.message ||
+      '';
+    const normalized = String(message).toLowerCase();
+
+    if (normalized.includes('timeout')) {
+      return 'Account created, but auto-login timed out. Please log in manually.';
+    }
+    if (err?.status === 401 || normalized.includes('invalid') || normalized.includes('verify')) {
+      return 'Account created successfully. Please verify your email if required, then log in.';
+    }
+    return 'Account created successfully. Please log in to continue.';
   }
 
   /* ===== TEXT ROTATION ===== */
