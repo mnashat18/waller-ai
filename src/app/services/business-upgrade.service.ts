@@ -1,9 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map, switchMap, timeout } from 'rxjs/operators';
+import { catchError, map, timeout } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
-import { AdminTokenService } from './admin-token';
 
 export type BusinessUpgradeRequestInput = {
   companyName: string;
@@ -36,10 +35,7 @@ export class BusinessUpgradeService {
   private api = environment.API_URL;
   private readonly requestTimeoutMs = 15000;
 
-  constructor(
-    private http: HttpClient,
-    private adminTokens: AdminTokenService
-  ) {}
+  constructor(private http: HttpClient) {}
 
   syncUserPhone(phone: string): Observable<BusinessUpgradeSubmitResult> {
     const normalizedPhone = this.normalizePhone(phone);
@@ -52,7 +48,6 @@ export class BusinessUpgradeService {
 
     const token = this.getToken();
     const headers = this.buildAuthHeaders(token);
-    const userId = this.getUserIdFromToken(token);
 
     if (!headers) {
       return of({
@@ -68,42 +63,11 @@ export class BusinessUpgradeService {
     ).pipe(
       timeout(this.requestTimeoutMs),
       map(() => ({ ok: true })),
-      catchError((primaryErr) =>
-        this.adminTokens.getToken().pipe(
-          switchMap((adminToken) => {
-            if (!adminToken || !userId) {
-              return of({
-                ok: false,
-                reason: this.resolvePhoneSyncError(primaryErr)
-              } as BusinessUpgradeSubmitResult);
-            }
-
-            const adminHeaders = new HttpHeaders({
-              Authorization: `Bearer ${adminToken}`
-            });
-
-            return this.http.patch(
-              `${this.api}/users/${encodeURIComponent(userId)}`,
-              { phone: normalizedPhone },
-              { headers: adminHeaders }
-            ).pipe(
-              timeout(this.requestTimeoutMs),
-              map(() => ({ ok: true })),
-              catchError((adminErr) =>
-                of({
-                  ok: false,
-                  reason: this.resolvePhoneSyncError(adminErr, primaryErr)
-                } as BusinessUpgradeSubmitResult)
-              )
-            );
-          }),
-          catchError((adminTokenErr) =>
-            of({
-              ok: false,
-              reason: this.resolvePhoneSyncError(adminTokenErr, primaryErr)
-            } as BusinessUpgradeSubmitResult)
-          )
-        )
+      catchError((err) =>
+        of({
+          ok: false,
+          reason: this.resolvePhoneSyncError(err)
+        } as BusinessUpgradeSubmitResult)
       )
     );
   }
@@ -111,7 +75,6 @@ export class BusinessUpgradeService {
   submitRequest(input: BusinessUpgradeRequestInput): Observable<BusinessUpgradeSubmitResult> {
     const token = this.getToken();
     const headers = this.buildAuthHeaders(token);
-    const userId = this.getUserIdFromToken(token);
     if (!headers) {
       return of({
         ok: false,
@@ -119,6 +82,9 @@ export class BusinessUpgradeService {
       });
     }
 
+    // Keep create payload limited to business profile fields.
+    // System fields (requested_by_user/requested_at/status/plan fields) are expected
+    // to be injected by Directus presets/policies.
     const payload = {
       company_name: input.companyName,
       business_name: input.businessName,
@@ -130,18 +96,7 @@ export class BusinessUpgradeService {
       country: input.country,
       city: input.city,
       address: input.address,
-      website: input.website,
-      notes: input.notes,
-      billing_cycle: input.billingCycle === 'yearly' ? 'Yearly' : 'Monthly',
-      requested_plan: 'business',
-      current_plan: 'free',
-      base_price_usd: input.basePriceUsd,
-      discount_usd: input.discountUsd,
-      final_price_usd: input.finalPriceUsd,
-      is_new_user_offer: input.isNewUserOffer,
-      requested_by_user: userId ?? undefined,
-      requested_at: new Date().toISOString(),
-      status: 'Pending'
+      website: input.website
     };
 
     return this.http.post<{ data?: { id?: string | number } }>(
@@ -151,42 +106,11 @@ export class BusinessUpgradeService {
     ).pipe(
       timeout(this.requestTimeoutMs),
       map((res) => ({ ok: true, id: res?.data?.id })),
-      catchError((primaryErr) =>
-        this.adminTokens.getToken().pipe(
-          switchMap((adminToken) => {
-            if (!adminToken) {
-              return of({
-                ok: false,
-                reason: this.resolveUpgradeSubmitError(primaryErr)
-              } as BusinessUpgradeSubmitResult);
-            }
-
-            const adminHeaders = new HttpHeaders({
-              Authorization: `Bearer ${adminToken}`
-            });
-
-            return this.http.post<{ data?: { id?: string | number } }>(
-              `${this.api}/items/business_upgrade_requests`,
-              payload,
-              { headers: adminHeaders }
-            ).pipe(
-              timeout(this.requestTimeoutMs),
-              map((res) => ({ ok: true, id: res?.data?.id })),
-              catchError((adminErr) =>
-                of({
-                  ok: false,
-                  reason: this.resolveUpgradeSubmitError(adminErr, primaryErr)
-                } as BusinessUpgradeSubmitResult)
-              )
-            );
-          }),
-          catchError((adminTokenErr) =>
-            of({
-              ok: false,
-              reason: this.resolveUpgradeSubmitError(adminTokenErr, primaryErr)
-            } as BusinessUpgradeSubmitResult)
-          )
-        )
+      catchError((err) =>
+        of({
+          ok: false,
+          reason: this.resolveUpgradeSubmitError(err)
+        } as BusinessUpgradeSubmitResult)
       )
     );
   }
@@ -254,8 +178,8 @@ export class BusinessUpgradeService {
     return trimmed.replace(/\s+/g, '');
   }
 
-  private resolvePhoneSyncError(err: any, originalErr?: any): string {
-    const message = this.readErrorMessage(err, this.readErrorMessage(originalErr, ''));
+  private resolvePhoneSyncError(err: any): string {
+    const message = this.readErrorMessage(err, '');
     const normalized = message.toLowerCase();
 
     if (
@@ -264,7 +188,7 @@ export class BusinessUpgradeService {
       normalized.includes("doesn't have permission") ||
       normalized.includes('forbidden')
     ) {
-      return 'Phone could not be saved to your account profile because backend permissions for users are missing. Please allow updating Users (own) or run admin token proxy, then try again.';
+      return 'Phone could not be saved to your account profile because backend permissions for users are missing. Please allow updating Users (own), then try again.';
     }
 
     if (
@@ -272,22 +196,29 @@ export class BusinessUpgradeService {
       normalized.includes('failed to fetch') ||
       normalized.includes('networkerror')
     ) {
-      return 'Could not reach admin token proxy. Start it with: npm run start:admin-token-proxy, then retry.';
+      return 'Could not reach backend services while saving phone number. Please retry shortly.';
     }
 
     return 'Could not save phone number to your account profile right now. Please try again shortly.';
   }
 
-  private resolveUpgradeSubmitError(err: any, originalErr?: any): string {
-    const message = this.readErrorMessage(err, this.readErrorMessage(originalErr, ''));
+  private resolveUpgradeSubmitError(err: any): string {
+    const message = this.readErrorMessage(err, '');
     const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes('permission to access field') ||
+      normalized.includes('field') && normalized.includes('queried in root')
+    ) {
+      return 'Create permission موجودة، لكن في حقول داخل payload مش متاحة في Field Permissions. فعّل الحقول المستخدمة في Create أو خفّض الحقول المرسلة.';
+    }
 
     if (
       normalized.includes('permission') ||
       normalized.includes("doesn't have permission") ||
       normalized.includes('forbidden')
     ) {
-      return 'Your account cannot create Business activation requests right now. In Directus, allow Create on business_upgrade_requests for authenticated users, or configure admin token proxy.';
+      return 'Your account cannot create Business activation requests right now. In Directus, allow Create on business_upgrade_requests for authenticated users.';
     }
 
     if (
