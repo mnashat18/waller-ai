@@ -42,8 +42,6 @@ type LocalTrialState = {
   expires_at: string;
 };
 
-type SubscriptionOwnerField = 'user';
-
 @Injectable({ providedIn: 'root' })
 export class SubscriptionService {
   private api = environment.API_URL;
@@ -56,7 +54,6 @@ export class SubscriptionService {
   private readonly fallbackBusinessYearlyPrice = 1680;
   private plansEndpointForbidden = false;
   private subscriptionsEndpointForbidden = false;
-  private subscriptionOwnerFilterUnavailable = false;
   private businessUpgradeRequestsEndpointForbidden = false;
   private readonly subscriptionFields = [
     'id',
@@ -126,7 +123,7 @@ export class SubscriptionService {
       return of(null);
     }
 
-    return this.fetchSubscriptionRecords(userId, 'Active', 10).pipe(
+    return this.fetchSubscriptionRecords('Active', 10).pipe(
       map((records) => {
         let remoteActive: UserSubscription | null = null;
         for (const record of records) {
@@ -161,7 +158,7 @@ export class SubscriptionService {
       return of(false);
     }
 
-    return this.fetchSubscriptionRecords(userId, undefined, 50).pipe(
+    return this.fetchSubscriptionRecords(undefined, 50).pipe(
       map((records) => {
         const hadBusinessBefore = records.some((record) => {
           const code = (record?.plan?.code ?? '').toString().toLowerCase();
@@ -302,6 +299,16 @@ export class SubscriptionService {
     if (!userId) {
       return;
     }
+    this.writeBusinessOnboardingMarker(userId, true);
+  }
+
+  grantLocalBusinessTrialNow(): void {
+    const userId = this.getUserId();
+    if (!userId) {
+      return;
+    }
+
+    this.ensureLocalTrialState(userId);
     this.writeBusinessOnboardingMarker(userId, true);
   }
 
@@ -470,8 +477,7 @@ export class SubscriptionService {
 
   private fetchLatestBusinessUpgradeRequest(userId: string): Observable<boolean> {
     if (this.businessUpgradeRequestsEndpointForbidden) {
-      // If role cannot read this collection, do not block onboarding flow.
-      return of(true);
+      return of(false);
     }
 
     const token = this.getUserToken();
@@ -496,7 +502,7 @@ export class SubscriptionService {
       catchError((err) => {
         if (this.isForbiddenError(err)) {
           this.businessUpgradeRequestsEndpointForbidden = true;
-          return of(true);
+          return of(false);
         }
         return of(false);
       })
@@ -576,49 +582,11 @@ export class SubscriptionService {
     }
   }
 
-  private fetchSubscriptionRecords(userId: string, status?: string, limit = 1): Observable<any[]> {
+  private fetchSubscriptionRecords(status?: string, limit = 1): Observable<any[]> {
     if (this.subscriptionsEndpointForbidden) {
       return of([]);
     }
 
-    if (this.subscriptionOwnerFilterUnavailable) {
-      return this.fetchSubscriptionRecordsWithoutOwnerFilter(status, limit).pipe(
-        catchError((err) => {
-          if (this.isForbiddenError(err)) {
-            this.subscriptionsEndpointForbidden = true;
-          }
-          return of([]);
-        })
-      );
-    }
-
-    const ownerField: SubscriptionOwnerField = 'user';
-
-    return this.fetchSubscriptionRecordsByOwnerField(userId, ownerField, status, limit).pipe(
-      catchError((err) => {
-        if (!this.isForbiddenError(err)) {
-          return of([]);
-        }
-
-        if (this.isOwnerFieldFilterUnavailable(err)) {
-          this.subscriptionOwnerFilterUnavailable = true;
-          return this.fetchSubscriptionRecordsWithoutOwnerFilter(status, limit).pipe(
-            catchError((noOwnerErr) => {
-              if (this.isForbiddenError(noOwnerErr)) {
-                this.subscriptionsEndpointForbidden = true;
-              }
-              return of([]);
-            })
-          );
-        }
-
-        this.subscriptionsEndpointForbidden = true;
-        return of([]);
-      })
-    );
-  }
-
-  private fetchSubscriptionRecordsWithoutOwnerFilter(status?: string, limit = 1): Observable<any[]> {
     const params = new URLSearchParams({
       'sort': '-date_created',
       'limit': String(limit),
@@ -635,37 +603,7 @@ export class SubscriptionService {
       map((res) => res.data ?? []),
       catchError((err) => {
         if (this.isForbiddenError(err)) {
-          throw err;
-        }
-        return of([]);
-      })
-    );
-  }
-
-  private fetchSubscriptionRecordsByOwnerField(
-    userId: string,
-    ownerField: SubscriptionOwnerField,
-    status?: string,
-    limit = 1
-  ): Observable<any[]> {
-    const params = new URLSearchParams({
-      'sort': '-date_created',
-      'limit': String(limit),
-      'fields': this.subscriptionFields
-    });
-    params.set(`filter[${ownerField}][_eq]`, userId);
-
-    if (status) {
-      params.set('filter[status][_eq]', status);
-    }
-
-    return this.http.get<{ data?: Array<any> }>(
-      `${this.api}/items/subscriptions?${params.toString()}`
-    ).pipe(
-      map((res) => res.data ?? []),
-      catchError((err) => {
-        if (this.isForbiddenError(err)) {
-          throw err;
+          this.subscriptionsEndpointForbidden = true;
         }
         return of([]);
       })
@@ -853,26 +791,6 @@ export class SubscriptionService {
 
   private isForbiddenError(err: any): boolean {
     return err?.status === 401 || err?.status === 403;
-  }
-
-  private isOwnerFieldFilterUnavailable(err: any): boolean {
-    const reason =
-      err?.error?.errors?.[0]?.extensions?.reason ||
-      err?.error?.errors?.[0]?.message ||
-      err?.message ||
-      '';
-    const normalized = String(reason).toLowerCase();
-
-    if (!normalized.includes('permission to access field')) {
-      return false;
-    }
-
-    return (
-      normalized.includes('"user"') ||
-      normalized.includes("'user'") ||
-      normalized.includes('"user_created"') ||
-      normalized.includes("'user_created'")
-    );
   }
 
 }

@@ -3,10 +3,10 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { of } from 'rxjs';
-import { catchError, switchMap, timeout } from 'rxjs/operators';
+import { catchError, timeout } from 'rxjs/operators';
 import { AuthService } from '../../services/auth';
 import { BusinessUpgradeService, BusinessUpgradeSubmitResult } from '../../services/business-upgrade.service';
-import { Plan, SubscriptionService, UserSubscription } from '../../services/subscription.service';
+import { Plan, SubscriptionService } from '../../services/subscription.service';
 
 @Component({
   selector: 'app-upgrade-plan',
@@ -83,35 +83,25 @@ export class UpgradePlanComponent implements OnInit {
     this.feedback = 'Submitting your payment activation request...';
     const normalizedPhone = this.form.phone.trim();
 
-    this.upgradeService.syncUserPhone(normalizedPhone).pipe(
-      switchMap((phoneSync) => {
-        if (!phoneSync.ok) {
-          this.submitting = false;
-          this.feedbackType = 'error';
-          this.feedback = phoneSync.reason ?? 'Please provide a valid phone number to continue.';
-          return of(null);
-        }
-
-        return this.upgradeService.submitRequest({
-          ownerName: this.form.ownerName.trim(),
-          companyName: this.form.companyName.trim(),
-          businessName: this.form.businessName.trim(),
-          workEmail: this.form.workEmail.trim(),
-          phone: normalizedPhone,
-          industry: this.form.industry.trim(),
-          teamSize: this.form.teamSize.trim(),
-          country: this.form.country.trim(),
-          city: this.form.city.trim(),
-          address: this.form.address.trim(),
-          website: this.form.website.trim(),
-          notes: this.form.notes.trim(),
-          billingCycle: 'monthly',
-          basePriceUsd: this.basePriceUsd,
-          discountUsd: this.discountUsd,
-          finalPriceUsd: this.totalTodayUsd,
-          isNewUserOffer: this.isTrialEligible
-        });
-      }),
+    this.upgradeService.submitRequest({
+      ownerName: this.form.ownerName.trim(),
+      companyName: this.form.companyName.trim(),
+      businessName: this.form.businessName.trim(),
+      workEmail: this.form.workEmail.trim(),
+      phone: normalizedPhone,
+      industry: this.form.industry.trim(),
+      teamSize: this.form.teamSize.trim(),
+      country: this.form.country.trim(),
+      city: this.form.city.trim(),
+      address: this.form.address.trim(),
+      website: this.form.website.trim(),
+      notes: this.form.notes.trim(),
+      billingCycle: 'monthly',
+      basePriceUsd: this.basePriceUsd,
+      discountUsd: this.discountUsd,
+      finalPriceUsd: this.totalTodayUsd,
+      isNewUserOffer: this.isTrialEligible
+    }).pipe(
       timeout(this.submitTimeoutMs),
       catchError((err) =>
         of<BusinessUpgradeSubmitResult>({
@@ -133,48 +123,23 @@ export class UpgradePlanComponent implements OnInit {
 
       this.requestId = result.id ?? null;
       this.subscriptionService.markBusinessOnboardingComplete();
-
-      if (this.isTrialEligible) {
-        this.activateBusinessTrialAfterSubmit();
-        return;
-      }
+      this.subscriptionService.grantLocalBusinessTrialNow();
+      // Best effort profile sync; do not block activation flow on this request.
+      this.upgradeService.syncUserPhone(normalizedPhone).pipe(
+        timeout(10000),
+        catchError(() => of({ ok: false }))
+      ).subscribe();
+      // Sync backend trial in background, but unlock and redirect immediately.
+      this.subscriptionService.startBusinessTrial().pipe(
+        timeout(15000),
+        catchError(() => of(null))
+      ).subscribe();
 
       this.submitting = false;
       this.feedbackType = 'success';
-      this.feedback =
-        'Payment activation request submitted successfully. Our team will review your details for paid Business activation.';
+      this.feedback = 'Activation request submitted successfully. Redirecting to dashboard...';
+      this.router.navigateByUrl('/dashboard');
     });
-  }
-
-  private activateBusinessTrialAfterSubmit() {
-    this.subscriptionService.startBusinessTrial().subscribe((subscription) => {
-      this.submitting = false;
-      const hasActiveStatus = (subscription?.status ?? '').trim().toLowerCase() === 'active';
-      const localTrial = this.isLocalTrialSubscription(subscription);
-      if (hasActiveStatus && !localTrial) {
-        this.feedbackType = 'success';
-        this.feedback =
-          'Business trial activated successfully. Paid Business features are now unlocked for 14 days.';
-        setTimeout(() => {
-          this.router.navigateByUrl('/business-center');
-        }, 1200);
-        return;
-      }
-      if (hasActiveStatus && localTrial) {
-        this.feedbackType = 'info';
-        this.feedback =
-          'Request submitted. Trial is pending backend subscription activation. If Business pages stay locked, make sure your subscription status is set to Active in Directus.';
-        return;
-      }
-
-      this.feedbackType = 'success';
-      this.feedback =
-        'Request submitted successfully. Trial activation will be completed shortly.';
-    });
-  }
-
-  private isLocalTrialSubscription(subscription: UserSubscription | null): boolean {
-    return typeof subscription?.id === 'string' && subscription.id.startsWith('local-trial-');
   }
 
   private loadBusinessPlan() {

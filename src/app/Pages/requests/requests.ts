@@ -10,7 +10,7 @@ import type {
 } from '../../components/create-request-modal/create-request-modal';
 import { AdminTokenService } from '../../services/admin-token';
 import { Organization, OrganizationService } from '../../services/organization.service';
-import { SubscriptionService, UserSubscription } from '../../services/subscription.service';
+import { SubscriptionService } from '../../services/subscription.service';
 import { environment } from 'src/environments/environment';
 
 @Component({
@@ -29,7 +29,6 @@ export class Requests implements OnInit {
   canCreateRequests = false;
   currentPlanName = 'Free';
   currentPlanCode = 'free';
-  currentSubscription: UserSubscription | null = null;
   isBusinessTrial = false;
   trialDaysRemaining: number | null = null;
   businessTrialNotice = '';
@@ -507,16 +506,15 @@ export class Requests implements OnInit {
   }
 
   private loadPlanAccess() {
-    this.subscriptionService.ensureBusinessTrial().subscribe((subscription) => {
-      this.currentSubscription = subscription;
-      this.currentPlanName = subscription?.plan?.name ?? (this.isBusinessSubscriptionActive(subscription) ? 'Business' : 'Free');
-      this.currentPlanCode = subscription?.plan?.code ?? 'free';
-      this.isBusinessTrial = Boolean(subscription?.is_trial);
+    this.subscriptionService.getBusinessAccessSnapshot().subscribe((snapshot) => {
+      this.currentPlanCode = snapshot.planCode || 'free';
+      this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+      this.isBusinessTrial = snapshot.isBusinessTrial;
       this.trialDaysRemaining =
-        typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
+        typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
       this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
       this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
-      this.canCreateRequests = this.isBusinessSubscriptionActive(subscription);
+      this.canCreateRequests = snapshot.hasBusinessAccess;
       if (!this.requestedByDefault) {
         this.requestedByDefault = this.currentPlanName;
       }
@@ -696,13 +694,6 @@ export class Requests implements OnInit {
       this.pendingCreateModal = true;
       this.openCreateModal();
     }
-  }
-
-  private isBusinessSubscriptionActive(subscription: UserSubscription | null): boolean {
-    if (!subscription) {
-      return false;
-    }
-    return (subscription.status ?? '').trim().toLowerCase() === 'active';
   }
 
 }

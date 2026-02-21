@@ -75,6 +75,8 @@ export class BusinessUpgradeService {
   submitRequest(input: BusinessUpgradeRequestInput): Observable<BusinessUpgradeSubmitResult> {
     const token = this.getToken();
     const headers = this.buildAuthHeaders(token);
+    const userId = this.getUserIdFromToken(token);
+
     if (!headers) {
       return of({
         ok: false,
@@ -83,8 +85,7 @@ export class BusinessUpgradeService {
     }
 
     // Keep create payload limited to business profile fields.
-    // System fields (requested_by_user/requested_at/status/plan fields) are expected
-    // to be injected by Directus presets/policies.
+    // System fields are injected by Directus presets/policies.
     const payload = {
       company_name: input.companyName,
       business_name: input.businessName,
@@ -100,18 +101,65 @@ export class BusinessUpgradeService {
     };
 
     return this.http.post<{ data?: { id?: string | number } }>(
-      `${this.api}/items/business_upgrade_requests`,
+      `${this.api}/items/business_upgrade_requests?fields=id`,
       payload,
       { headers }
     ).pipe(
       timeout(this.requestTimeoutMs),
       map((res) => ({ ok: true, id: res?.data?.id })),
-      catchError((err) =>
-        of({
-          ok: false,
-          reason: this.resolveUpgradeSubmitError(err)
-        } as BusinessUpgradeSubmitResult)
-      )
+      catchError((err) => {
+        // Some Directus setups create the row but fail response serialization due field permissions.
+        // Confirm by checking latest own request.
+        if (!this.isCreateLikelySuccessful(err) || !userId) {
+          return of({
+            ok: false,
+            reason: this.resolveUpgradeSubmitError(err)
+          } as BusinessUpgradeSubmitResult);
+        }
+
+        return this.findLatestOwnUpgradeRequest(userId, headers).pipe(
+          map((found) => {
+            if (found.exists) {
+              return { ok: true, id: found.id } as BusinessUpgradeSubmitResult;
+            }
+            return {
+              ok: false,
+              reason: this.resolveUpgradeSubmitError(err)
+            } as BusinessUpgradeSubmitResult;
+          }),
+          catchError(() =>
+            of({
+              ok: false,
+              reason: this.resolveUpgradeSubmitError(err)
+            } as BusinessUpgradeSubmitResult)
+          )
+        );
+      })
+    );
+  }
+
+  private findLatestOwnUpgradeRequest(
+    userId: string,
+    headers: HttpHeaders
+  ): Observable<{ exists: boolean; id?: string | number }> {
+    const params = new URLSearchParams({
+      'filter[requested_by_user][_eq]': userId,
+      'sort': '-id',
+      'limit': '1',
+      'fields': 'id'
+    });
+
+    return this.http.get<{ data?: Array<{ id?: string | number }> }>(
+      `${this.api}/items/business_upgrade_requests?${params.toString()}`,
+      { headers }
+    ).pipe(
+      map((res) => {
+        const first = Array.isArray(res?.data) ? res.data[0] : undefined;
+        if (!first) {
+          return { exists: false };
+        }
+        return { exists: true, id: first.id };
+      })
     );
   }
 
@@ -208,9 +256,9 @@ export class BusinessUpgradeService {
 
     if (
       normalized.includes('permission to access field') ||
-      normalized.includes('field') && normalized.includes('queried in root')
+      (normalized.includes('field') && normalized.includes('queried in root'))
     ) {
-      return 'Create permission موجودة، لكن في حقول داخل payload مش متاحة في Field Permissions. فعّل الحقول المستخدمة في Create أو خفّض الحقول المرسلة.';
+      return 'Create permission exists, but one or more fields in the request are blocked by Field Permissions/Validation.';
     }
 
     if (
@@ -239,6 +287,20 @@ export class BusinessUpgradeService {
     }
 
     return 'Failed to submit payment activation request.';
+  }
+
+  private isCreateLikelySuccessful(err: any): boolean {
+    const status = err?.status;
+    if (status !== 403) {
+      return false;
+    }
+
+    const reason = this.readErrorMessage(err, '').toLowerCase();
+    return (
+      reason.includes('queried in root') ||
+      reason.includes('permission to access field') ||
+      reason.includes('field')
+    );
   }
 
   private readErrorMessage(err: any, fallback: string): string {
