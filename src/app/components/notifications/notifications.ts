@@ -20,6 +20,7 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   notifications: NotificationItem[] = [];
 
   private refreshSub?: Subscription;
+  private notificationsEndpointForbidden = false;
 
   constructor(
     private http: HttpClient,
@@ -89,6 +90,13 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   }
 
   private loadNotifications() {
+    if (this.notificationsEndpointForbidden) {
+      this.notifications = [];
+      this.loading = false;
+      this.cdr.detectChanges();
+      return;
+    }
+
     const token = this.getUserToken();
     const userId = this.getUserId(token);
 
@@ -153,7 +161,13 @@ export class NotificationsComponent implements OnInit, OnDestroy {
       { headers }
     ).pipe(
       map(res => (res.data ?? []).map((record) => this.mapNotification(record))),
-      catchError(() => of([]))
+      catchError((err) => {
+        if (this.isForbiddenError(err)) {
+          this.notificationsEndpointForbidden = true;
+          this.refreshSub?.unsubscribe();
+        }
+        return of([]);
+      })
     );
   }
 
@@ -246,7 +260,7 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -294,6 +308,10 @@ export class NotificationsComponent implements OnInit, OnDestroy {
     } catch {
       return false;
     }
+  }
+
+  private isForbiddenError(err: any): boolean {
+    return err?.status === 401 || err?.status === 403;
   }
 
   get unreadCount(): number {

@@ -329,7 +329,7 @@
 
         <div class="billing-summary">
           <div class="chip">Current Plan: {{ currentPlanName }}</div>
-          <div class="chip">Renewal Date: {{ formatDate(subscription?.expires_at) }}</div>
+          <div class="chip">Renewal Date: {{ formatDate(renewalDate || undefined) }}</div>
         </div>
 
         <div class="mt-4 flex flex-wrap gap-3">

@@ -1,9 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
-import { SubscriptionService } from './subscription.service';
 
 export type ExportJob = {
   id?: string | number;
@@ -83,13 +82,19 @@ type ActionResult = {
 @Injectable({ providedIn: 'root' })
 export class BusinessCenterService {
   private api = environment.API_URL;
+  private exportJobsForbidden = false;
+  private messageInvitesForbidden = false;
+  private locationsForbidden = false;
+  private rulesForbidden = false;
+  private invoicesForbidden = false;
 
-  constructor(
-    private http: HttpClient,
-    private subscriptions: SubscriptionService
-  ) {}
+  constructor(private http: HttpClient) {}
 
   listExportJobs(limit = 25): Observable<ExportJob[]> {
+    if (this.exportJobsForbidden) {
+      return of([]);
+    }
+
     const access = this.getAccessContext();
     const params = new URLSearchParams({
       sort: '-date_created',
@@ -103,6 +108,9 @@ export class BusinessCenterService {
       ).pipe(
         map((res) => res.data ?? []),
         catchError((err) => {
+          if (this.isForbiddenError(err)) {
+            this.exportJobsForbidden = true;
+          }
           this.rememberAccessError(err, 'Business export center is not accessible with your current backend permissions.');
           return of([]);
         })
@@ -135,6 +143,10 @@ export class BusinessCenterService {
   }
 
   listMessageInvites(limit = 25): Observable<MessageInvite[]> {
+    if (this.messageInvitesForbidden) {
+      return of([]);
+    }
+
     const access = this.getAccessContext();
     const params = new URLSearchParams({
       sort: '-date_created',
@@ -148,6 +160,9 @@ export class BusinessCenterService {
       ).pipe(
         map((res) => res.data ?? []),
         catchError((err) => {
+          if (this.isForbiddenError(err)) {
+            this.messageInvitesForbidden = true;
+          }
           this.rememberAccessError(err, 'Business invites are not accessible with your current backend permissions.');
           return of([]);
         })
@@ -179,6 +194,10 @@ export class BusinessCenterService {
   }
 
   listLocations(limit = 50): Observable<BusinessLocation[]> {
+    if (this.locationsForbidden) {
+      return of([]);
+    }
+
     const access = this.getAccessContext();
     const params = new URLSearchParams({
       sort: '-date_created',
@@ -192,6 +211,9 @@ export class BusinessCenterService {
       ).pipe(
         map((res) => res.data ?? []),
         catchError((err) => {
+          if (this.isForbiddenError(err)) {
+            this.locationsForbidden = true;
+          }
           this.rememberAccessError(err, 'Business locations are not accessible with your current backend permissions.');
           return of([]);
         })
@@ -224,6 +246,10 @@ export class BusinessCenterService {
   }
 
   listAutomationRules(limit = 50): Observable<AutomationRule[]> {
+    if (this.rulesForbidden) {
+      return of([]);
+    }
+
     const access = this.getAccessContext();
     const params = new URLSearchParams({
       sort: '-date_created',
@@ -237,6 +263,9 @@ export class BusinessCenterService {
       ).pipe(
         map((res) => res.data ?? []),
         catchError((err) => {
+          if (this.isForbiddenError(err)) {
+            this.rulesForbidden = true;
+          }
           this.rememberAccessError(err, 'Business automation rules are not accessible with your current backend permissions.');
           return of([]);
         })
@@ -290,6 +319,10 @@ export class BusinessCenterService {
   }
 
   listInvoices(limit = 25): Observable<BusinessInvoice[]> {
+    if (this.invoicesForbidden) {
+      return of([]);
+    }
+
     const access = this.getAccessContext();
     const params = new URLSearchParams({
       sort: '-date_created',
@@ -306,6 +339,9 @@ export class BusinessCenterService {
           amount_usd: this.toNumber(invoice.amount_usd)
         }))),
         catchError((err) => {
+          if (this.isForbiddenError(err)) {
+            this.invoicesForbidden = true;
+          }
           this.rememberAccessError(err, 'Business billing data is not accessible with your current backend permissions.');
           return of([]);
         })
@@ -357,30 +393,13 @@ export class BusinessCenterService {
   }
 
   private withActiveBusinessListAccess<T>(factory: () => Observable<T[]>): Observable<T[]> {
-    return this.subscriptions.hasActiveBusinessSubscription().pipe(
-      switchMap((hasAccess) => {
-        if (!hasAccess) {
-          this.rememberAccessError(null, 'Business features require an active subscription status.');
-          return of([] as T[]);
-        }
-        return factory();
-      }),
+    return factory().pipe(
       catchError(() => of([] as T[]))
     );
   }
 
   private withActiveBusinessActionAccess(factory: () => Observable<ActionResult>): Observable<ActionResult> {
-    return this.subscriptions.hasActiveBusinessSubscription().pipe(
-      switchMap((hasAccess) => {
-        if (!hasAccess) {
-          this.rememberAccessError(null, 'Business features require an active subscription status.');
-          return of({
-            ok: false,
-            message: 'Business features require an active subscription status.'
-          });
-        }
-        return factory();
-      }),
+    return factory().pipe(
       catchError(() =>
         of({
           ok: false,
@@ -474,6 +493,10 @@ export class BusinessCenterService {
       return Number.isNaN(parsed) ? undefined : parsed;
     }
     return undefined;
+  }
+
+  private isForbiddenError(err: any): boolean {
+    return err?.status === 401 || err?.status === 403;
   }
 }
 

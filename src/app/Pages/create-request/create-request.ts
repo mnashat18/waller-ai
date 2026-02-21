@@ -710,6 +710,7 @@ export class CreateRequestComponent implements OnInit {
   ): Observable<boolean> {
     const payload: CreateRequestPayload = {
       Target: requestedBy,
+      org_id: this.org?.id ?? undefined,
       requested_by_user: this.getUserIdFromToken(token) ?? undefined,
       requested_by_org: this.org?.id ?? undefined,
       requested_for_user: contact.userId,
@@ -774,12 +775,11 @@ export class CreateRequestComponent implements OnInit {
     const expiresAt = new Date(now);
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    const channel = this.resolveInviteChannel(contact, inviteChannel);
     const payload = {
+      org_id: this.org?.id ?? undefined,
       request: requestId,
       email: contact.email ?? undefined,
       phone: contact.phone ?? undefined,
-      channel,
       token: inviteToken,
       status: 'Sent',
       sent_at: now.toISOString(),
@@ -960,6 +960,7 @@ export class CreateRequestComponent implements OnInit {
 
 type CreateRequestPayload = {
   Target: string;
+  org_id?: string;
   requested_by_user?: string;
   requested_by_org?: string;
   requested_for?: string;

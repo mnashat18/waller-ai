@@ -14,10 +14,15 @@ export type Organization = {
 @Injectable({ providedIn: 'root' })
 export class OrganizationService {
   private api = environment.API_URL;
+  private endpointForbidden = false;
 
   constructor(private http: HttpClient) {}
 
   getUserOrganization(): Observable<Organization | null> {
+    if (this.endpointForbidden) {
+      return of(null);
+    }
+
     const userId = this.getUserId();
     if (!userId) {
       return of(null);
@@ -26,7 +31,7 @@ export class OrganizationService {
     const params = new URLSearchParams({
       'filter[user][_eq]': userId,
       'limit': '1',
-      'fields': 'id,role,org.id,org.name,org.industry'
+      'fields': 'id,role,org.id,org.name'
     });
 
     return this.http.get<{ data?: Array<any> }>(
@@ -44,7 +49,12 @@ export class OrganizationService {
           role: record.role
         } as Organization;
       }),
-      catchError(() => of(null))
+      catchError((err) => {
+        if (err?.status === 401 || err?.status === 403) {
+          this.endpointForbidden = true;
+        }
+        return of(null);
+      })
     );
   }
 

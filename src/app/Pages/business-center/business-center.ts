@@ -2,8 +2,6 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
-import { of } from 'rxjs';
-import { catchError, timeout } from 'rxjs/operators';
 import {
   AutomationRule,
   BusinessCenterService,
@@ -12,7 +10,7 @@ import {
   ExportJob,
   MessageInvite
 } from '../../services/business-center.service';
-import { SubscriptionService, UserSubscription } from '../../services/subscription.service';
+import { SubscriptionService } from '../../services/subscription.service';
 
 type Feedback = {
   type: 'success' | 'error' | 'info';
@@ -33,7 +31,7 @@ export class BusinessCenterComponent implements OnInit {
   isBusinessTrial = false;
   trialDaysRemaining: number | null = null;
   currentPlanName = 'Free';
-  subscription: UserSubscription | null = null;
+  renewalDate: string | null = null;
   feedback: Feedback | null = null;
 
   exportsLoading = false;
@@ -292,22 +290,13 @@ export class BusinessCenterComponent implements OnInit {
 
   private loadAccessState() {
     this.loadingAccess = true;
-    this.subscriptions.ensureBusinessTrial().pipe(
-      timeout(7000),
-      catchError(() => {
-        this.feedback = {
-          type: 'error',
-          message: 'Could not verify Business access right now. Refresh the page or open Billing.'
-        };
-        return of(null);
-      })
-    ).subscribe((subscription) => {
-      this.subscription = subscription;
-      this.currentPlanName = subscription?.plan?.name ?? (this.isBusinessSubscriptionActive(subscription) ? 'Business' : 'Free');
-      this.isBusinessTrial = Boolean(subscription?.is_trial);
+    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
+      this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+      this.isBusinessTrial = snapshot.isBusinessTrial;
       this.trialDaysRemaining =
-        typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
-      this.hasBusinessAccess = this.isBusinessSubscriptionActive(subscription);
+        typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
+      this.hasBusinessAccess = snapshot.hasBusinessAccess;
+      this.renewalDate = snapshot.trialExpiresAt;
       this.loadingAccess = false;
 
       if (this.hasBusinessAccess) {
@@ -423,10 +412,4 @@ export class BusinessCenterComponent implements OnInit {
     return Number.isNaN(parsed) ? undefined : parsed;
   }
 
-  private isBusinessSubscriptionActive(subscription: UserSubscription | null): boolean {
-    if (!subscription) {
-      return false;
-    }
-    return (subscription.status ?? '').trim().toLowerCase() === 'active';
-  }
 }
