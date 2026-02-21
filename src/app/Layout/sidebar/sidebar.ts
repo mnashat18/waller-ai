@@ -69,11 +69,6 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.trialExpired = snapshot.trialExpired;
     this.trialDaysRemaining = snapshot.daysRemaining;
 
-    const code = (snapshot.planCode || 'free').toLowerCase();
-    if (code === 'business' && snapshot.hasBusinessAccess) {
-      this.planLabel = 'Business';
-      return;
-    }
-    this.planLabel = 'Free';
+    this.planLabel = snapshot.hasBusinessAccess ? 'Business' : 'Free';
   }
 }

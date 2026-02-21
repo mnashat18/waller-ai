@@ -204,11 +204,11 @@ export class NewUserGuideComponent implements OnInit, OnDestroy {
     guide: RouteGuide,
     subscription: UserSubscription | null
   ): GuideState {
-    const planCode = (subscription?.plan?.code ?? 'free').toLowerCase();
+    const isActiveSubscription = (subscription?.status ?? '').trim().toLowerCase() === 'active';
     const trialDaysRemaining =
       typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
     const isTrialActive =
-      planCode === 'business' &&
+      isActiveSubscription &&
       Boolean(subscription?.is_trial) &&
       (trialDaysRemaining === null || trialDaysRemaining > 0);
 

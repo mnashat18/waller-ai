@@ -29,46 +29,27 @@ const mobileProfileMatch: CanMatchFn = () => isMobileViewport();
 const mobileAuditLogsMatch: CanMatchFn = () => isMobileViewport();
 const mobileBusinessCenterMatch: CanMatchFn = () => isMobileViewport();
 
-const hasAdminAccess = (): boolean => {
-  if (typeof localStorage === 'undefined') {
-    return false;
-  }
-
-  const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
-  if (!token) {
-    return false;
-  }
-
-  const parts = token.split('.');
-  if (parts.length !== 3) {
-    return false;
-  }
-
-  try {
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-    return payload?.['admin_access'] === true;
-  } catch {
-    return false;
-  }
-};
-
 const paidBusinessGuard: CanActivateFn = () => {
-  if (hasAdminAccess()) {
-    return true;
-  }
-
   const subscriptions = inject(SubscriptionService);
   const router = inject(Router);
 
-  return subscriptions.ensureBusinessTrial().pipe(
-    map((subscription) => {
-      const code = (subscription?.plan?.code ?? '').toLowerCase();
-      if (code === 'business') {
-        return true;
-      }
-      return router.createUrlTree(['/payment']);
-    }),
+  return subscriptions.hasActiveBusinessSubscription().pipe(
+    map((hasActiveSubscription) =>
+      hasActiveSubscription ? true : router.createUrlTree(['/payment'])
+    ),
     catchError(() => of(router.createUrlTree(['/payment'])))
+  );
+};
+
+const paymentAccessGuard: CanActivateFn = () => {
+  const subscriptions = inject(SubscriptionService);
+  const router = inject(Router);
+
+  return subscriptions.hasActiveBusinessSubscription().pipe(
+    map((hasActiveSubscription) =>
+      hasActiveSubscription ? router.createUrlTree(['/dashboard']) : true
+    ),
+    catchError(() => of(true))
   );
 };
 
@@ -218,12 +199,14 @@ export const routes: Routes = [
       },
       {
         path: 'upgrade-plan',
+        canActivate: [paymentAccessGuard],
         loadComponent: () =>
           import('./public.layout/upgrade-plan/upgrade-plan')
             .then(m => m.UpgradePlanComponent)
       },
       {
         path: 'payment',
+        canActivate: [paymentAccessGuard],
         loadComponent: () =>
           import('./public.layout/upgrade-plan/upgrade-plan')
             .then(m => m.UpgradePlanComponent)

@@ -12,7 +12,7 @@
       <span class="chip">Plan: {{ currentPlanName }}</span>
       <span *ngIf="isBusinessTrial" class="chip">{{ trialDaysLabel() }}</span>
       <a routerLink="/requests" class="chip">Back to Requests</a>
-      <a routerLink="/business-center" class="chip">Business Center</a>
+      <a *ngIf="canCreateRequests" routerLink="/business-center" class="chip">Business Center</a>
     </div>
   </div>
 

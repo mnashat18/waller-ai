@@ -114,7 +114,7 @@ export class Requests implements OnInit {
     this.cdr.detectChanges();
 
     const contact = this.normalizeContact(requestedFor);
-    const canInvite = this.currentPlanCode === 'business' || this.isAdminUser;
+    const canInvite = this.canCreateRequests;
 
     if ((contact.email || contact.phone) && !canInvite) {
       this.submitFeedback = {
@@ -509,14 +509,14 @@ export class Requests implements OnInit {
   private loadPlanAccess() {
     this.subscriptionService.ensureBusinessTrial().subscribe((subscription) => {
       this.currentSubscription = subscription;
-      this.currentPlanName = subscription?.plan?.name ?? 'Free';
+      this.currentPlanName = subscription?.plan?.name ?? (this.isBusinessSubscriptionActive(subscription) ? 'Business' : 'Free');
       this.currentPlanCode = subscription?.plan?.code ?? 'free';
       this.isBusinessTrial = Boolean(subscription?.is_trial);
       this.trialDaysRemaining =
         typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
       this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
       this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
-      this.canCreateRequests = ['admin', 'business'].includes(this.currentPlanCode) || this.isAdminUser;
+      this.canCreateRequests = this.isBusinessSubscriptionActive(subscription);
       if (!this.requestedByDefault) {
         this.requestedByDefault = this.currentPlanName;
       }
@@ -696,6 +696,13 @@ export class Requests implements OnInit {
       this.pendingCreateModal = true;
       this.openCreateModal();
     }
+  }
+
+  private isBusinessSubscriptionActive(subscription: UserSubscription | null): boolean {
+    if (!subscription) {
+      return false;
+    }
+    return (subscription.status ?? '').trim().toLowerCase() === 'active';
   }
 
 }

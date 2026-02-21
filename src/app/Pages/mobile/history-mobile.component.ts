@@ -5,6 +5,7 @@ import { RouterModule } from '@angular/router';
 import { map } from 'rxjs/operators';
 import { AdminTokenService } from '../../services/admin-token';
 import { NotificationsComponent } from '../../components/notifications/notifications';
+import { SubscriptionService } from '../../services/subscription.service';
 import { environment } from 'src/environments/environment';
 
 @Component({
@@ -23,14 +24,17 @@ export class HistoryMobileComponent implements OnInit {
 
   scans: HistoryScan[] = [];
   selectedScan: HistoryScan | null = null;
+  hasBusinessAccess = false;
 
   constructor(
     private http: HttpClient,
     private adminTokens: AdminTokenService,
+    private subscriptions: SubscriptionService,
     private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
+    this.loadPlanState();
     this.loadHistory();
   }
 
@@ -252,6 +256,13 @@ export class HistoryMobileComponent implements OnInit {
       return Number.isNaN(parsed) ? null : parsed;
     }
     return null;
+  }
+
+  private loadPlanState() {
+    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
+      this.hasBusinessAccess = snapshot.hasBusinessAccess;
+      this.cdr.detectChanges();
+    });
   }
 }
 

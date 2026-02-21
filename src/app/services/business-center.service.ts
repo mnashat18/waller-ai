@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
+import { SubscriptionService } from './subscription.service';
 
 export type ExportJob = {
   id?: string | number;
@@ -72,7 +73,6 @@ export type BillingProfileInput = {
 type AccessContext = {
   token: string | null;
   userId: string | null;
-  isAdmin: boolean;
 };
 
 type ActionResult = {
@@ -84,7 +84,10 @@ type ActionResult = {
 export class BusinessCenterService {
   private api = environment.API_URL;
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private subscriptions: SubscriptionService
+  ) {}
 
   listExportJobs(limit = 25): Observable<ExportJob[]> {
     const access = this.getAccessContext();
@@ -93,18 +96,17 @@ export class BusinessCenterService {
       limit: String(limit),
       fields: 'id,name,dataset,format,schedule_type,next_run_at,status,file_url,date_created'
     });
-    if (!access.isAdmin && access.userId) {
-      params.set('filter[user_created][_eq]', access.userId);
-    }
-    return this.http.get<{ data?: ExportJob[] }>(
-      `${this.api}/items/business_export_jobs?${params.toString()}`,
-      this.requestOptions(access.token)
-    ).pipe(
-      map((res) => res.data ?? []),
-      catchError((err) => {
-        this.rememberAccessError(err, 'Business export center is not accessible with your current backend permissions.');
-        return of([]);
-      })
+    return this.withActiveBusinessListAccess(() =>
+      this.http.get<{ data?: ExportJob[] }>(
+        `${this.api}/items/business_export_jobs?${params.toString()}`,
+        this.requestOptions(access.token)
+      ).pipe(
+        map((res) => res.data ?? []),
+        catchError((err) => {
+          this.rememberAccessError(err, 'Business export center is not accessible with your current backend permissions.');
+          return of([]);
+        })
+      )
     );
   }
 
@@ -120,13 +122,15 @@ export class BusinessCenterService {
       requested_by_user: access.userId ?? undefined,
       requested_at: new Date().toISOString()
     };
-    return this.http.post(
-      `${this.api}/items/business_export_jobs`,
-      body,
-      this.requestOptions(access.token)
-    ).pipe(
-      map(() => ({ ok: true, message: 'Export job queued successfully.' })),
-      catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to queue export job.') }))
+    return this.withActiveBusinessActionAccess(() =>
+      this.http.post(
+        `${this.api}/items/business_export_jobs`,
+        body,
+        this.requestOptions(access.token)
+      ).pipe(
+        map(() => ({ ok: true, message: 'Export job queued successfully.' })),
+        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to queue export job.') }))
+      )
     );
   }
 
@@ -137,18 +141,17 @@ export class BusinessCenterService {
       limit: String(limit),
       fields: 'id,recipient_name,phone,channel,message_template,status,sent_at,date_created'
     });
-    if (!access.isAdmin && access.userId) {
-      params.set('filter[user_created][_eq]', access.userId);
-    }
-    return this.http.get<{ data?: MessageInvite[] }>(
-      `${this.api}/items/business_message_invites?${params.toString()}`,
-      this.requestOptions(access.token)
-    ).pipe(
-      map((res) => res.data ?? []),
-      catchError((err) => {
-        this.rememberAccessError(err, 'Business invites are not accessible with your current backend permissions.');
-        return of([]);
-      })
+    return this.withActiveBusinessListAccess(() =>
+      this.http.get<{ data?: MessageInvite[] }>(
+        `${this.api}/items/business_message_invites?${params.toString()}`,
+        this.requestOptions(access.token)
+      ).pipe(
+        map((res) => res.data ?? []),
+        catchError((err) => {
+          this.rememberAccessError(err, 'Business invites are not accessible with your current backend permissions.');
+          return of([]);
+        })
+      )
     );
   }
 
@@ -163,13 +166,15 @@ export class BusinessCenterService {
       requested_by_user: access.userId ?? undefined,
       sent_at: new Date().toISOString()
     };
-    return this.http.post(
-      `${this.api}/items/business_message_invites`,
-      body,
-      this.requestOptions(access.token)
-    ).pipe(
-      map(() => ({ ok: true, message: 'Message invite queued.' })),
-      catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to queue message invite.') }))
+    return this.withActiveBusinessActionAccess(() =>
+      this.http.post(
+        `${this.api}/items/business_message_invites`,
+        body,
+        this.requestOptions(access.token)
+      ).pipe(
+        map(() => ({ ok: true, message: 'Message invite queued.' })),
+        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to queue message invite.') }))
+      )
     );
   }
 
@@ -180,18 +185,17 @@ export class BusinessCenterService {
       limit: String(limit),
       fields: 'id,name,code,city,country,address,manager_name,is_active,date_created'
     });
-    if (!access.isAdmin && access.userId) {
-      params.set('filter[user_created][_eq]', access.userId);
-    }
-    return this.http.get<{ data?: BusinessLocation[] }>(
-      `${this.api}/items/business_locations?${params.toString()}`,
-      this.requestOptions(access.token)
-    ).pipe(
-      map((res) => res.data ?? []),
-      catchError((err) => {
-        this.rememberAccessError(err, 'Business locations are not accessible with your current backend permissions.');
-        return of([]);
-      })
+    return this.withActiveBusinessListAccess(() =>
+      this.http.get<{ data?: BusinessLocation[] }>(
+        `${this.api}/items/business_locations?${params.toString()}`,
+        this.requestOptions(access.token)
+      ).pipe(
+        map((res) => res.data ?? []),
+        catchError((err) => {
+          this.rememberAccessError(err, 'Business locations are not accessible with your current backend permissions.');
+          return of([]);
+        })
+      )
     );
   }
 
@@ -207,13 +211,15 @@ export class BusinessCenterService {
       is_active: payload.is_active !== false,
       owner_user: access.userId ?? undefined
     };
-    return this.http.post(
-      `${this.api}/items/business_locations`,
-      body,
-      this.requestOptions(access.token)
-    ).pipe(
-      map(() => ({ ok: true, message: 'Location added.' })),
-      catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to add location.') }))
+    return this.withActiveBusinessActionAccess(() =>
+      this.http.post(
+        `${this.api}/items/business_locations`,
+        body,
+        this.requestOptions(access.token)
+      ).pipe(
+        map(() => ({ ok: true, message: 'Location added.' })),
+        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to add location.') }))
+      )
     );
   }
 
@@ -224,18 +230,17 @@ export class BusinessCenterService {
       limit: String(limit),
       fields: 'id,rule_name,trigger_type,action_type,threshold,cooldown_minutes,is_active,status,date_created'
     });
-    if (!access.isAdmin && access.userId) {
-      params.set('filter[user_created][_eq]', access.userId);
-    }
-    return this.http.get<{ data?: AutomationRule[] }>(
-      `${this.api}/items/business_automation_rules?${params.toString()}`,
-      this.requestOptions(access.token)
-    ).pipe(
-      map((res) => res.data ?? []),
-      catchError((err) => {
-        this.rememberAccessError(err, 'Business automation rules are not accessible with your current backend permissions.');
-        return of([]);
-      })
+    return this.withActiveBusinessListAccess(() =>
+      this.http.get<{ data?: AutomationRule[] }>(
+        `${this.api}/items/business_automation_rules?${params.toString()}`,
+        this.requestOptions(access.token)
+      ).pipe(
+        map((res) => res.data ?? []),
+        catchError((err) => {
+          this.rememberAccessError(err, 'Business automation rules are not accessible with your current backend permissions.');
+          return of([]);
+        })
+      )
     );
   }
 
@@ -251,13 +256,15 @@ export class BusinessCenterService {
       status: payload.is_active ? 'Active' : 'Paused',
       owner_user: access.userId ?? undefined
     };
-    return this.http.post(
-      `${this.api}/items/business_automation_rules`,
-      body,
-      this.requestOptions(access.token)
-    ).pipe(
-      map(() => ({ ok: true, message: 'Automation rule created.' })),
-      catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to create automation rule.') }))
+    return this.withActiveBusinessActionAccess(() =>
+      this.http.post(
+        `${this.api}/items/business_automation_rules`,
+        body,
+        this.requestOptions(access.token)
+      ).pipe(
+        map(() => ({ ok: true, message: 'Automation rule created.' })),
+        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to create automation rule.') }))
+      )
     );
   }
 
@@ -267,16 +274,18 @@ export class BusinessCenterService {
     }
     const access = this.getAccessContext();
     const isActive = !rule.is_active;
-    return this.http.patch(
-      `${this.api}/items/business_automation_rules/${encodeURIComponent(String(rule.id))}`,
-      {
-        is_active: isActive,
-        status: isActive ? 'Active' : 'Paused'
-      },
-      this.requestOptions(access.token)
-    ).pipe(
-      map(() => ({ ok: true, message: isActive ? 'Rule activated.' : 'Rule paused.' })),
-      catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to update rule.') }))
+    return this.withActiveBusinessActionAccess(() =>
+      this.http.patch(
+        `${this.api}/items/business_automation_rules/${encodeURIComponent(String(rule.id))}`,
+        {
+          is_active: isActive,
+          status: isActive ? 'Active' : 'Paused'
+        },
+        this.requestOptions(access.token)
+      ).pipe(
+        map(() => ({ ok: true, message: isActive ? 'Rule activated.' : 'Rule paused.' })),
+        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to update rule.') }))
+      )
     );
   }
 
@@ -287,21 +296,20 @@ export class BusinessCenterService {
       limit: String(limit),
       fields: 'id,invoice_number,amount_usd,due_date,status,billing_cycle,date_created'
     });
-    if (!access.isAdmin && access.userId) {
-      params.set('filter[user_created][_eq]', access.userId);
-    }
-    return this.http.get<{ data?: BusinessInvoice[] }>(
-      `${this.api}/items/business_invoices?${params.toString()}`,
-      this.requestOptions(access.token)
-    ).pipe(
-      map((res) => (res.data ?? []).map((invoice) => ({
-        ...invoice,
-        amount_usd: this.toNumber(invoice.amount_usd)
-      }))),
-      catchError((err) => {
-        this.rememberAccessError(err, 'Business billing data is not accessible with your current backend permissions.');
-        return of([]);
-      })
+    return this.withActiveBusinessListAccess(() =>
+      this.http.get<{ data?: BusinessInvoice[] }>(
+        `${this.api}/items/business_invoices?${params.toString()}`,
+        this.requestOptions(access.token)
+      ).pipe(
+        map((res) => (res.data ?? []).map((invoice) => ({
+          ...invoice,
+          amount_usd: this.toNumber(invoice.amount_usd)
+        }))),
+        catchError((err) => {
+          this.rememberAccessError(err, 'Business billing data is not accessible with your current backend permissions.');
+          return of([]);
+        })
+      )
     );
   }
 
@@ -314,13 +322,15 @@ export class BusinessCenterService {
       requested_by_user: access.userId ?? undefined,
       requested_at: new Date().toISOString()
     };
-    return this.http.post(
-      `${this.api}/items/business_renewal_requests`,
-      body,
-      this.requestOptions(access.token)
-    ).pipe(
-      map(() => ({ ok: true, message: 'Renewal request submitted.' })),
-      catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to submit renewal request.') }))
+    return this.withActiveBusinessActionAccess(() =>
+      this.http.post(
+        `${this.api}/items/business_renewal_requests`,
+        body,
+        this.requestOptions(access.token)
+      ).pipe(
+        map(() => ({ ok: true, message: 'Renewal request submitted.' })),
+        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to submit renewal request.') }))
+      )
     );
   }
 
@@ -334,13 +344,49 @@ export class BusinessCenterService {
       address: profile.address || null,
       status: 'Active'
     };
-    return this.http.post(
-      `${this.api}/items/business_billing_profiles`,
-      body,
-      this.requestOptions(access.token)
-    ).pipe(
-      map(() => ({ ok: true, message: 'Billing profile saved.' })),
-      catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to save billing profile.') }))
+    return this.withActiveBusinessActionAccess(() =>
+      this.http.post(
+        `${this.api}/items/business_billing_profiles`,
+        body,
+        this.requestOptions(access.token)
+      ).pipe(
+        map(() => ({ ok: true, message: 'Billing profile saved.' })),
+        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to save billing profile.') }))
+      )
+    );
+  }
+
+  private withActiveBusinessListAccess<T>(factory: () => Observable<T[]>): Observable<T[]> {
+    return this.subscriptions.hasActiveBusinessSubscription().pipe(
+      switchMap((hasAccess) => {
+        if (!hasAccess) {
+          this.rememberAccessError(null, 'Business features require an active subscription status.');
+          return of([] as T[]);
+        }
+        return factory();
+      }),
+      catchError(() => of([] as T[]))
+    );
+  }
+
+  private withActiveBusinessActionAccess(factory: () => Observable<ActionResult>): Observable<ActionResult> {
+    return this.subscriptions.hasActiveBusinessSubscription().pipe(
+      switchMap((hasAccess) => {
+        if (!hasAccess) {
+          this.rememberAccessError(null, 'Business features require an active subscription status.');
+          return of({
+            ok: false,
+            message: 'Business features require an active subscription status.'
+          });
+        }
+        return factory();
+      }),
+      catchError(() =>
+        of({
+          ok: false,
+          message: 'Business access validation failed.'
+        })
+      )
     );
   }
 
@@ -354,8 +400,7 @@ export class BusinessCenterService {
     const payload = token ? this.decodeJwtPayload(token) : null;
     const userIdValue = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
     const userId = typeof userIdValue === 'string' && userIdValue ? userIdValue : null;
-    const isAdmin = payload?.['admin_access'] === true;
-    return { token, userId, isAdmin };
+    return { token, userId };
   }
 
   private getToken(): string | null {
@@ -431,3 +476,4 @@ export class BusinessCenterService {
     return undefined;
   }
 }
+

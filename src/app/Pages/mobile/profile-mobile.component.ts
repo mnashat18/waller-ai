@@ -8,6 +8,7 @@ import { catchError, map, switchMap } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
 import { AuthService } from '../../services/auth';
 import { AdminTokenService } from '../../services/admin-token';
+import { SubscriptionService } from '../../services/subscription.service';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 
 @Component({
@@ -20,6 +21,7 @@ export class ProfileMobileComponent implements OnInit {
   loading = true;
   errorMessage = '';
   profile: ProfileView | null = null;
+  hasBusinessAccess = false;
   editing = false;
   saving = false;
   saveFeedback: { type: 'success' | 'error' | 'info'; message: string } | null = null;
@@ -37,10 +39,12 @@ export class ProfileMobileComponent implements OnInit {
     private cdr: ChangeDetectorRef,
     private auth: AuthService,
     private adminTokens: AdminTokenService,
+    private subscriptions: SubscriptionService,
     private router: Router
   ) {}
 
   ngOnInit() {
+    this.loadPlanState();
     this.loadProfile();
   }
 
@@ -545,6 +549,13 @@ export class ProfileMobileComponent implements OnInit {
   private finishLogout() {
     this.auth.logout();
     this.router.navigateByUrl('/');
+  }
+
+  private loadPlanState() {
+    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
+      this.hasBusinessAccess = snapshot.hasBusinessAccess;
+      this.cdr.detectChanges();
+    });
   }
 }
 

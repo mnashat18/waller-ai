@@ -3,7 +3,6 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { Observable, of } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
-import { AdminTokenService } from './admin-token';
 
 export type Plan = {
   id?: string | number;
@@ -43,7 +42,7 @@ type LocalTrialState = {
   expires_at: string;
 };
 
-type SubscriptionOwnerField = 'user_created' | 'user';
+type SubscriptionOwnerField = 'user';
 
 @Injectable({ providedIn: 'root' })
 export class SubscriptionService {
@@ -55,12 +54,9 @@ export class SubscriptionService {
   private readonly businessOnboardingStoragePrefix = 'wellar_business_onboarding_v1_';
   private readonly fallbackBusinessMonthlyPrice = 200;
   private readonly fallbackBusinessYearlyPrice = 1680;
-  private readonly businessRoleHints = ['business'];
-  private readonly freeRoleHints = ['user', 'free'];
-  private businessRoleId: string | null = environment.BUSINESS_ROLE_ID || null;
-  private freeRoleId: string | null = environment.FREE_ROLE_ID || null;
   private plansEndpointForbidden = false;
   private subscriptionsEndpointForbidden = false;
+  private subscriptionOwnerFilterUnavailable = false;
   private businessUpgradeRequestsEndpointForbidden = false;
   private readonly subscriptionFields = [
     'id',
@@ -80,10 +76,7 @@ export class SubscriptionService {
     'plan.sort_order'
   ].join(',');
 
-  constructor(
-    private http: HttpClient,
-    private adminTokens: AdminTokenService
-  ) {}
+  constructor(private http: HttpClient) {}
 
   getPlans(): Observable<Plan[]> {
     if (this.plansEndpointForbidden) {
@@ -138,7 +131,7 @@ export class SubscriptionService {
         let remoteActive: UserSubscription | null = null;
         for (const record of records) {
           const subscription = this.normalizeSubscription(record);
-          if (subscription && this.isSubscriptionCurrentlyActive(subscription)) {
+          if (this.hasActiveBusinessStatus(subscription)) {
             remoteActive = subscription;
             break;
           }
@@ -150,19 +143,15 @@ export class SubscriptionService {
   }
 
   ensureBusinessTrial(): Observable<UserSubscription | null> {
-    const userId = this.getUserId();
-    if (!userId) {
-      return of(null);
-    }
-
     return this.getActiveSubscription().pipe(
-      switchMap((subscription) =>
-        this.syncRoleAndRefreshIfNeeded(userId, subscription).pipe(
-          map(() => subscription),
-          catchError(() => of(subscription))
-        )
-      ),
       catchError(() => of(null))
+    );
+  }
+
+  hasActiveBusinessSubscription(): Observable<boolean> {
+    return this.getActiveSubscription().pipe(
+      map((subscription) => this.hasActiveBusinessStatus(subscription)),
+      catchError(() => of(false))
     );
   }
 
@@ -279,7 +268,7 @@ export class SubscriptionService {
 
     return this.getActiveSubscription().pipe(
       switchMap((subscription) => {
-        if (this.shouldUseBusinessRole(subscription)) {
+        if (this.hasActiveBusinessStatus(subscription)) {
           this.writeBusinessOnboardingMarker(userId, true);
           return of(true);
         }
@@ -376,11 +365,8 @@ export class SubscriptionService {
     userId: string,
     remoteSubscription: UserSubscription | null
   ): UserSubscription | null {
-    if (remoteSubscription && this.isSubscriptionCurrentlyActive(remoteSubscription)) {
-      const remoteCode = (remoteSubscription.plan?.code ?? '').toLowerCase();
-      if (remoteCode && remoteCode !== 'free') {
-        return remoteSubscription;
-      }
+    if (this.hasActiveBusinessStatus(remoteSubscription)) {
+      return remoteSubscription;
     }
 
     const localTrial = this.getLocalTrialSubscription(userId, false);
@@ -399,12 +385,10 @@ export class SubscriptionService {
     userId: string,
     subscription: UserSubscription | null
   ): BusinessAccessSnapshot {
-    const planCode = (subscription?.plan?.code ?? 'free').toLowerCase();
-    const hasBusinessAccess =
-      planCode === this.businessPlanCode &&
-      Boolean(subscription) &&
-      subscription !== null &&
-      this.isSubscriptionCurrentlyActive(subscription);
+    const hasBusinessAccess = this.hasActiveBusinessStatus(subscription);
+    const planCode = hasBusinessAccess
+      ? (subscription?.plan?.code ?? this.businessPlanCode).toLowerCase()
+      : 'free';
 
     const localTrial = this.readLocalTrialState(userId);
     const localTrialExpiresAt = localTrial?.expires_at ?? null;
@@ -597,23 +581,63 @@ export class SubscriptionService {
       return of([]);
     }
 
-    const primaryOwnerField: SubscriptionOwnerField = 'user';
-    const fallbackOwnerField: SubscriptionOwnerField = 'user_created';
+    if (this.subscriptionOwnerFilterUnavailable) {
+      return this.fetchSubscriptionRecordsWithoutOwnerFilter(status, limit).pipe(
+        catchError((err) => {
+          if (this.isForbiddenError(err)) {
+            this.subscriptionsEndpointForbidden = true;
+          }
+          return of([]);
+        })
+      );
+    }
 
-    return this.fetchSubscriptionRecordsByOwnerField(userId, primaryOwnerField, status, limit).pipe(
+    const ownerField: SubscriptionOwnerField = 'user';
+
+    return this.fetchSubscriptionRecordsByOwnerField(userId, ownerField, status, limit).pipe(
       catchError((err) => {
         if (!this.isForbiddenError(err)) {
           return of([]);
         }
 
-        return this.fetchSubscriptionRecordsByOwnerField(userId, fallbackOwnerField, status, limit).pipe(
-          catchError((fallbackErr) => {
-            if (this.isForbiddenError(fallbackErr)) {
-              this.subscriptionsEndpointForbidden = true;
-            }
-            return of([]);
-          })
-        );
+        if (this.isOwnerFieldFilterUnavailable(err)) {
+          this.subscriptionOwnerFilterUnavailable = true;
+          return this.fetchSubscriptionRecordsWithoutOwnerFilter(status, limit).pipe(
+            catchError((noOwnerErr) => {
+              if (this.isForbiddenError(noOwnerErr)) {
+                this.subscriptionsEndpointForbidden = true;
+              }
+              return of([]);
+            })
+          );
+        }
+
+        this.subscriptionsEndpointForbidden = true;
+        return of([]);
+      })
+    );
+  }
+
+  private fetchSubscriptionRecordsWithoutOwnerFilter(status?: string, limit = 1): Observable<any[]> {
+    const params = new URLSearchParams({
+      'sort': '-date_created',
+      'limit': String(limit),
+      'fields': this.subscriptionFields
+    });
+
+    if (status) {
+      params.set('filter[status][_eq]', status);
+    }
+
+    return this.http.get<{ data?: Array<any> }>(
+      `${this.api}/items/subscriptions?${params.toString()}`
+    ).pipe(
+      map((res) => res.data ?? []),
+      catchError((err) => {
+        if (this.isForbiddenError(err)) {
+          throw err;
+        }
+        return of([]);
       })
     );
   }
@@ -756,224 +780,11 @@ export class SubscriptionService {
     return Number.isNaN(timestamp) ? null : timestamp;
   }
 
-  private syncRoleAndRefreshIfNeeded(userId: string, subscription: UserSubscription | null): Observable<void> {
-    const shouldBusinessRole = this.shouldUseBusinessRole(subscription);
-    return this.resolveTargetRoleId(shouldBusinessRole).pipe(
-      switchMap((targetRoleId) => this.updateUserRoleIfDifferent(userId, targetRoleId)),
-      switchMap((changed) => {
-        if (!changed) {
-          return of(void 0);
-        }
-        return this.refreshSessionAfterRoleChange().pipe(
-          map(() => void 0),
-          catchError(() => of(void 0))
-        );
-      }),
-      catchError(() => of(void 0))
-    );
-  }
-
-  private shouldUseBusinessRole(subscription: UserSubscription | null): boolean {
+  private hasActiveBusinessStatus(subscription: UserSubscription | null): boolean {
     if (!subscription) {
       return false;
     }
-    const planCode = (subscription?.plan?.code ?? '').toLowerCase();
-    return planCode === this.businessPlanCode && this.isSubscriptionCurrentlyActive(subscription);
-  }
-
-  private updateUserRoleIfDifferent(userId: string, targetRoleId: string | null): Observable<boolean> {
-    if (!targetRoleId) {
-      return of(false);
-    }
-
-    const currentRoleId = this.getRoleIdFromToken();
-    if (currentRoleId && currentRoleId === targetRoleId) {
-      return of(false);
-    }
-
-    return this.adminTokens.getToken().pipe(
-      switchMap((adminToken) => {
-        if (!adminToken) {
-          return of(false);
-        }
-
-        const headers = new HttpHeaders({
-          Authorization: `Bearer ${adminToken}`
-        });
-
-        return this.http.patch(
-          `${this.api}/users/${encodeURIComponent(userId)}`,
-          { role: targetRoleId },
-          { headers }
-        ).pipe(
-          map(() => true),
-          catchError(() => of(false))
-        );
-      }),
-      catchError(() => of(false))
-    );
-  }
-
-  private resolveTargetRoleId(useBusinessRole: boolean): Observable<string | null> {
-    if (useBusinessRole) {
-      if (this.businessRoleId) {
-        return of(this.businessRoleId);
-      }
-      return this.findRoleIdByHints(this.businessRoleHints).pipe(
-        map((roleId) => {
-          this.businessRoleId = roleId;
-          return roleId;
-        }),
-        catchError(() => of(null))
-      );
-    }
-
-    if (this.freeRoleId) {
-      return of(this.freeRoleId);
-    }
-    return this.findRoleIdByHints(this.freeRoleHints).pipe(
-      map((roleId) => {
-        this.freeRoleId = roleId;
-        return roleId;
-      }),
-      catchError(() => of(null))
-    );
-  }
-
-  private findRoleIdByHints(hints: string[]): Observable<string | null> {
-    return this.adminTokens.getToken().pipe(
-      switchMap((adminToken) => {
-        if (!adminToken) {
-          return of(null);
-        }
-
-        const headers = new HttpHeaders({
-          Authorization: `Bearer ${adminToken}`
-        });
-
-        const params = new URLSearchParams({
-          fields: 'id,name',
-          sort: 'name',
-          limit: '200'
-        });
-
-        return this.http.get<{ data?: Array<{ id?: string | number; name?: string }> }>(
-          `${this.api}/roles?${params.toString()}`,
-          { headers }
-        ).pipe(
-          map((res) => this.pickRoleId(res.data ?? [], hints)),
-          catchError(() => of(null))
-        );
-      }),
-      catchError(() => of(null))
-    );
-  }
-
-  private pickRoleId(
-    roles: Array<{ id?: string | number; name?: string }>,
-    hints: string[]
-  ): string | null {
-    if (!roles.length) {
-      return null;
-    }
-
-    const normalized = roles
-      .map((role) => ({
-        id: this.asId(role.id),
-        name: (role.name ?? '').trim().toLowerCase()
-      }))
-      .filter((role) => role.id && role.name) as Array<{ id: string; name: string }>;
-
-    for (const hint of hints) {
-      const exact = normalized.find((role) => role.name === hint);
-      if (exact) {
-        return exact.id;
-      }
-    }
-
-    for (const hint of hints) {
-      const contains = normalized.find((role) => role.name.includes(hint));
-      if (contains) {
-        return contains.id;
-      }
-    }
-
-    return null;
-  }
-
-  private refreshSessionAfterRoleChange(): Observable<boolean> {
-    const refreshToken = typeof localStorage !== 'undefined' ? localStorage.getItem('refresh_token') : null;
-
-    if (refreshToken) {
-      return this.http.post<any>(
-        `${this.api}/auth/refresh`,
-        { refresh_token: refreshToken }
-      ).pipe(
-        map((res) => this.storeRefreshTokens(res)),
-        catchError(() => this.refreshSessionWithCookie())
-      );
-    }
-
-    if (!this.isSameOriginApi()) {
-      return of(false);
-    }
-
-    return this.refreshSessionWithCookie();
-  }
-
-  private refreshSessionWithCookie(): Observable<boolean> {
-    return this.http.post<any>(
-      `${this.api}/auth/refresh`,
-      { mode: 'session' },
-      { withCredentials: true }
-    ).pipe(
-      map((res) => this.storeRefreshTokens(res)),
-      catchError(() => of(false))
-    );
-  }
-
-  private storeRefreshTokens(res: any): boolean {
-    if (typeof localStorage === 'undefined') {
-      return false;
-    }
-
-    const accessToken = res?.data?.access_token;
-    const refreshToken = res?.data?.refresh_token;
-
-    if (accessToken) {
-      localStorage.setItem('token', accessToken);
-      localStorage.setItem('access_token', accessToken);
-    }
-    if (refreshToken) {
-      localStorage.setItem('refresh_token', refreshToken);
-    }
-
-    return Boolean(accessToken);
-  }
-
-  private getRoleIdFromToken(): string | null {
-    if (typeof localStorage === 'undefined') {
-      return null;
-    }
-
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
-    if (!token) {
-      return null;
-    }
-
-    const payload = this.decodeJwtPayload(token);
-    const roleId = payload?.['role'];
-    return this.asId(roleId);
-  }
-
-  private asId(value: unknown): string | null {
-    if (typeof value === 'string' && value) {
-      return value;
-    }
-    if (typeof value === 'number' && !Number.isNaN(value)) {
-      return String(value);
-    }
-    return null;
+    return this.isStatusActive(subscription.status);
   }
 
   private toNumber(value: unknown): number | undefined {
@@ -1044,15 +855,24 @@ export class SubscriptionService {
     return err?.status === 401 || err?.status === 403;
   }
 
-  private isSameOriginApi(): boolean {
-    if (typeof window === 'undefined') {
+  private isOwnerFieldFilterUnavailable(err: any): boolean {
+    const reason =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.message ||
+      '';
+    const normalized = String(reason).toLowerCase();
+
+    if (!normalized.includes('permission to access field')) {
       return false;
     }
 
-    try {
-      return new URL(this.api, window.location.origin).origin === window.location.origin;
-    } catch {
-      return false;
-    }
+    return (
+      normalized.includes('"user"') ||
+      normalized.includes("'user'") ||
+      normalized.includes('"user_created"') ||
+      normalized.includes("'user_created'")
+    );
   }
+
 }

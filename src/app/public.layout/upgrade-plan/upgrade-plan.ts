@@ -6,7 +6,7 @@ import { of } from 'rxjs';
 import { catchError, switchMap, timeout } from 'rxjs/operators';
 import { AuthService } from '../../services/auth';
 import { BusinessUpgradeService, BusinessUpgradeSubmitResult } from '../../services/business-upgrade.service';
-import { Plan, SubscriptionService } from '../../services/subscription.service';
+import { Plan, SubscriptionService, UserSubscription } from '../../services/subscription.service';
 
 @Component({
   selector: 'app-upgrade-plan',
@@ -149,8 +149,9 @@ export class UpgradePlanComponent implements OnInit {
   private activateBusinessTrialAfterSubmit() {
     this.subscriptionService.startBusinessTrial().subscribe((subscription) => {
       this.submitting = false;
-      const planCode = (subscription?.plan?.code ?? '').toLowerCase();
-      if (planCode === 'business') {
+      const hasActiveStatus = (subscription?.status ?? '').trim().toLowerCase() === 'active';
+      const localTrial = this.isLocalTrialSubscription(subscription);
+      if (hasActiveStatus && !localTrial) {
         this.feedbackType = 'success';
         this.feedback =
           'Business trial activated successfully. Paid Business features are now unlocked for 14 days.';
@@ -159,11 +160,21 @@ export class UpgradePlanComponent implements OnInit {
         }, 1200);
         return;
       }
+      if (hasActiveStatus && localTrial) {
+        this.feedbackType = 'info';
+        this.feedback =
+          'Request submitted. Trial is pending backend subscription activation. If Business pages stay locked, make sure your subscription status is set to Active in Directus.';
+        return;
+      }
 
       this.feedbackType = 'success';
       this.feedback =
         'Request submitted successfully. Trial activation will be completed shortly.';
     });
+  }
+
+  private isLocalTrialSubscription(subscription: UserSubscription | null): boolean {
+    return typeof subscription?.id === 'string' && subscription.id.startsWith('local-trial-');
   }
 
   private loadBusinessPlan() {
@@ -256,7 +267,7 @@ export class UpgradePlanComponent implements OnInit {
       normalized.includes('forbidden') ||
       normalized.includes('permission')
     ) {
-      return 'Your account role cannot submit payment activation requests right now. Please contact support to enable business_upgrade_requests access.';
+      return 'Your account cannot submit payment activation requests right now. Please contact support to enable business_upgrade_requests access.';
     }
 
     if (err?.status === 401 || normalized.includes('unauthorized')) {

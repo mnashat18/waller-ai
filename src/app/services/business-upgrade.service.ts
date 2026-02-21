@@ -287,7 +287,7 @@ export class BusinessUpgradeService {
       normalized.includes("doesn't have permission") ||
       normalized.includes('forbidden')
     ) {
-      return 'Your account role cannot create Business activation requests. In Directus, allow Create on business_upgrade_requests for this role, or configure admin token proxy.';
+      return 'Your account cannot create Business activation requests right now. In Directus, allow Create on business_upgrade_requests for authenticated users, or configure admin token proxy.';
     }
 
     if (

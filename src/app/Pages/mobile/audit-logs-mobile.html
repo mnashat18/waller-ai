@@ -186,6 +186,7 @@
         <span>Audit logs</span>
       </a>
       <a
+        *ngIf="hasBusinessAccess"
         routerLink="/requests/create"
         class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -211,7 +212,7 @@
         </svg>
         <span>Requests</span>
       </a>
-      <a routerLink="/business-center" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+      <a *ngIf="hasBusinessAccess" routerLink="/business-center" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M4 20V8l8-4 8 4v12"></path>
           <path d="M8 20v-5h8v5"></path>

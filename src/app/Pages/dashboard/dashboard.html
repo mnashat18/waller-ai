@@ -24,7 +24,7 @@
         Start New Scan
       </button>
       <a routerLink="/history" class="chip">View History</a>
-      <a routerLink="/business-center" class="chip">Business Center</a>
+      <a *ngIf="hasBusinessAccess" routerLink="/business-center" class="chip">Business Center</a>
       <a *ngIf="!hasBusinessAccess" routerLink="/payment" class="chip">Billing</a>
     </div>
 

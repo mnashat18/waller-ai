@@ -303,13 +303,11 @@ export class BusinessCenterComponent implements OnInit {
       })
     ).subscribe((subscription) => {
       this.subscription = subscription;
-      this.currentPlanName = subscription?.plan?.name ?? 'Free';
-      const currentCode = (subscription?.plan?.code ?? 'free').toLowerCase();
+      this.currentPlanName = subscription?.plan?.name ?? (this.isBusinessSubscriptionActive(subscription) ? 'Business' : 'Free');
       this.isBusinessTrial = Boolean(subscription?.is_trial);
       this.trialDaysRemaining =
         typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
-      const isAdmin = this.isAdminFromToken();
-      this.hasBusinessAccess = isAdmin || currentCode === 'business';
+      this.hasBusinessAccess = this.isBusinessSubscriptionActive(subscription);
       this.loadingAccess = false;
 
       if (this.hasBusinessAccess) {
@@ -402,7 +400,7 @@ export class BusinessCenterComponent implements OnInit {
 
     this.feedback = {
       type: 'error',
-      message: `${details.join(' ')} If you are running locally, start admin token proxy with: npm run start:admin-token-proxy`
+      message: details.join(' ')
     };
   }
 
@@ -425,26 +423,10 @@ export class BusinessCenterComponent implements OnInit {
     return Number.isNaN(parsed) ? undefined : parsed;
   }
 
-  private isAdminFromToken(): boolean {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
-    if (!token) {
+  private isBusinessSubscriptionActive(subscription: UserSubscription | null): boolean {
+    if (!subscription) {
       return false;
     }
-    const payload = this.decodeJwtPayload(token);
-    return payload?.['admin_access'] === true;
-  }
-
-  private decodeJwtPayload(token: string): Record<string, unknown> | null {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return null;
-    }
-
-    try {
-      const payload = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-      return JSON.parse(payload) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+    return (subscription.status ?? '').trim().toLowerCase() === 'active';
   }
 }
