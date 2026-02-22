@@ -350,7 +350,7 @@ export class BusinessCenterService {
       email: email ?? null,
       phone: phone ?? null,
       token: this.buildInviteToken(),
-      status: 'Sent',
+      status: 'pending',
       sent_at: now.toISOString(),
       expires_at: expiresAt.toISOString()
     };
@@ -870,6 +870,9 @@ export class BusinessCenterService {
   }
 
   private buildInviteToken(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
     const random = Math.random().toString(36).slice(2, 12);
     const time = Date.now().toString(36);
     return `${time}${random}`.slice(0, 20);

@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { of } from 'rxjs';
+import { Observable, forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import {
   CreateRequestForm,
@@ -102,51 +102,49 @@ export class RequestsMobileComponent implements OnInit {
     }
 
     const userToken = this.getUserToken();
-    const token = userToken;
-
-    if (contact.userId) {
-      this.submitRequestPayload(requestedBy, contact, requiredState, token);
+    const currentUserId = this.getUserIdFromToken(userToken);
+    if (!userToken || !currentUserId) {
+      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+      this.submittingRequest = false;
+      this.cdr.detectChanges();
       return;
     }
 
-    if (contact.email) {
-      this.resolveRequestedFor(contact.email, token).subscribe({
-        next: (resolvedUserId) => {
-          if (resolvedUserId) {
-            this.submitRequestPayload(requestedBy, { userId: resolvedUserId }, requiredState, token);
-            return;
-          }
-          this.submitRequestPayload(
-            requestedBy,
-            contact,
-            requiredState,
-            token,
-            true,
-            inviteChannel
-          );
-        },
-        error: () => {
-          this.submitRequestPayload(
-            requestedBy,
-            contact,
-            requiredState,
-            token,
-            true,
-            inviteChannel
-          );
+    this.resolveRequestedFor(contact, userToken).subscribe({
+      next: (resolvedContact) => {
+        if (!resolvedContact) {
+          this.submitFeedback = {
+            type: 'error',
+            message: 'Please provide a valid recipient.'
+          };
+          this.submittingRequest = false;
+          this.cdr.detectChanges();
+          return;
         }
-      });
-      return;
-    }
 
-    this.submitRequestPayload(
-      requestedBy,
-      contact,
-      requiredState,
-      token,
-      Boolean(contact.phone),
-      inviteChannel
-    );
+        const shouldCreateInvite = Boolean(
+          resolvedContact.shouldInvite && (resolvedContact.email || resolvedContact.phone)
+        );
+
+        this.submitRequestPayload(
+          requestedBy,
+          resolvedContact,
+          requiredState,
+          userToken,
+          shouldCreateInvite,
+          inviteChannel,
+          currentUserId
+        );
+      },
+      error: (err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.describeHttpError(err, 'Failed to resolve user account.')
+        };
+        this.submittingRequest = false;
+        this.cdr.detectChanges();
+      }
+    });
   }
 
   dismissPermissionNotice() {
@@ -214,17 +212,39 @@ export class RequestsMobileComponent implements OnInit {
       return;
     }
 
-    this.fetchRequests(userToken, userId).subscribe({
+    forkJoin({
+      incoming: this.fetchRequests(userToken, { requestedForUserId: userId }).pipe(
+        catchError((err) => {
+          console.error('[requests-mobile] incoming requests error:', err);
+          return of([] as RequestRecord[]);
+        })
+      ),
+      outgoing: this.fetchRequests(userToken, { requestedByUserId: userId }).pipe(
+        catchError((err) => {
+          console.error('[requests-mobile] outgoing requests error:', err);
+          return of([] as RequestRecord[]);
+        })
+      )
+    }).pipe(
+      map(({ incoming, outgoing }) => this.mergeUniqueRequests([...incoming, ...outgoing]))
+    ).subscribe({
       next: (requests) => this.applyRequests(requests),
       error: (fetchErr) => console.error('[requests-mobile] requests error:', fetchErr)
     });
   }
 
-  private fetchRequests(token: string | null, requestedForUserId: string | null) {
+  private fetchRequests(
+    token: string | null,
+    filters: { requestedForUserId?: string; requestedByUserId?: string } | null
+  ) {
     const headers = this.buildAuthHeaders(token);
     const fields = [
       'id',
       'Target',
+      'requested_by_user.id',
+      'requested_by_user.email',
+      'requested_by_user.first_name',
+      'requested_by_user.last_name',
       'requested_for_user.id',
       'requested_for_user.email',
       'requested_for_user.first_name',
@@ -243,16 +263,48 @@ export class RequestsMobileComponent implements OnInit {
       fields
     });
 
-    if (requestedForUserId) {
-      params.set('filter[requested_for_user][_eq]', requestedForUserId);
+    if (filters?.requestedForUserId) {
+      params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
+    }
+    if (filters?.requestedByUserId) {
+      params.set('filter[requested_by_user][_eq]', filters.requestedByUserId);
     }
 
+    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
     return this.http.get<{ data?: RequestRecord[] }>(
       `${environment.API_URL}/items/requests?${params.toString()}`,
-      headers ? { headers } : {}
+      requestOptions
     ).pipe(
       map(res => res.data ?? [])
     );
+  }
+
+  private mergeUniqueRequests(requests: RequestRecord[]): RequestRecord[] {
+    const mapById = new Map<string, RequestRecord>();
+    const withoutId: RequestRecord[] = [];
+
+    for (const request of requests) {
+      const id = typeof request.id === 'string' ? request.id : '';
+      if (!id) {
+        withoutId.push(request);
+        continue;
+      }
+      if (!mapById.has(id)) {
+        mapById.set(id, request);
+      }
+    }
+
+    return [...mapById.values(), ...withoutId].sort(
+      (a, b) => this.toTimestampValue(b.timestamp) - this.toTimestampValue(a.timestamp)
+    );
+  }
+
+  private toTimestampValue(value: string | number | Date | undefined): number {
+    if (!value) {
+      return 0;
+    }
+    const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    return Number.isNaN(time) ? 0 : time;
   }
 
   private applyRequests(requests: RequestRecord[]) {
@@ -295,36 +347,68 @@ export class RequestsMobileComponent implements OnInit {
     return `${datePart} ${timePart}`;
   }
 
-  private resolveRequestedFor(value: string, token: string | null) {
-    if (!value) return of(null);
-    if (!this.looksLikeEmail(value)) return of(value);
+  private resolveRequestedFor(
+    contact: { userId?: string; email?: string; phone?: string },
+    token: string | null
+  ): Observable<ResolvedContact | null> {
+    const userId = (contact.userId ?? '').trim();
+    if (userId) {
+      return of({
+        userId,
+        email: contact.email,
+        phone: contact.phone,
+        shouldInvite: false
+      });
+    }
 
+    const email = (contact.email ?? '').trim().toLowerCase();
+    const phone = (contact.phone ?? '').trim();
+    if (!email && !phone) {
+      return of(null);
+    }
+
+    const filterField: 'email' | 'phone' = email ? 'email' : 'phone';
+    const filterValue = email || phone;
     const headers = this.buildAuthHeaders(token);
     const params = new URLSearchParams({
-      'filter[email][_eq]': value,
-      fields: 'id',
+      [`filter[${filterField}][_eq]`]: filterValue,
+      fields: 'id,email,phone',
       limit: '1'
     });
-    const url = `${environment.API_URL}/users?${params.toString()}`;
+    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
 
-    return this.http.get<{ data?: Array<{ id?: string }> }>(
-      url,
-      headers ? { headers } : {}
+    return this.http.get<{ data?: Array<{ id?: string; email?: string; phone?: string }> }>(
+      `${environment.API_URL}/users?${params.toString()}`,
+      requestOptions
     ).pipe(
-      map(res => res?.data?.[0]?.id ?? null)
-    );
-  }
+      map((res) => {
+        const user = res?.data?.[0];
+        const resolvedUserId = typeof user?.id === 'string' ? user.id.trim() : '';
+        if (resolvedUserId) {
+          return {
+            userId: resolvedUserId,
+            email: email || undefined,
+            phone: phone || undefined,
+            shouldInvite: false
+          };
+        }
 
-  private looksLikeEmail(value: string): boolean {
-    return value.includes('@');
+        return {
+          email: email || undefined,
+          phone: phone || undefined,
+          shouldInvite: true
+        };
+      })
+    );
   }
 
   private createRequest(payload: CreateRequestPayload, token: string | null) {
     const headers = this.buildAuthHeaders(token);
+    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
     return this.http.post<{ data?: { id?: string } }>(
       `${environment.API_URL}/items/requests`,
       payload,
-      headers ? { headers } : {}
+      requestOptions
     );
   }
 
@@ -418,32 +502,74 @@ export class RequestsMobileComponent implements OnInit {
 
   private submitRequestPayload(
     requestedBy: string,
-    contact: { userId?: string; email?: string; phone?: string },
+    contact: ResolvedContact,
     requiredState: string,
     token: string | null,
     createInvite = false,
-    inviteChannel: InviteChannel = 'auto'
+    inviteChannel: InviteChannel = 'auto',
+    currentUserId?: string
   ) {
+    const requestedByUser = currentUserId ?? this.getUserIdFromToken(token);
+    if (!requestedByUser) {
+      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+      this.submittingRequest = false;
+      this.cdr.detectChanges();
+      return;
+    }
+
     const payload: CreateRequestPayload = {
       Target: requestedBy,
       org_id: this.org?.id ?? undefined,
       requested_by_org: this.org?.id ?? undefined,
+      requested_by_user: requestedByUser,
       requested_for_user: contact.userId,
       requested_for_email: contact.email,
       requested_for_phone: contact.phone,
-      required_state: requiredState
+      required_state: requiredState,
+      response_status: 'Pending'
     };
 
     this.createRequest(payload, token).subscribe({
       next: (res) => {
-        if (createInvite && res?.data?.id) {
-          this.createInvite(res.data.id, contact, token, inviteChannel);
+        if (!createInvite) {
+          this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
+          this.submittingRequest = false;
+          this.showCreateModal = false;
+          this.loadRequests();
+          this.cdr.detectChanges();
+          return;
         }
-        this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
-        this.submittingRequest = false;
-        this.showCreateModal = false;
-        this.loadRequests();
-        this.cdr.detectChanges();
+
+        if (!res?.data?.id) {
+          this.submitFeedback = {
+            type: 'error',
+            message: 'Request created, but invitation could not be linked.'
+          };
+          this.submittingRequest = false;
+          this.loadRequests();
+          this.cdr.detectChanges();
+          return;
+        }
+
+        this.createInvite(res.data.id, contact, token, inviteChannel).subscribe({
+          next: (inviteCreated) => {
+            if (inviteCreated) {
+              this.submitFeedback = {
+                type: 'success',
+                message: 'Invitation sent. Ask them to sign up.'
+              };
+              this.showCreateModal = false;
+            } else {
+              this.submitFeedback = {
+                type: 'error',
+                message: 'Request created, but invitation could not be sent.'
+              };
+            }
+            this.submittingRequest = false;
+            this.loadRequests();
+            this.cdr.detectChanges();
+          }
+        });
       },
       error: (err) => {
         this.submitFeedback = {
@@ -459,7 +585,7 @@ export class RequestsMobileComponent implements OnInit {
   private normalizeContact(value: string) {
     const cleaned = value.trim();
     if (!cleaned) return {};
-    if (cleaned.includes('@')) return { email: cleaned };
+    if (cleaned.includes('@')) return { email: cleaned.toLowerCase() };
     if (/^[+\d][\d\s-]{6,}$/.test(cleaned)) return { phone: cleaned.replace(/\s+/g, '') };
     return { userId: cleaned };
   }
@@ -483,22 +609,30 @@ export class RequestsMobileComponent implements OnInit {
       phone: contact.phone ?? undefined,
       channel,
       token: inviteToken,
-      status: 'Sent',
+      status: 'pending',
       sent_at: now.toISOString(),
       expires_at: expiresAt.toISOString()
     };
 
     const headers = this.buildAuthHeaders(token);
-    this.http.post(
+    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
+    return this.http.post(
       `${environment.API_URL}/items/request_invites`,
       payload,
-      headers ? { headers } : {}
+      requestOptions
     ).pipe(
-      catchError(() => of(null))
-    ).subscribe();
+      map(() => true),
+      catchError((err) => {
+        console.error('[requests-mobile] create invite error:', err);
+        return of(false);
+      })
+    );
   }
 
   private buildInviteToken() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
     const random = Math.random().toString(36).slice(2, 12);
     const time = Date.now().toString(36);
     return `${time}${random}`.slice(0, 20);
@@ -629,11 +763,20 @@ type CreateRequestPayload = {
   Target: string;
   org_id?: string;
   requested_by_org?: string;
+  requested_by_user?: string;
   requested_for_user?: string;
   requested_for_email?: string;
   requested_for_phone?: string;
   required_state: string;
+  response_status?: string;
 };
 
 type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';
+
+type ResolvedContact = {
+  userId?: string;
+  email?: string;
+  phone?: string;
+  shouldInvite: boolean;
+};
 

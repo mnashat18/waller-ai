@@ -55,6 +55,7 @@
     <a routerLink="/requests/create"
        routerLinkActive="active"
        [routerLinkActiveOptions]="{ exact: true }"
+       (click)="openCreateRequest($event)"
        *ngIf="canUseBusinessFeatures"
        class="sidebar-item">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">

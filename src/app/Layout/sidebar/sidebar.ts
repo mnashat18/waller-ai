@@ -27,6 +27,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   private navSub?: RxSubscription;
   private refreshSub?: RxSubscription;
   private readonly accessTimeoutMs = 10000;
+  private currentUserId: string | null = null;
 
   constructor(
     private businessCenter: BusinessCenterService,
@@ -35,6 +36,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
+    this.currentUserId = this.resolveCurrentUserId();
     this.applyFallbackFromSession();
     this.loadAccessState(true);
     this.refreshSub = this.subscriptions.snapshotRefreshEvents().subscribe(() => {
@@ -98,6 +100,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
         return;
       }
 
+      this.currentUserId = state.userId ?? this.currentUserId;
+
       this.hasBusinessProfile = Boolean(state.profile?.id);
       this.hasBusinessAccess = Boolean(state.hasPaidAccess);
       this.canUseBusinessFeatures =
@@ -126,16 +130,20 @@ export class SidebarComponent implements OnInit, OnDestroy {
   private applyFallbackFromSession(): void {
     const cached = this.readSidebarState();
     if (cached) {
-      this.planLabel = cached.planLabel;
-      this.memberRoleLabel = cached.memberRoleLabel;
-      this.hasBusinessProfile = cached.hasBusinessProfile;
-      this.hasBusinessAccess = cached.hasBusinessAccess;
-      this.canUseBusinessFeatures = cached.canUseBusinessFeatures;
-      this.canOpenBusinessCenter = cached.canOpenBusinessCenter;
-      this.isBusinessTrial = cached.isBusinessTrial;
-      this.trialExpired = cached.trialExpired;
-      this.trialDaysRemaining = cached.trialDaysRemaining;
-      return;
+      if (this.currentUserId && cached.userId && cached.userId !== this.currentUserId) {
+        this.clearSidebarState();
+      } else {
+        this.planLabel = cached.planLabel;
+        this.memberRoleLabel = cached.memberRoleLabel;
+        this.hasBusinessProfile = cached.hasBusinessProfile;
+        this.hasBusinessAccess = cached.hasBusinessAccess;
+        this.canUseBusinessFeatures = cached.canUseBusinessFeatures;
+        this.canOpenBusinessCenter = cached.canOpenBusinessCenter;
+        this.isBusinessTrial = cached.isBusinessTrial;
+        this.trialExpired = cached.trialExpired;
+        this.trialDaysRemaining = cached.trialDaysRemaining;
+        return;
+      }
     }
 
     this.planLabel = 'Free';
@@ -178,6 +186,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
     try {
       localStorage.setItem(this.sidebarStateStorageKey, JSON.stringify({
+        userId: this.currentUserId,
         planLabel: this.planLabel,
         memberRoleLabel: this.memberRoleLabel,
         hasBusinessProfile: this.hasBusinessProfile,
@@ -196,6 +205,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   private readSidebarState(): {
     planLabel: string;
     memberRoleLabel: string;
+    userId: string | null;
     hasBusinessProfile: boolean;
     hasBusinessAccess: boolean;
     canUseBusinessFeatures: boolean;
@@ -215,6 +225,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
       }
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       return {
+        userId: typeof parsed['userId'] === 'string' ? parsed['userId'] : null,
         planLabel: typeof parsed['planLabel'] === 'string' ? parsed['planLabel'] : 'Free',
         memberRoleLabel: typeof parsed['memberRoleLabel'] === 'string' ? parsed['memberRoleLabel'] : 'User',
         hasBusinessProfile: parsed['hasBusinessProfile'] === true,
@@ -228,6 +239,53 @@ export class SidebarComponent implements OnInit, OnDestroy {
       };
     } catch {
       return null;
+    }
+  }
+
+  openCreateRequest(event: Event): void {
+    event.preventDefault();
+    if (!this.canUseBusinessFeatures) {
+      return;
+    }
+    this.router.navigate(['/requests/create']);
+  }
+
+  private resolveCurrentUserId(): string | null {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    const token =
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token') ??
+      localStorage.getItem('directus_token');
+    if (!token) {
+      return null;
+    }
+
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return null;
+    }
+
+    try {
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const id = payload?.id ?? payload?.user_id ?? payload?.sub;
+      return typeof id === 'string' && id.trim() ? id.trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private clearSidebarState(): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorage.removeItem(this.sidebarStateStorageKey);
+    } catch {
+      // ignore storage errors
     }
   }
 }
