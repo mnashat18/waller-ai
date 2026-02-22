@@ -1,20 +1,30 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
+import { forkJoin, Observable, of } from 'rxjs';
+import { catchError, finalize } from 'rxjs/operators';
 import {
-  AutomationRule,
+  ActivityEventRecord,
   BusinessCenterService,
-  BusinessInvoice,
-  BusinessLocation,
-  ExportJob,
-  MessageInvite
+  BusinessHubAccessState,
+  BusinessProfile,
+  BusinessProfileMember,
+  ReportExportRecord,
+  RequestInviteRecord,
+  RequestRecord
 } from '../../services/business-center.service';
-import { SubscriptionService } from '../../services/subscription.service';
 
 type Feedback = {
   type: 'success' | 'error' | 'info';
   message: string;
+};
+
+type InviteMetrics = {
+  pending: number;
+  sent: number;
+  claimed: number;
+  expired: number;
 };
 
 @Component({
@@ -24,251 +34,57 @@ type Feedback = {
   templateUrl: './business-center.html',
   styleUrl: './business-center.css'
 })
-export class BusinessCenterComponent implements OnInit {
+export class BusinessCenterComponent implements OnInit, OnDestroy {
   loadingAccess = true;
   loadingData = false;
   hasBusinessAccess = false;
-  isBusinessTrial = false;
-  trialDaysRemaining: number | null = null;
-  currentPlanName = 'Free';
-  renewalDate: string | null = null;
+  accessReason = '';
+
   feedback: Feedback | null = null;
+  private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
-  exportsLoading = false;
-  invitesLoading = false;
-  locationsLoading = false;
-  rulesLoading = false;
-  invoicesLoading = false;
+  accessState: BusinessHubAccessState | null = null;
+  profile: BusinessProfile | null = null;
 
-  exportJobs: ExportJob[] = [];
-  messageInvites: MessageInvite[] = [];
-  locations: BusinessLocation[] = [];
-  rules: AutomationRule[] = [];
-  invoices: BusinessInvoice[] = [];
+  teamMembers: BusinessProfileMember[] = [];
+  requests: RequestRecord[] = [];
+  requestInvites: RequestInviteRecord[] = [];
+  reportExports: ReportExportRecord[] = [];
+  activityEvents: ActivityEventRecord[] = [];
+
+  inviteMetrics: InviteMetrics = {
+    pending: 0,
+    sent: 0,
+    claimed: 0,
+    expired: 0
+  };
+
+  upgradeSubmitting = false;
+  exportSubmitting = false;
+  inviteSubmitting = false;
 
   exportForm = {
-    name: 'Operations Snapshot',
-    dataset: 'requests',
     format: 'csv' as 'csv' | 'pdf',
-    scheduleType: 'one_time' as 'one_time' | 'daily' | 'weekly' | 'monthly',
-    nextRunAt: ''
+    filters: ''
   };
 
   inviteForm = {
-    recipientName: '',
-    phone: '',
-    channel: 'whatsapp' as 'whatsapp' | 'sms',
-    messageTemplate: 'Your team scan invite is ready. Reply to start now.'
+    requestId: '',
+    email: '',
+    phone: ''
   };
 
-  locationForm = {
-    name: '',
-    code: '',
-    city: '',
-    country: '',
-    address: '',
-    managerName: ''
-  };
+  constructor(private businessCenter: BusinessCenterService) {}
 
-  ruleForm = {
-    ruleName: '',
-    triggerType: 'high_risk',
-    actionType: 'whatsapp_alert',
-    threshold: '',
-    cooldownMinutes: '30',
-    isActive: true
-  };
-
-  billingForm = {
-    companyLegalName: '',
-    taxId: '',
-    billingEmail: '',
-    accountsPhone: '',
-    address: ''
-  };
-
-  renewalNote = '';
-
-  constructor(
-    private businessCenter: BusinessCenterService,
-    private subscriptions: SubscriptionService
-  ) {}
-
-  ngOnInit() {
+  ngOnInit(): void {
     this.loadAccessState();
   }
 
-  trialBadgeText(): string {
-    if (!this.isBusinessTrial) {
-      return '';
-    }
-    if (typeof this.trialDaysRemaining !== 'number') {
-      return 'Business trial active';
-    }
-    if (this.trialDaysRemaining <= 1) {
-      return 'Business trial ends today';
-    }
-    return `${this.trialDaysRemaining} days left in trial`;
+  ngOnDestroy(): void {
+    this.clearFeedbackTimer();
   }
 
-  showPaidFeatureMessage(feature: string): string {
-    if (!this.isBusinessTrial) {
-      return '';
-    }
-    if (typeof this.trialDaysRemaining !== 'number') {
-      return `${feature} is a paid Business feature, unlocked for your trial now.`;
-    }
-    if (this.trialDaysRemaining <= 1) {
-      return `${feature} is paid on Business. You can use it free today only.`;
-    }
-    return `${feature} is paid on Business. Free for you now (${this.trialDaysRemaining} days left).`;
-  }
-
-  submitExportJob() {
-    const name = this.exportForm.name.trim();
-    if (!name) {
-      this.feedback = { type: 'error', message: 'Export name is required.' };
-      return;
-    }
-
-    this.feedback = { type: 'info', message: 'Queueing export job...' };
-    this.businessCenter.createExportJob({
-      name,
-      dataset: this.exportForm.dataset,
-      format: this.exportForm.format,
-      schedule_type: this.exportForm.scheduleType,
-      next_run_at: this.toIsoFromDateTimeLocal(this.exportForm.nextRunAt)
-    } as ExportJob).subscribe((res) => {
-      this.feedback = { type: res.ok ? 'success' : 'error', message: res.message };
-      if (res.ok) {
-        this.loadExportJobs();
-      }
-    });
-  }
-
-  submitMessageInvite() {
-    const recipientName = this.inviteForm.recipientName.trim();
-    const phone = this.inviteForm.phone.trim();
-    if (!recipientName || !phone) {
-      this.feedback = { type: 'error', message: 'Recipient name and phone are required.' };
-      return;
-    }
-
-    this.feedback = { type: 'info', message: 'Queueing business message invite...' };
-    this.businessCenter.createMessageInvite({
-      recipient_name: recipientName,
-      phone,
-      channel: this.inviteForm.channel,
-      message_template: this.inviteForm.messageTemplate.trim()
-    } as MessageInvite).subscribe((res) => {
-      this.feedback = { type: res.ok ? 'success' : 'error', message: res.message };
-      if (res.ok) {
-        this.inviteForm.recipientName = '';
-        this.inviteForm.phone = '';
-        this.loadMessageInvites();
-      }
-    });
-  }
-
-  submitLocation() {
-    const name = this.locationForm.name.trim();
-    if (!name) {
-      this.feedback = { type: 'error', message: 'Location name is required.' };
-      return;
-    }
-
-    this.feedback = { type: 'info', message: 'Saving location...' };
-    this.businessCenter.createLocation({
-      name,
-      code: this.locationForm.code.trim(),
-      city: this.locationForm.city.trim(),
-      country: this.locationForm.country.trim(),
-      address: this.locationForm.address.trim(),
-      manager_name: this.locationForm.managerName.trim(),
-      is_active: true
-    }).subscribe((res) => {
-      this.feedback = { type: res.ok ? 'success' : 'error', message: res.message };
-      if (res.ok) {
-        this.locationForm = {
-          name: '',
-          code: '',
-          city: '',
-          country: '',
-          address: '',
-          managerName: ''
-        };
-        this.loadLocations();
-      }
-    });
-  }
-
-  submitRule() {
-    const ruleName = this.ruleForm.ruleName.trim();
-    if (!ruleName) {
-      this.feedback = { type: 'error', message: 'Rule name is required.' };
-      return;
-    }
-
-    this.feedback = { type: 'info', message: 'Creating automation rule...' };
-    this.businessCenter.createAutomationRule({
-      rule_name: ruleName,
-      trigger_type: this.ruleForm.triggerType,
-      action_type: this.ruleForm.actionType,
-      threshold: this.toOptionalNumber(this.ruleForm.threshold),
-      cooldown_minutes: this.toOptionalNumber(this.ruleForm.cooldownMinutes),
-      is_active: this.ruleForm.isActive
-    }).subscribe((res) => {
-      this.feedback = { type: res.ok ? 'success' : 'error', message: res.message };
-      if (res.ok) {
-        this.ruleForm.ruleName = '';
-        this.loadRules();
-      }
-    });
-  }
-
-  toggleRule(rule: AutomationRule) {
-    this.businessCenter.toggleAutomationRule(rule).subscribe((res) => {
-      this.feedback = { type: res.ok ? 'success' : 'error', message: res.message };
-      if (res.ok) {
-        this.loadRules();
-      }
-    });
-  }
-
-  submitRenewal(cycle: 'monthly' | 'yearly') {
-    this.feedback = { type: 'info', message: 'Submitting renewal request...' };
-    this.businessCenter.requestRenewal(cycle, this.renewalNote.trim()).subscribe((res) => {
-      this.feedback = { type: res.ok ? 'success' : 'error', message: res.message };
-      if (res.ok) {
-        this.renewalNote = '';
-      }
-    });
-  }
-
-  saveBillingProfile() {
-    const legal = this.billingForm.companyLegalName.trim();
-    const email = this.billingForm.billingEmail.trim();
-    if (!legal || !email) {
-      this.feedback = {
-        type: 'error',
-        message: 'Billing profile needs company legal name and billing email.'
-      };
-      return;
-    }
-
-    this.feedback = { type: 'info', message: 'Saving billing profile...' };
-    this.businessCenter.saveBillingProfile({
-      companyLegalName: legal,
-      taxId: this.billingForm.taxId.trim(),
-      billingEmail: email,
-      accountsPhone: this.billingForm.accountsPhone.trim(),
-      address: this.billingForm.address.trim()
-    }).subscribe((res) => {
-      this.feedback = { type: res.ok ? 'success' : 'error', message: res.message };
-    });
-  }
-
-  formatDate(value?: string): string {
+  formatDate(value?: string | null): string {
     if (!value) {
       return '-';
     }
@@ -281,135 +97,325 @@ export class BusinessCenterComponent implements OnInit {
     return `${datePart} ${timePart}`;
   }
 
-  formatMoney(value?: number): string {
-    if (typeof value !== 'number') {
-      return '-';
+  accessBadgeLabel(): string {
+    if (!this.profile) {
+      return 'Plan: Free';
     }
-    return `$${value.toFixed(2)}`;
+    const plan = (this.profile.plan_code ?? 'free').toString();
+    return `Plan: ${plan}`;
   }
 
-  private loadAccessState() {
-    this.loadingAccess = true;
-    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
-      this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
-      this.isBusinessTrial = snapshot.isBusinessTrial;
-      this.trialDaysRemaining =
-        typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
-      this.hasBusinessAccess = snapshot.hasBusinessAccess;
-      this.renewalDate = snapshot.trialExpiresAt;
-      this.loadingAccess = false;
+  requestStatusLabel(status?: string | null): string {
+    const normalized = (status ?? '').trim().toLowerCase();
+    if (normalized.includes('approved') || normalized.includes('accepted')) {
+      return 'Approved';
+    }
+    if (normalized.includes('denied') || normalized.includes('rejected')) {
+      return 'Denied';
+    }
+    return 'Pending';
+  }
 
-      if (this.hasBusinessAccess) {
-        this.loadAllBusinessData();
+  inviteStatusLabel(invite: RequestInviteRecord): 'Pending' | 'Sent' | 'Claimed' | 'Expired' {
+    if (invite.claimed_at) {
+      return 'Claimed';
+    }
+
+    const expiresAt = invite.expires_at ? new Date(invite.expires_at).getTime() : NaN;
+    if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
+      return 'Expired';
+    }
+
+    const normalized = (invite.status ?? '').trim().toLowerCase();
+    if (normalized.includes('claim')) {
+      return 'Claimed';
+    }
+    if (normalized.includes('expire')) {
+      return 'Expired';
+    }
+    if (normalized.includes('send')) {
+      return 'Sent';
+    }
+    return 'Pending';
+  }
+
+  submitUpgradeRequest(): void {
+    const orgId = this.accessState?.orgId ?? null;
+    this.upgradeSubmitting = true;
+    this.showFeedback('info', 'Submitting upgrade request...');
+
+    this.businessCenter.submitUpgradeRequest(orgId).pipe(
+      finalize(() => {
+        this.upgradeSubmitting = false;
+      })
+    ).subscribe((res) => {
+      this.showFeedback(res.ok ? 'success' : 'error', res.message);
+    });
+  }
+
+  submitExportRequest(): void {
+    if (!this.hasBusinessAccess) {
+      return;
+    }
+
+    this.exportSubmitting = true;
+    this.showFeedback('info', 'Submitting export request...');
+
+    this.businessCenter.createReportExport(
+      {
+        format: this.exportForm.format,
+        filters: this.exportForm.filters
+      },
+      this.accessState?.orgId ?? null
+    ).pipe(
+      finalize(() => {
+        this.exportSubmitting = false;
+      })
+    ).subscribe((res) => {
+      this.showFeedback(res.ok ? 'success' : 'error', res.message);
+      if (res.ok) {
+        this.reloadExports();
       }
     });
   }
 
-  private loadAllBusinessData() {
-    this.clearLastBusinessError();
+  submitInvite(): void {
+    if (!this.hasBusinessAccess) {
+      return;
+    }
+
+    const requestId = this.inviteForm.requestId.trim();
+    const email = this.inviteForm.email.trim();
+    const phone = this.inviteForm.phone.trim();
+    if (!requestId) {
+      this.showFeedback('error', 'Request ID is required.');
+      return;
+    }
+    if (!email && !phone) {
+      this.showFeedback('error', 'Email or phone is required.');
+      return;
+    }
+
+    this.inviteSubmitting = true;
+    this.showFeedback('info', 'Sending invite...');
+    this.businessCenter.createRequestInvite(
+      { requestId, email, phone },
+      this.accessState?.orgId ?? null
+    ).pipe(
+      finalize(() => {
+        this.inviteSubmitting = false;
+      })
+    ).subscribe((res) => {
+      this.showFeedback(res.ok ? 'success' : 'error', res.message);
+      if (res.ok) {
+        this.inviteForm.email = '';
+        this.inviteForm.phone = '';
+        this.reloadInvites();
+      }
+    });
+  }
+
+  trackById(_index: number, row: { id?: string | null }): string {
+    return row.id ?? String(_index);
+  }
+
+  private loadAccessState(): void {
+    this.loadingAccess = true;
+    this.businessCenter.getHubAccessState().pipe(
+      finalize(() => {
+        this.loadingAccess = false;
+      })
+    ).subscribe((state) => {
+      this.accessState = state;
+      this.profile = state.profile;
+      this.hasBusinessAccess = state.hasPaidAccess;
+      this.accessReason = state.reason;
+
+      if (!state.hasPaidAccess) {
+        this.clearBusinessData();
+        if (state.reason) {
+          this.showFeedback('info', state.reason, true);
+        }
+        return;
+      }
+
+      this.loadBusinessData(state);
+    });
+  }
+
+  private loadBusinessData(state: BusinessHubAccessState): void {
+    if (!state.profile) {
+      this.clearBusinessData();
+      this.showFeedback('error', 'Business profile is missing.');
+      return;
+    }
+
     this.loadingData = true;
-    this.loadExportJobs();
-    this.loadMessageInvites();
-    this.loadLocations();
-    this.loadRules();
-    this.loadInvoices();
-    this.loadingData = false;
-  }
+    this.clearBusinessData();
 
-  private loadExportJobs() {
-    this.exportsLoading = true;
-    this.businessCenter.listExportJobs().subscribe((rows) => {
-      this.exportJobs = rows;
-      this.exportsLoading = false;
-      this.showAccessErrorIfAny();
+    const team$ = this.businessCenter.listTeamMembers(state.profile.id).pipe(
+      catchError((err) => this.sectionFallback(err, 'team members'))
+    );
+    const requests$ = this.businessCenter.listRequests(state.orgId).pipe(
+      catchError((err) => this.sectionFallback(err, 'requests'))
+    );
+    const invites$ = this.businessCenter.listRequestInvites(state.orgId).pipe(
+      catchError((err) => this.sectionFallback(err, 'request invites'))
+    );
+    const exports$ = this.businessCenter.listReportExports(state.orgId).pipe(
+      catchError((err) => this.sectionFallback(err, 'export jobs'))
+    );
+    const activity$ = this.businessCenter.listActivityEvents(state.orgId).pipe(
+      catchError((err) => this.sectionFallback(err, 'activity log'))
+    );
+
+    forkJoin({
+      team: team$ as Observable<BusinessProfileMember[]>,
+      requests: requests$ as Observable<RequestRecord[]>,
+      invites: invites$ as Observable<RequestInviteRecord[]>,
+      exports: exports$ as Observable<ReportExportRecord[]>,
+      events: activity$ as Observable<ActivityEventRecord[]>
+    }).pipe(
+      finalize(() => {
+        this.loadingData = false;
+      })
+    ).subscribe(({ team, requests, invites, exports, events }) => {
+      this.teamMembers = team;
+      this.requests = requests;
+      this.requestInvites = invites;
+      this.reportExports = exports;
+      this.activityEvents = events;
+      this.inviteMetrics = this.calculateInviteMetrics(requests, invites);
     });
   }
 
-  private loadMessageInvites() {
-    this.invitesLoading = true;
-    this.businessCenter.listMessageInvites().subscribe((rows) => {
-      this.messageInvites = rows;
-      this.invitesLoading = false;
-      this.showAccessErrorIfAny();
+  private reloadInvites(): void {
+    this.businessCenter.listRequestInvites(this.accessState?.orgId ?? null).subscribe({
+      next: (rows) => {
+        this.requestInvites = rows;
+        this.inviteMetrics = this.calculateInviteMetrics(this.requests, rows);
+      },
+      error: (err) => {
+        this.showFeedback('error', this.describeHttpError(err, 'Failed to reload invites.'));
+      }
     });
   }
 
-  private loadLocations() {
-    this.locationsLoading = true;
-    this.businessCenter.listLocations().subscribe((rows) => {
-      this.locations = rows;
-      this.locationsLoading = false;
-      this.showAccessErrorIfAny();
+  private reloadExports(): void {
+    this.businessCenter.listReportExports(this.accessState?.orgId ?? null).subscribe({
+      next: (rows) => {
+        this.reportExports = rows;
+      },
+      error: (err) => {
+        this.showFeedback('error', this.describeHttpError(err, 'Failed to reload export jobs.'));
+      }
     });
   }
 
-  private loadRules() {
-    this.rulesLoading = true;
-    this.businessCenter.listAutomationRules().subscribe((rows) => {
-      this.rules = rows;
-      this.rulesLoading = false;
-      this.showAccessErrorIfAny();
-    });
+  private calculateInviteMetrics(
+    requests: RequestRecord[],
+    invites: RequestInviteRecord[]
+  ): InviteMetrics {
+    const pendingRequests = requests.reduce((count, row) => {
+      return count + (this.requestStatusLabel(row.response_status) === 'Pending' ? 1 : 0);
+    }, 0);
+
+    const metrics: InviteMetrics = {
+      pending: pendingRequests,
+      sent: 0,
+      claimed: 0,
+      expired: 0
+    };
+
+    for (const invite of invites) {
+      const status = this.inviteStatusLabel(invite);
+      if (status === 'Sent') {
+        metrics.sent += 1;
+      } else if (status === 'Claimed') {
+        metrics.claimed += 1;
+      } else if (status === 'Expired') {
+        metrics.expired += 1;
+      }
+    }
+
+    return metrics;
   }
 
-  private loadInvoices() {
-    this.invoicesLoading = true;
-    this.businessCenter.listInvoices().subscribe((rows) => {
-      this.invoices = rows;
-      this.invoicesLoading = false;
-      this.showAccessErrorIfAny();
-    });
-  }
-
-  private clearLastBusinessError() {
-    if (typeof localStorage === 'undefined') {
-      return;
-    }
-    localStorage.removeItem('business_center_last_error');
-  }
-
-  private showAccessErrorIfAny() {
-    if (typeof localStorage === 'undefined') {
-      return;
-    }
-
-    const reason = localStorage.getItem('business_center_last_error');
-    const adminTokenError = localStorage.getItem('admin_token_error');
-    if (!reason && !adminTokenError) {
-      return;
-    }
-
-    const details: string[] = [];
-    if (reason) {
-      details.push(reason);
-    }
-    if (adminTokenError) {
-      details.push(`Admin token proxy error: ${adminTokenError}`);
-    }
-
-    this.feedback = {
-      type: 'error',
-      message: details.join(' ')
+  private clearBusinessData(): void {
+    this.teamMembers = [];
+    this.requests = [];
+    this.requestInvites = [];
+    this.reportExports = [];
+    this.activityEvents = [];
+    this.inviteMetrics = {
+      pending: 0,
+      sent: 0,
+      claimed: 0,
+      expired: 0
     };
   }
 
-  private toIsoFromDateTimeLocal(value: string): string | undefined {
-    if (!value) {
-      return undefined;
-    }
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return undefined;
-    }
-    return date.toISOString();
+  private sectionFallback(err: any, section: string): Observable<never[]> {
+    this.showFeedback('error', this.describeHttpError(err, `Failed to load ${section}.`));
+    return of([]);
   }
 
-  private toOptionalNumber(value: string): number | undefined {
-    if (!value.trim()) {
-      return undefined;
+  private describeHttpError(err: any, fallback: string): string {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const detail =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.error?.message ||
+      err?.message ||
+      '';
+    const normalized = String(detail).toLowerCase();
+
+    if (
+      status === 0 ||
+      normalized.includes('network') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('connection refused') ||
+      normalized.includes('timeout')
+    ) {
+      return `Network error: ${detail || fallback}`;
     }
-    const parsed = Number(value);
-    return Number.isNaN(parsed) ? undefined : parsed;
+
+    if (status === 401 || status === 403) {
+      return `Access denied (${status}): ${detail || fallback}`;
+    }
+
+    if (status >= 500) {
+      return `Server error (${status}): ${detail || fallback}`;
+    }
+
+    if (status >= 400) {
+      return `Request error (${status}): ${detail || fallback}`;
+    }
+
+    return detail || fallback;
   }
 
+  private showFeedback(type: Feedback['type'], message: string, sticky = false): void {
+    this.feedback = { type, message };
+    this.clearFeedbackTimer();
+    if (sticky) {
+      return;
+    }
+
+    this.feedbackTimer = setTimeout(() => {
+      if (this.feedback?.message === message) {
+        this.feedback = null;
+      }
+    }, 7000);
+  }
+
+  private clearFeedbackTimer(): void {
+    if (!this.feedbackTimer) {
+      return;
+    }
+    clearTimeout(this.feedbackTimer);
+    this.feedbackTimer = null;
+  }
 }
+

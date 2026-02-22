@@ -4,31 +4,33 @@
       <span class="hero-chip">Business Center</span>
       <h1 class="page-title">Business Ops Hub</h1>
       <p class="page-subtitle">
-        Export center, WhatsApp/SMS invites, location management, automation rules, and billing portal.
+        Team management, requests/invites tracking, export center, and activity timeline.
       </p>
     </div>
 
     <div class="hero-actions">
-      <span class="chip">Plan: {{ currentPlanName }}</span>
-      <span *ngIf="isBusinessTrial" class="chip">{{ trialBadgeText() }}</span>
+      <span class="chip">{{ accessBadgeLabel() }}</span>
       <a routerLink="/pricing" class="chip">Compare Plans</a>
     </div>
   </div>
 
   <div *ngIf="loadingAccess" class="panel">
-    Checking your business access...
+    Checking your Business profile and paid access...
   </div>
 
   <div *ngIf="!loadingAccess && !hasBusinessAccess" class="panel">
     <div class="panel-header">
-      <h3 class="panel-title">Business Access Required</h3>
-      <span class="chip">Paid Feature</span>
+      <h3 class="panel-title">Business Paid Access Required</h3>
+      <span class="chip">Upgrade</span>
     </div>
     <p class="text-slate-300">
-      This hub is available on Business only. Open Billing to unlock all paid operational tools.
+      {{ accessReason || 'Your account is not on active paid Business yet.' }}
     </p>
-    <div class="mt-4 flex gap-3">
-      <a routerLink="/payment" class="btn-primary px-5 py-2 rounded-full">Open Billing</a>
+    <div class="mt-4 flex flex-wrap gap-3">
+      <button class="btn-primary px-5 py-2 rounded-full" [disabled]="upgradeSubmitting" (click)="submitUpgradeRequest()">
+        {{ upgradeSubmitting ? 'Submitting...' : 'Request Business Upgrade' }}
+      </button>
+      <a routerLink="/payment" class="chip">Open Billing</a>
       <a routerLink="/dashboard" class="chip">Back to Dashboard</a>
     </div>
   </div>
@@ -38,45 +40,157 @@
       {{ info.message }}
     </div>
 
-    <div class="business-grid">
+    <div *ngIf="loadingData" class="panel">
+      Loading Business Ops modules...
+    </div>
+
+    <div *ngIf="!loadingData" class="business-grid">
       <section class="panel">
         <div class="panel-header">
-          <h3 class="panel-title">0) Create Request Center</h3>
-          <span class="chip">Paid</span>
+          <h3 class="panel-title">1) Business Profile Summary</h3>
+          <span class="chip">{{ profile?.billing_status || '-' }}</span>
         </div>
-        <p class="section-note">{{ showPaidFeatureMessage('Create Requests') }}</p>
-        <p class="text-slate-300">
-          Create scan requests from the Requests page, send invites, and track response status in one flow.
-        </p>
-        <div class="mt-4 flex items-center gap-3">
-          <a routerLink="/requests/create" class="btn-primary px-4 py-2 rounded-full">
-            Open Create Request
-          </a>
-          <a routerLink="/requests" class="chip">Go to Requests</a>
+        <div class="summary-grid">
+          <div><strong>Company</strong><br />{{ profile?.company_name || '-' }}</div>
+          <div><strong>Business Name</strong><br />{{ profile?.business_name || '-' }}</div>
+          <div><strong>Plan Code</strong><br />{{ profile?.plan_code || '-' }}</div>
+          <div><strong>Is Active</strong><br />{{ profile?.is_active ? 'true' : 'false' }}</div>
+          <div><strong>Trial Start</strong><br />{{ formatDate(profile?.trial_started_at) }}</div>
+          <div><strong>Trial Expires</strong><br />{{ formatDate(profile?.trial_expires_at) }}</div>
         </div>
       </section>
 
       <section class="panel">
         <div class="panel-header">
-          <h3 class="panel-title">1) CSV/PDF Export Center</h3>
-          <span class="chip">Paid</span>
+          <h3 class="panel-title">2) Team Members</h3>
+          <span class="chip">{{ teamMembers.length }} members</span>
         </div>
-        <p class="section-note">{{ showPaidFeatureMessage('Export Center') }}</p>
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th class="th">Member</th>
+                <th class="th">Role</th>
+                <th class="th">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="row" *ngFor="let member of teamMembers; trackBy: trackById">
+                <td>{{ member.user_label || member.user_id || '-' }}</td>
+                <td>{{ member.member_role || '-' }}</td>
+                <td>{{ member.status || '-' }}</td>
+              </tr>
+              <tr *ngIf="!teamMembers.length">
+                <td colspan="3" class="empty-cell">No team members found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-        <div class="form-grid">
+      <section class="panel span-2">
+        <div class="panel-header">
+          <h3 class="panel-title">3) Requests & Invites</h3>
+          <span class="chip">requests: {{ requests.length }}</span>
+        </div>
+
+        <div class="metrics-row">
+          <span class="chip">Pending: {{ inviteMetrics.pending }}</span>
+          <span class="chip">Sent: {{ inviteMetrics.sent }}</span>
+          <span class="chip">Claimed: {{ inviteMetrics.claimed }}</span>
+          <span class="chip">Expired: {{ inviteMetrics.expired }}</span>
+        </div>
+
+        <div class="table-shell mt-4">
+          <table>
+            <thead>
+              <tr>
+                <th class="th">Request ID</th>
+                <th class="th">Target</th>
+                <th class="th">Recipient</th>
+                <th class="th">Required State</th>
+                <th class="th">Status</th>
+                <th class="th">Timestamp</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="row" *ngFor="let req of requests; trackBy: trackById">
+                <td>{{ req.id }}</td>
+                <td>{{ req.target }}</td>
+                <td>{{ req.recipient }}</td>
+                <td>{{ req.required_state }}</td>
+                <td>{{ requestStatusLabel(req.response_status) }}</td>
+                <td>{{ formatDate(req.timestamp) }}</td>
+              </tr>
+              <tr *ngIf="!requests.length">
+                <td colspan="6" class="empty-cell">No requests found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="form-grid mt-5">
           <label>
-            Export Name
-            <input class="input" [(ngModel)]="exportForm.name" />
-          </label>
-          <label>
-            Dataset
-            <select class="input" [(ngModel)]="exportForm.dataset">
-              <option value="requests">Requests</option>
-              <option value="audit_logs">Audit Logs</option>
-              <option value="scan_history">Scan History</option>
-              <option value="dashboard_snapshot">Dashboard Snapshot</option>
+            Request
+            <select class="input" [(ngModel)]="inviteForm.requestId">
+              <option value="">Select request</option>
+              <option *ngFor="let req of requests; trackBy: trackById" [value]="req.id">
+                {{ req.id }} - {{ req.recipient }}
+              </option>
             </select>
           </label>
+          <label>
+            Invite Email
+            <input class="input" placeholder="user@example.com" [(ngModel)]="inviteForm.email" />
+          </label>
+          <label>
+            Invite Phone
+            <input class="input" placeholder="+2010..." [(ngModel)]="inviteForm.phone" />
+          </label>
+        </div>
+
+        <div class="mt-4 flex items-center gap-3">
+          <button class="btn-primary px-4 py-2 rounded-full" [disabled]="inviteSubmitting" (click)="submitInvite()">
+            {{ inviteSubmitting ? 'Sending...' : 'Send Invite' }}
+          </button>
+        </div>
+
+        <div class="table-shell mt-5">
+          <table>
+            <thead>
+              <tr>
+                <th class="th">Invite ID</th>
+                <th class="th">Request</th>
+                <th class="th">Contact</th>
+                <th class="th">Status</th>
+                <th class="th">Sent At</th>
+                <th class="th">Expires</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="row" *ngFor="let invite of requestInvites; trackBy: trackById">
+                <td>{{ invite.id }}</td>
+                <td>{{ invite.request || '-' }}</td>
+                <td>{{ invite.email || invite.phone || '-' }}</td>
+                <td>{{ inviteStatusLabel(invite) }}</td>
+                <td>{{ formatDate(invite.sent_at || invite.date_created) }}</td>
+                <td>{{ formatDate(invite.expires_at) }}</td>
+              </tr>
+              <tr *ngIf="!requestInvites.length">
+                <td colspan="6" class="empty-cell">No invites found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h3 class="panel-title">4) Export Center</h3>
+          <span class="chip">{{ reportExports.length }} exports</span>
+        </div>
+
+        <div class="form-grid">
           <label>
             Format
             <select class="input" [(ngModel)]="exportForm.format">
@@ -84,47 +198,39 @@
               <option value="pdf">PDF</option>
             </select>
           </label>
-          <label>
-            Schedule
-            <select class="input" [(ngModel)]="exportForm.scheduleType">
-              <option value="one_time">One time</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-            </select>
-          </label>
-          <label>
-            Next run
-            <input class="input" type="datetime-local" [(ngModel)]="exportForm.nextRunAt" />
+          <label class="full-width">
+            Filters (optional JSON)
+            <textarea class="input" rows="3" [(ngModel)]="exportForm.filters"></textarea>
           </label>
         </div>
 
         <div class="mt-4 flex items-center gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" (click)="submitExportJob()">Create Export</button>
-          <span class="chip" *ngIf="exportsLoading">Loading...</span>
+          <button class="btn-primary px-4 py-2 rounded-full" [disabled]="exportSubmitting" (click)="submitExportRequest()">
+            {{ exportSubmitting ? 'Submitting...' : 'Create Export Job' }}
+          </button>
         </div>
 
         <div class="table-shell mt-5">
           <table>
             <thead>
               <tr>
-                <th class="th">Name</th>
+                <th class="th">ID</th>
                 <th class="th">Format</th>
-                <th class="th">Schedule</th>
                 <th class="th">Status</th>
-                <th class="th">Next Run</th>
+                <th class="th">File</th>
+                <th class="th">Completed At</th>
               </tr>
             </thead>
             <tbody>
-              <tr class="row" *ngFor="let item of exportJobs">
-                <td>{{ item.name }}</td>
+              <tr class="row" *ngFor="let item of reportExports; trackBy: trackById">
+                <td>{{ item.id }}</td>
                 <td>{{ item.format.toUpperCase() }}</td>
-                <td>{{ item.schedule_type }}</td>
                 <td>{{ item.status || '-' }}</td>
-                <td>{{ formatDate(item.next_run_at) }}</td>
+                <td>{{ item.file || '-' }}</td>
+                <td>{{ formatDate(item.completed_at || item.date_created) }}</td>
               </tr>
-              <tr *ngIf="!exportsLoading && !exportJobs.length">
-                <td colspan="5" class="empty-cell">No export jobs yet.</td>
+              <tr *ngIf="!reportExports.length">
+                <td colspan="5" class="empty-cell">No export jobs found.</td>
               </tr>
             </tbody>
           </table>
@@ -133,270 +239,29 @@
 
       <section class="panel">
         <div class="panel-header">
-          <h3 class="panel-title">2) WhatsApp/SMS Invites</h3>
-          <span class="chip">Paid</span>
-        </div>
-        <p class="section-note">{{ showPaidFeatureMessage('WhatsApp/SMS Invites') }}</p>
-
-        <div class="form-grid">
-          <label>
-            Recipient Name
-            <input class="input" [(ngModel)]="inviteForm.recipientName" />
-          </label>
-          <label>
-            Phone
-            <input class="input" placeholder="+201234567890" [(ngModel)]="inviteForm.phone" />
-          </label>
-          <label>
-            Channel
-            <select class="input" [(ngModel)]="inviteForm.channel">
-              <option value="whatsapp">WhatsApp</option>
-              <option value="sms">SMS</option>
-            </select>
-          </label>
-          <label class="full-width">
-            Message Template
-            <textarea class="input" rows="3" [(ngModel)]="inviteForm.messageTemplate"></textarea>
-          </label>
+          <h3 class="panel-title">5) Activity Log</h3>
+          <span class="chip">{{ activityEvents.length }} events</span>
         </div>
 
-        <div class="mt-4 flex items-center gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" (click)="submitMessageInvite()">Send Invite</button>
-          <span class="chip" *ngIf="invitesLoading">Loading...</span>
-        </div>
-
-        <div class="table-shell mt-5">
+        <div class="table-shell">
           <table>
             <thead>
               <tr>
-                <th class="th">Recipient</th>
-                <th class="th">Phone</th>
-                <th class="th">Channel</th>
-                <th class="th">Status</th>
-                <th class="th">Sent At</th>
+                <th class="th">Actor</th>
+                <th class="th">Action</th>
+                <th class="th">Entity</th>
+                <th class="th">Date</th>
               </tr>
             </thead>
             <tbody>
-              <tr class="row" *ngFor="let item of messageInvites">
-                <td>{{ item.recipient_name }}</td>
-                <td>{{ item.phone }}</td>
-                <td>{{ item.channel }}</td>
-                <td>{{ item.status || '-' }}</td>
-                <td>{{ formatDate(item.sent_at || item.date_created) }}</td>
+              <tr class="row" *ngFor="let event of activityEvents; trackBy: trackById">
+                <td>{{ event.actor_label || '-' }}</td>
+                <td>{{ event.action || '-' }}</td>
+                <td>{{ event.entity_type || '-' }} #{{ event.entity_id || '-' }}</td>
+                <td>{{ formatDate(event.date_created) }}</td>
               </tr>
-              <tr *ngIf="!invitesLoading && !messageInvites.length">
-                <td colspan="5" class="empty-cell">No message invites yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h3 class="panel-title">3) Multi-location Management</h3>
-          <span class="chip">Paid</span>
-        </div>
-        <p class="section-note">{{ showPaidFeatureMessage('Multi-location Management') }}</p>
-
-        <div class="form-grid">
-          <label>
-            Location Name
-            <input class="input" [(ngModel)]="locationForm.name" />
-          </label>
-          <label>
-            Code
-            <input class="input" [(ngModel)]="locationForm.code" />
-          </label>
-          <label>
-            City
-            <input class="input" [(ngModel)]="locationForm.city" />
-          </label>
-          <label>
-            Country
-            <input class="input" [(ngModel)]="locationForm.country" />
-          </label>
-          <label>
-            Manager
-            <input class="input" [(ngModel)]="locationForm.managerName" />
-          </label>
-          <label>
-            Address
-            <input class="input" [(ngModel)]="locationForm.address" />
-          </label>
-        </div>
-
-        <div class="mt-4 flex items-center gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" (click)="submitLocation()">Add Location</button>
-          <span class="chip" *ngIf="locationsLoading">Loading...</span>
-        </div>
-
-        <div class="table-shell mt-5">
-          <table>
-            <thead>
-              <tr>
-                <th class="th">Name</th>
-                <th class="th">City</th>
-                <th class="th">Country</th>
-                <th class="th">Manager</th>
-                <th class="th">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr class="row" *ngFor="let item of locations">
-                <td>{{ item.name }}</td>
-                <td>{{ item.city || '-' }}</td>
-                <td>{{ item.country || '-' }}</td>
-                <td>{{ item.manager_name || '-' }}</td>
-                <td>{{ item.is_active === false ? 'Inactive' : 'Active' }}</td>
-              </tr>
-              <tr *ngIf="!locationsLoading && !locations.length">
-                <td colspan="5" class="empty-cell">No locations yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h3 class="panel-title">4) Automation Rules & Escalation</h3>
-          <span class="chip">Paid</span>
-        </div>
-        <p class="section-note">{{ showPaidFeatureMessage('Automation Rules') }}</p>
-
-        <div class="form-grid">
-          <label>
-            Rule Name
-            <input class="input" [(ngModel)]="ruleForm.ruleName" />
-          </label>
-          <label>
-            Trigger
-            <select class="input" [(ngModel)]="ruleForm.triggerType">
-              <option value="high_risk">High risk detected</option>
-              <option value="fatigue_spike">Fatigue spike</option>
-              <option value="missed_scan">Missed daily scan</option>
-              <option value="pending_request_timeout">Pending request timeout</option>
-            </select>
-          </label>
-          <label>
-            Action
-            <select class="input" [(ngModel)]="ruleForm.actionType">
-              <option value="email_manager">Email manager</option>
-              <option value="sms_manager">SMS manager</option>
-              <option value="whatsapp_alert">WhatsApp alert</option>
-              <option value="escalate_to_admin">Escalate to admin</option>
-            </select>
-          </label>
-          <label>
-            Threshold
-            <input class="input" placeholder="optional number" [(ngModel)]="ruleForm.threshold" />
-          </label>
-          <label>
-            Cooldown (minutes)
-            <input class="input" [(ngModel)]="ruleForm.cooldownMinutes" />
-          </label>
-        </div>
-
-        <div class="mt-4 flex items-center gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" (click)="submitRule()">Create Rule</button>
-          <span class="chip" *ngIf="rulesLoading">Loading...</span>
-        </div>
-
-        <div class="rules-list mt-5">
-          <article class="rule-item" *ngFor="let item of rules">
-            <div>
-              <h4>{{ item.rule_name }}</h4>
-              <p>{{ item.trigger_type }} -> {{ item.action_type }}</p>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="chip">{{ item.is_active ? 'Active' : 'Paused' }}</span>
-              <button class="chip" (click)="toggleRule(item)">
-                {{ item.is_active ? 'Pause' : 'Activate' }}
-              </button>
-            </div>
-          </article>
-          <p *ngIf="!rulesLoading && !rules.length" class="empty-cell">No automation rules yet.</p>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h3 class="panel-title">5) Billing Portal</h3>
-          <span class="chip">Paid</span>
-        </div>
-        <p class="section-note">{{ showPaidFeatureMessage('Billing Portal') }}</p>
-
-        <div class="billing-summary">
-          <div class="chip">Current Plan: {{ currentPlanName }}</div>
-          <div class="chip">Renewal Date: {{ formatDate(renewalDate || undefined) }}</div>
-        </div>
-
-        <div class="mt-4 flex flex-wrap gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" (click)="submitRenewal('monthly')">
-            Request Monthly Renewal
-          </button>
-          <button class="btn-primary px-4 py-2 rounded-full" (click)="submitRenewal('yearly')">
-            Request Yearly Renewal
-          </button>
-        </div>
-
-        <label class="mt-4 block">
-          Renewal note
-          <textarea class="input mt-2" rows="3" [(ngModel)]="renewalNote"></textarea>
-        </label>
-
-        <div class="form-grid mt-5">
-          <label>
-            Company legal name
-            <input class="input" [(ngModel)]="billingForm.companyLegalName" />
-          </label>
-          <label>
-            Tax ID
-            <input class="input" [(ngModel)]="billingForm.taxId" />
-          </label>
-          <label>
-            Billing email
-            <input class="input" [(ngModel)]="billingForm.billingEmail" />
-          </label>
-          <label>
-            Accounts phone
-            <input class="input" [(ngModel)]="billingForm.accountsPhone" />
-          </label>
-          <label class="full-width">
-            Billing address
-            <input class="input" [(ngModel)]="billingForm.address" />
-          </label>
-        </div>
-
-        <div class="mt-4 flex items-center gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" (click)="saveBillingProfile()">
-            Save Billing Profile
-          </button>
-          <span class="chip" *ngIf="invoicesLoading">Loading...</span>
-        </div>
-
-        <div class="table-shell mt-5">
-          <table>
-            <thead>
-              <tr>
-                <th class="th">Invoice</th>
-                <th class="th">Amount</th>
-                <th class="th">Cycle</th>
-                <th class="th">Due</th>
-                <th class="th">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr class="row" *ngFor="let item of invoices">
-                <td>{{ item.invoice_number || item.id }}</td>
-                <td>{{ formatMoney(item.amount_usd) }}</td>
-                <td>{{ item.billing_cycle || '-' }}</td>
-                <td>{{ formatDate(item.due_date || item.date_created) }}</td>
-                <td>{{ item.status || '-' }}</td>
-              </tr>
-              <tr *ngIf="!invoicesLoading && !invoices.length">
-                <td colspan="5" class="empty-cell">No invoices yet.</td>
+              <tr *ngIf="!activityEvents.length">
+                <td colspan="4" class="empty-cell">No activity events found.</td>
               </tr>
             </tbody>
           </table>
@@ -405,3 +270,4 @@
     </div>
   </ng-container>
 </div>
+

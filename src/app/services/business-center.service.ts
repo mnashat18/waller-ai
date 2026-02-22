@@ -1,412 +1,763 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
 
-export type ExportJob = {
-  id?: string | number;
-  name: string;
-  dataset: string;
-  format: 'csv' | 'pdf';
-  schedule_type: 'one_time' | 'daily' | 'weekly' | 'monthly';
-  next_run_at?: string;
-  status?: string;
-  file_url?: string;
-  date_created?: string;
+export type ActionResult = {
+  ok: boolean;
+  message: string;
 };
 
-export type MessageInvite = {
-  id?: string | number;
-  recipient_name: string;
-  phone: string;
-  channel: 'whatsapp' | 'sms';
-  message_template: string;
-  status?: string;
-  sent_at?: string;
-  date_created?: string;
+export type BusinessProfile = {
+  id: string;
+  owner_user?: string | null;
+  plan_code?: string | null;
+  billing_status?: string | null;
+  trial_started_at?: string | null;
+  trial_expires_at?: string | null;
+  is_active?: boolean | null;
+  company_name?: string | null;
+  business_name?: string | null;
+  org_id?: string | null;
+  date_created?: string | null;
 };
 
-export type BusinessLocation = {
-  id?: string | number;
-  name: string;
-  code?: string;
-  city?: string;
-  country?: string;
-  address?: string;
-  manager_name?: string;
-  is_active?: boolean;
-  date_created?: string;
+export type BusinessProfileMember = {
+  id: string;
+  business_profile?: string | null;
+  user_id?: string | null;
+  user_label?: string | null;
+  member_role?: string | null;
+  status?: string | null;
 };
 
-export type AutomationRule = {
-  id?: string | number;
-  rule_name: string;
-  trigger_type: string;
-  action_type: string;
-  threshold?: number;
-  cooldown_minutes?: number;
-  is_active: boolean;
-  status?: string;
-  date_created?: string;
+export type RequestRecord = {
+  id: string;
+  target: string;
+  recipient: string;
+  required_state: string;
+  response_status: string;
+  timestamp?: string | null;
+  org_id?: string | null;
 };
 
-export type BusinessInvoice = {
-  id?: string | number;
-  invoice_number?: string;
-  amount_usd?: number;
-  due_date?: string;
-  status?: string;
-  billing_cycle?: string;
-  date_created?: string;
+export type RequestInviteRecord = {
+  id: string;
+  request?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  status?: string | null;
+  token?: string | null;
+  sent_at?: string | null;
+  claimed_at?: string | null;
+  expires_at?: string | null;
+  org_id?: string | null;
+  date_created?: string | null;
 };
 
-export type BillingProfileInput = {
-  companyLegalName: string;
-  taxId: string;
-  billingEmail: string;
-  accountsPhone: string;
-  address: string;
+export type ReportExportRecord = {
+  id: string;
+  format: string;
+  status?: string | null;
+  file?: string | null;
+  filters?: string | null;
+  completed_at?: string | null;
+  org_id?: string | null;
+  user?: string | null;
+  date_created?: string | null;
+};
+
+export type ActivityEventRecord = {
+  id: string;
+  actor_label?: string | null;
+  target_user_label?: string | null;
+  action?: string | null;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  payload?: string | null;
+  org_id?: string | null;
+  date_created?: string | null;
+};
+
+export type BusinessHubAccessState = {
+  userId: string | null;
+  orgId: string | null;
+  profile: BusinessProfile | null;
+  membership: BusinessProfileMember | null;
+  hasPaidAccess: boolean;
+  reason: string;
 };
 
 type AccessContext = {
   token: string | null;
   userId: string | null;
-};
-
-type ActionResult = {
-  ok: boolean;
-  message: string;
+  orgId: string | null;
 };
 
 @Injectable({ providedIn: 'root' })
 export class BusinessCenterService {
   private api = environment.API_URL;
-  private exportJobsForbidden = false;
-  private messageInvitesForbidden = false;
-  private locationsForbidden = false;
-  private rulesForbidden = false;
-  private invoicesForbidden = false;
 
   constructor(private http: HttpClient) {}
 
-  listExportJobs(limit = 25): Observable<ExportJob[]> {
-    if (this.exportJobsForbidden) {
-      return of([]);
+  getHubAccessState(): Observable<BusinessHubAccessState> {
+    const access = this.getAccessContext();
+    if (!access.userId || !access.token) {
+      return of({
+        userId: access.userId,
+        orgId: access.orgId,
+        profile: null,
+        membership: null,
+        hasPaidAccess: false,
+        reason: 'Please sign in first.'
+      });
     }
 
-    const access = this.getAccessContext();
-    const params = new URLSearchParams({
-      sort: '-date_created',
-      limit: String(limit),
-      fields: 'id,name,dataset,format,schedule_type,next_run_at,status,file_url,date_created'
-    });
-    return this.withActiveBusinessListAccess(() =>
-      this.http.get<{ data?: ExportJob[] }>(
-        `${this.api}/items/business_export_jobs?${params.toString()}`,
-        this.requestOptions(access.token)
-      ).pipe(
-        map((res) => res.data ?? []),
-        catchError((err) => {
-          if (this.isForbiddenError(err)) {
-            this.exportJobsForbidden = true;
-          }
-          this.rememberAccessError(err, 'Business export center is not accessible with your current backend permissions.');
-          return of([]);
+    return this.fetchOwnedProfile(access.userId, access.token).pipe(
+      switchMap((ownedProfile) => {
+        if (ownedProfile) {
+          return of({
+            profile: ownedProfile,
+            membership: null
+          });
+        }
+        return this.fetchMemberProfile(access.userId as string, access.token as string);
+      }),
+      map(({ profile, membership }) =>
+        this.buildAccessState(access, profile, membership)
+      ),
+      catchError((err) =>
+        of({
+          userId: access.userId,
+          orgId: access.orgId,
+          profile: null,
+          membership: null,
+          hasPaidAccess: false,
+          reason: this.toFriendlyError(err, 'Failed to verify Business access.')
         })
       )
     );
   }
 
-  createExportJob(payload: ExportJob): Observable<ActionResult> {
+  listTeamMembers(profileId: string | null, limit = 50): Observable<BusinessProfileMember[]> {
     const access = this.getAccessContext();
-    const body = {
-      name: payload.name,
-      dataset: payload.dataset,
-      format: payload.format,
-      schedule_type: payload.schedule_type,
-      next_run_at: payload.next_run_at ?? null,
-      status: 'Queued',
-      requested_by_user: access.userId ?? undefined,
-      requested_at: new Date().toISOString()
-    };
-    return this.withActiveBusinessActionAccess(() =>
-      this.http.post(
-        `${this.api}/items/business_export_jobs`,
-        body,
-        this.requestOptions(access.token)
-      ).pipe(
-        map(() => ({ ok: true, message: 'Export job queued successfully.' })),
-        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to queue export job.') }))
-      )
-    );
-  }
-
-  listMessageInvites(limit = 25): Observable<MessageInvite[]> {
-    if (this.messageInvitesForbidden) {
+    if (!profileId || !access.token) {
       return of([]);
     }
 
-    const access = this.getAccessContext();
     const params = new URLSearchParams({
       sort: '-date_created',
       limit: String(limit),
-      fields: 'id,recipient_name,phone,channel,message_template,status,sent_at,date_created'
+      fields: [
+        'id',
+        'member_role',
+        'status',
+        'business_profile',
+        'user.id',
+        'user.email',
+        'user.first_name',
+        'user.last_name'
+      ].join(',')
     });
-    return this.withActiveBusinessListAccess(() =>
-      this.http.get<{ data?: MessageInvite[] }>(
-        `${this.api}/items/business_message_invites?${params.toString()}`,
-        this.requestOptions(access.token)
-      ).pipe(
-        map((res) => res.data ?? []),
-        catchError((err) => {
-          if (this.isForbiddenError(err)) {
-            this.messageInvitesForbidden = true;
-          }
-          this.rememberAccessError(err, 'Business invites are not accessible with your current backend permissions.');
-          return of([]);
-        })
-      )
+    params.set('filter[business_profile][_eq]', profileId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/business_profile_members?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeMember(row)))
     );
   }
 
-  createMessageInvite(payload: MessageInvite): Observable<ActionResult> {
+  listRequests(orgId: string | null, limit = 60): Observable<RequestRecord[]> {
     const access = this.getAccessContext();
-    const body = {
-      recipient_name: payload.recipient_name,
-      phone: payload.phone,
-      channel: payload.channel,
-      message_template: payload.message_template,
-      status: 'Queued',
-      requested_by_user: access.userId ?? undefined,
-      sent_at: new Date().toISOString()
-    };
-    return this.withActiveBusinessActionAccess(() =>
-      this.http.post(
-        `${this.api}/items/business_message_invites`,
-        body,
-        this.requestOptions(access.token)
-      ).pipe(
-        map(() => ({ ok: true, message: 'Message invite queued.' })),
-        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to queue message invite.') }))
-      )
-    );
-  }
-
-  listLocations(limit = 50): Observable<BusinessLocation[]> {
-    if (this.locationsForbidden) {
+    if (!orgId || !access.token) {
       return of([]);
     }
 
-    const access = this.getAccessContext();
     const params = new URLSearchParams({
-      sort: '-date_created',
+      sort: '-timestamp',
       limit: String(limit),
-      fields: 'id,name,code,city,country,address,manager_name,is_active,date_created'
+      fields: [
+        'id',
+        'Target',
+        'required_state',
+        'response_status',
+        'timestamp',
+        'org_id',
+        'requested_by_org',
+        'requested_for_user.id',
+        'requested_for_user.email',
+        'requested_for_user.first_name',
+        'requested_for_user.last_name',
+        'requested_for_email',
+        'requested_for_phone'
+      ].join(',')
     });
-    return this.withActiveBusinessListAccess(() =>
-      this.http.get<{ data?: BusinessLocation[] }>(
-        `${this.api}/items/business_locations?${params.toString()}`,
-        this.requestOptions(access.token)
-      ).pipe(
-        map((res) => res.data ?? []),
-        catchError((err) => {
-          if (this.isForbiddenError(err)) {
-            this.locationsForbidden = true;
-          }
-          this.rememberAccessError(err, 'Business locations are not accessible with your current backend permissions.');
-          return of([]);
-        })
-      )
+    params.set('filter[_or][0][org_id][_eq]', orgId);
+    params.set('filter[_or][1][requested_by_org][_eq]', orgId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row)))
     );
   }
 
-  createLocation(payload: BusinessLocation): Observable<ActionResult> {
+  listRequestInvites(orgId: string | null, limit = 80): Observable<RequestInviteRecord[]> {
     const access = this.getAccessContext();
-    const body = {
-      name: payload.name,
-      code: payload.code ?? null,
-      city: payload.city ?? null,
-      country: payload.country ?? null,
-      address: payload.address ?? null,
-      manager_name: payload.manager_name ?? null,
-      is_active: payload.is_active !== false,
-      owner_user: access.userId ?? undefined
-    };
-    return this.withActiveBusinessActionAccess(() =>
-      this.http.post(
-        `${this.api}/items/business_locations`,
-        body,
-        this.requestOptions(access.token)
-      ).pipe(
-        map(() => ({ ok: true, message: 'Location added.' })),
-        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to add location.') }))
-      )
-    );
-  }
-
-  listAutomationRules(limit = 50): Observable<AutomationRule[]> {
-    if (this.rulesForbidden) {
+    if (!orgId || !access.token) {
       return of([]);
     }
 
-    const access = this.getAccessContext();
     const params = new URLSearchParams({
       sort: '-date_created',
       limit: String(limit),
-      fields: 'id,rule_name,trigger_type,action_type,threshold,cooldown_minutes,is_active,status,date_created'
+      fields: [
+        'id',
+        'request',
+        'email',
+        'phone',
+        'status',
+        'token',
+        'sent_at',
+        'claimed_at',
+        'expires_at',
+        'org_id',
+        'date_created'
+      ].join(',')
     });
-    return this.withActiveBusinessListAccess(() =>
-      this.http.get<{ data?: AutomationRule[] }>(
-        `${this.api}/items/business_automation_rules?${params.toString()}`,
-        this.requestOptions(access.token)
-      ).pipe(
-        map((res) => res.data ?? []),
-        catchError((err) => {
-          if (this.isForbiddenError(err)) {
-            this.rulesForbidden = true;
-          }
-          this.rememberAccessError(err, 'Business automation rules are not accessible with your current backend permissions.');
-          return of([]);
-        })
-      )
+    params.set('filter[org_id][_eq]', orgId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/request_invites?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeInvite(row)))
     );
   }
 
-  createAutomationRule(payload: AutomationRule): Observable<ActionResult> {
+  createRequestInvite(
+    payload: { requestId: string; email?: string; phone?: string },
+    orgId: string | null
+  ): Observable<ActionResult> {
     const access = this.getAccessContext();
-    const body = {
-      rule_name: payload.rule_name,
-      trigger_type: payload.trigger_type,
-      action_type: payload.action_type,
-      threshold: payload.threshold ?? null,
-      cooldown_minutes: payload.cooldown_minutes ?? null,
-      is_active: payload.is_active,
-      status: payload.is_active ? 'Active' : 'Paused',
-      owner_user: access.userId ?? undefined
-    };
-    return this.withActiveBusinessActionAccess(() =>
-      this.http.post(
-        `${this.api}/items/business_automation_rules`,
-        body,
-        this.requestOptions(access.token)
-      ).pipe(
-        map(() => ({ ok: true, message: 'Automation rule created.' })),
-        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to create automation rule.') }))
-      )
-    );
-  }
-
-  toggleAutomationRule(rule: AutomationRule): Observable<ActionResult> {
-    if (!rule.id) {
-      return of({ ok: false, message: 'Rule ID is missing.' });
-    }
-    const access = this.getAccessContext();
-    const isActive = !rule.is_active;
-    return this.withActiveBusinessActionAccess(() =>
-      this.http.patch(
-        `${this.api}/items/business_automation_rules/${encodeURIComponent(String(rule.id))}`,
-        {
-          is_active: isActive,
-          status: isActive ? 'Active' : 'Paused'
-        },
-        this.requestOptions(access.token)
-      ).pipe(
-        map(() => ({ ok: true, message: isActive ? 'Rule activated.' : 'Rule paused.' })),
-        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to update rule.') }))
-      )
-    );
-  }
-
-  listInvoices(limit = 25): Observable<BusinessInvoice[]> {
-    if (this.invoicesForbidden) {
-      return of([]);
+    if (!access.token) {
+      return of({ ok: false, message: 'Please sign in first.' });
     }
 
-    const access = this.getAccessContext();
-    const params = new URLSearchParams({
-      sort: '-date_created',
-      limit: String(limit),
-      fields: 'id,invoice_number,amount_usd,due_date,status,billing_cycle,date_created'
-    });
-    return this.withActiveBusinessListAccess(() =>
-      this.http.get<{ data?: BusinessInvoice[] }>(
-        `${this.api}/items/business_invoices?${params.toString()}`,
-        this.requestOptions(access.token)
-      ).pipe(
-        map((res) => (res.data ?? []).map((invoice) => ({
-          ...invoice,
-          amount_usd: this.toNumber(invoice.amount_usd)
-        }))),
-        catchError((err) => {
-          if (this.isForbiddenError(err)) {
-            this.invoicesForbidden = true;
-          }
-          this.rememberAccessError(err, 'Business billing data is not accessible with your current backend permissions.');
-          return of([]);
-        })
-      )
-    );
-  }
+    const requestId = this.pickString(payload.requestId);
+    const email = this.pickString(payload.email);
+    const phone = this.pickString(payload.phone);
+    if (!requestId) {
+      return of({ ok: false, message: 'Request ID is required.' });
+    }
+    if (!email && !phone) {
+      return of({ ok: false, message: 'Email or phone is required.' });
+    }
 
-  requestRenewal(cycle: 'monthly' | 'yearly', note: string): Observable<ActionResult> {
-    const access = this.getAccessContext();
-    const body = {
-      desired_cycle: cycle === 'yearly' ? 'Yearly' : 'Monthly',
-      note: note || null,
-      status: 'Pending',
-      requested_by_user: access.userId ?? undefined,
-      requested_at: new Date().toISOString()
+    const now = new Date();
+    const expiresAt = new Date(now);
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    const body: Record<string, unknown> = {
+      request: requestId,
+      email: email ?? null,
+      phone: phone ?? null,
+      token: this.buildInviteToken(),
+      status: 'Sent',
+      sent_at: now.toISOString(),
+      expires_at: expiresAt.toISOString()
     };
-    return this.withActiveBusinessActionAccess(() =>
-      this.http.post(
-        `${this.api}/items/business_renewal_requests`,
-        body,
-        this.requestOptions(access.token)
-      ).pipe(
-        map(() => ({ ok: true, message: 'Renewal request submitted.' })),
-        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to submit renewal request.') }))
-      )
-    );
-  }
+    if (orgId) {
+      body['org_id'] = orgId;
+    }
 
-  saveBillingProfile(profile: BillingProfileInput): Observable<ActionResult> {
-    const access = this.getAccessContext();
-    const body = {
-      company_legal_name: profile.companyLegalName,
-      tax_id: profile.taxId || null,
-      billing_email: profile.billingEmail,
-      accounts_phone: profile.accountsPhone || null,
-      address: profile.address || null,
-      status: 'Active'
-    };
-    return this.withActiveBusinessActionAccess(() =>
-      this.http.post(
-        `${this.api}/items/business_billing_profiles`,
-        body,
-        this.requestOptions(access.token)
-      ).pipe(
-        map(() => ({ ok: true, message: 'Billing profile saved.' })),
-        catchError((err) => of({ ok: false, message: this.readError(err, 'Failed to save billing profile.') }))
-      )
-    );
-  }
-
-  private withActiveBusinessListAccess<T>(factory: () => Observable<T[]>): Observable<T[]> {
-    return factory().pipe(
-      catchError(() => of([] as T[]))
-    );
-  }
-
-  private withActiveBusinessActionAccess(factory: () => Observable<ActionResult>): Observable<ActionResult> {
-    return factory().pipe(
-      catchError(() =>
+    return this.http.post(
+      `${this.api}/items/request_invites`,
+      body,
+      this.requestOptions(access.token)
+    ).pipe(
+      map(() => ({ ok: true, message: 'Invite sent successfully.' })),
+      catchError((err) =>
         of({
           ok: false,
-          message: 'Business access validation failed.'
+          message: this.toFriendlyError(err, 'Failed to send invite.')
         })
       )
     );
+  }
+
+  listReportExports(orgId: string | null, limit = 40): Observable<ReportExportRecord[]> {
+    const access = this.getAccessContext();
+    if (!access.token) {
+      return of([]);
+    }
+
+    const params = new URLSearchParams({
+      sort: '-date_created',
+      limit: String(limit),
+      fields: 'id,format,status,file,filters,completed_at,org_id,user,date_created'
+    });
+    if (orgId) {
+      params.set('filter[org_id][_eq]', orgId);
+    } else if (access.userId) {
+      params.set('filter[user][_eq]', access.userId);
+    } else {
+      return of([]);
+    }
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/reports_exports?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeExport(row)))
+    );
+  }
+
+  createReportExport(
+    input: { format: 'csv' | 'pdf'; filters?: string | null },
+    orgId: string | null
+  ): Observable<ActionResult> {
+    const access = this.getAccessContext();
+    if (!access.token) {
+      return of({ ok: false, message: 'Please sign in first.' });
+    }
+
+    const primary: Record<string, unknown> = {
+      format: input.format,
+      filters: this.parseFilters(input.filters)
+    };
+    if (orgId) {
+      primary['org_id'] = orgId;
+    }
+    if (access.userId) {
+      primary['user'] = access.userId;
+    }
+
+    return this.http.post(
+      `${this.api}/items/reports_exports`,
+      primary,
+      this.requestOptions(access.token)
+    ).pipe(
+      map(() => ({ ok: true, message: 'Export request queued.' })),
+      catchError((err) => {
+        if (!this.shouldRetryWithMinimalPayload(err)) {
+          return of({
+            ok: false,
+            message: this.toFriendlyError(err, 'Failed to queue export request.')
+          });
+        }
+
+        const fallback: Record<string, unknown> = { format: input.format };
+        if (orgId) {
+          fallback['org_id'] = orgId;
+        }
+
+        return this.http.post(
+          `${this.api}/items/reports_exports`,
+          fallback,
+          this.requestOptions(access.token)
+        ).pipe(
+          map(() => ({ ok: true, message: 'Export request queued.' })),
+          catchError((retryErr) =>
+            of({
+              ok: false,
+              message: this.toFriendlyError(retryErr, 'Failed to queue export request.')
+            })
+          )
+        );
+      })
+    );
+  }
+
+  listActivityEvents(orgId: string | null, limit = 60): Observable<ActivityEventRecord[]> {
+    const access = this.getAccessContext();
+    if (!orgId || !access.token) {
+      return of([]);
+    }
+
+    const params = new URLSearchParams({
+      sort: '-date_created',
+      limit: String(limit),
+      fields: [
+        'id',
+        'action',
+        'entity_type',
+        'entity_id',
+        'payload',
+        'org_id',
+        'date_created',
+        'actor.id',
+        'actor.email',
+        'actor.first_name',
+        'actor.last_name',
+        'target_user.id',
+        'target_user.email',
+        'target_user.first_name',
+        'target_user.last_name'
+      ].join(',')
+    });
+    params.set('filter[org_id][_eq]', orgId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/activity_events?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeActivity(row)))
+    );
+  }
+
+  submitUpgradeRequest(orgId: string | null): Observable<ActionResult> {
+    const access = this.getAccessContext();
+    if (!access.token || !access.userId) {
+      return of({ ok: false, message: 'Please sign in first.' });
+    }
+
+    const primary: Record<string, unknown> = {
+      requested_by_user: access.userId,
+      requested_at: new Date().toISOString(),
+      status: 'Pending'
+    };
+    if (orgId) {
+      primary['org_id'] = orgId;
+    }
+
+    return this.http.post(
+      `${this.api}/items/business_upgrade_requests`,
+      primary,
+      this.requestOptions(access.token)
+    ).pipe(
+      map(() => ({ ok: true, message: 'Upgrade request submitted successfully.' })),
+      catchError((err) => {
+        if (!this.shouldRetryWithMinimalPayload(err)) {
+          return of({
+            ok: false,
+            message: this.toFriendlyError(err, 'Failed to submit upgrade request.')
+          });
+        }
+
+        return this.http.post(
+          `${this.api}/items/business_upgrade_requests`,
+          { requested_by_user: access.userId },
+          this.requestOptions(access.token)
+        ).pipe(
+          map(() => ({ ok: true, message: 'Upgrade request submitted successfully.' })),
+          catchError((retryErr) =>
+            of({
+              ok: false,
+              message: this.toFriendlyError(retryErr, 'Failed to submit upgrade request.')
+            })
+          )
+        );
+      })
+    );
+  }
+
+  private fetchOwnedProfile(userId: string, token: string): Observable<BusinessProfile | null> {
+    const params = new URLSearchParams({
+      sort: '-date_created',
+      limit: '1',
+      fields: [
+        'id',
+        'owner_user',
+        'plan_code',
+        'billing_status',
+        'trial_started_at',
+        'trial_expires_at',
+        'is_active',
+        'company_name',
+        'business_name',
+        'org_id',
+        'date_created'
+      ].join(',')
+    });
+    params.set('filter[owner_user][_eq]', userId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/business_profiles?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => this.normalizeProfile((res.data ?? [])[0])),
+      catchError(() => of(null))
+    );
+  }
+
+  private fetchMemberProfile(
+    userId: string,
+    token: string
+  ): Observable<{ profile: BusinessProfile | null; membership: BusinessProfileMember | null }> {
+    const params = new URLSearchParams({
+      sort: '-date_created',
+      limit: '20',
+      fields: [
+        'id',
+        'member_role',
+        'status',
+        'user.id',
+        'user.email',
+        'user.first_name',
+        'user.last_name',
+        'business_profile.id',
+        'business_profile.owner_user',
+        'business_profile.plan_code',
+        'business_profile.billing_status',
+        'business_profile.trial_started_at',
+        'business_profile.trial_expires_at',
+        'business_profile.is_active',
+        'business_profile.company_name',
+        'business_profile.business_name',
+        'business_profile.org_id',
+        'business_profile.date_created'
+      ].join(',')
+    });
+    params.set('filter[user][_eq]', userId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/business_profile_members?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => {
+        const rows = res.data ?? [];
+        const normalized = rows.map((row) => ({
+          membership: this.normalizeMember(row),
+          profile: this.normalizeProfile(row?.business_profile)
+        })).filter((row) => row.profile);
+
+        if (!normalized.length) {
+          return { profile: null, membership: null };
+        }
+
+        const active = normalized.find((row) =>
+          this.isMembershipActive(row.membership?.status)
+        );
+        if (!active) {
+          return { profile: null, membership: null };
+        }
+        return active;
+      }),
+      catchError(() => of({ profile: null, membership: null }))
+    );
+  }
+
+  private buildAccessState(
+    access: AccessContext,
+    profile: BusinessProfile | null,
+    membership: BusinessProfileMember | null
+  ): BusinessHubAccessState {
+    const profileOrgId = this.normalizeId(profile?.org_id);
+    const orgId = profileOrgId ?? access.orgId ?? null;
+
+    if (!profile) {
+      return {
+        userId: access.userId,
+        orgId,
+        profile: null,
+        membership,
+        hasPaidAccess: false,
+        reason: 'No Business profile found for your account.'
+      };
+    }
+
+    const planCode = (profile.plan_code ?? '').toString().trim().toLowerCase();
+    const billingStatus = (profile.billing_status ?? '').toString().trim().toLowerCase();
+    const isActive = this.coerceBoolean(profile.is_active);
+    const hasPaidAccess =
+      planCode === 'business' &&
+      billingStatus === 'active' &&
+      isActive;
+
+    let reason = '';
+    if (!hasPaidAccess) {
+      if (planCode !== 'business') {
+        reason = 'Business profile exists, but plan_code is not "business".';
+      } else if (billingStatus !== 'active') {
+        reason = 'Business profile exists, but billing_status is not Active.';
+      } else if (!isActive) {
+        reason = 'Business profile exists, but is_active is false.';
+      } else {
+        reason = 'Business paid access is not active.';
+      }
+    }
+
+    return {
+      userId: access.userId,
+      orgId,
+      profile,
+      membership,
+      hasPaidAccess,
+      reason
+    };
+  }
+
+  private normalizeProfile(raw: any): BusinessProfile | null {
+    const id = this.normalizeId(raw?.id);
+    if (!id) {
+      return null;
+    }
+
+    return {
+      id,
+      owner_user: this.normalizeId(raw?.owner_user),
+      plan_code: this.pickString(raw?.plan_code),
+      billing_status: this.pickString(raw?.billing_status),
+      trial_started_at: this.pickString(raw?.trial_started_at),
+      trial_expires_at: this.pickString(raw?.trial_expires_at),
+      is_active: this.coerceBoolean(raw?.is_active),
+      company_name: this.pickString(raw?.company_name),
+      business_name: this.pickString(raw?.business_name),
+      org_id: this.normalizeId(raw?.org_id),
+      date_created: this.pickString(raw?.date_created)
+    };
+  }
+
+  private normalizeMember(raw: any): BusinessProfileMember {
+    return {
+      id: this.normalizeId(raw?.id) ?? '',
+      business_profile: this.normalizeId(raw?.business_profile),
+      user_id: this.normalizeId(raw?.user?.id ?? raw?.user),
+      user_label: this.userLabel(raw?.user),
+      member_role: this.pickString(raw?.member_role),
+      status: this.pickString(raw?.status)
+    };
+  }
+
+  private normalizeRequest(raw: any): RequestRecord {
+    return {
+      id: this.normalizeId(raw?.id) ?? '',
+      target: this.pickString(raw?.Target) ?? 'Business',
+      recipient: this.requestRecipient(raw),
+      required_state: this.pickString(raw?.required_state) ?? 'Unknown',
+      response_status: this.pickString(raw?.response_status) ?? 'Pending',
+      timestamp: this.pickString(raw?.timestamp),
+      org_id: this.normalizeId(raw?.org_id) ?? this.normalizeId(raw?.requested_by_org)
+    };
+  }
+
+  private normalizeInvite(raw: any): RequestInviteRecord {
+    return {
+      id: this.normalizeId(raw?.id) ?? '',
+      request: this.normalizeId(raw?.request),
+      email: this.pickString(raw?.email),
+      phone: this.pickString(raw?.phone),
+      status: this.pickString(raw?.status),
+      token: this.pickString(raw?.token),
+      sent_at: this.pickString(raw?.sent_at),
+      claimed_at: this.pickString(raw?.claimed_at),
+      expires_at: this.pickString(raw?.expires_at),
+      org_id: this.normalizeId(raw?.org_id),
+      date_created: this.pickString(raw?.date_created)
+    };
+  }
+
+  private normalizeExport(raw: any): ReportExportRecord {
+    const filters =
+      typeof raw?.filters === 'string'
+        ? raw.filters
+        : raw?.filters
+          ? JSON.stringify(raw.filters)
+          : null;
+
+    const file =
+      this.pickString(raw?.file?.id) ??
+      this.pickString(raw?.file?.filename_download) ??
+      this.pickString(raw?.file);
+
+    return {
+      id: this.normalizeId(raw?.id) ?? '',
+      format: (this.pickString(raw?.format) ?? 'csv').toLowerCase(),
+      status: this.pickString(raw?.status),
+      file,
+      filters,
+      completed_at: this.pickString(raw?.completed_at),
+      org_id: this.normalizeId(raw?.org_id),
+      user: this.normalizeId(raw?.user),
+      date_created: this.pickString(raw?.date_created)
+    };
+  }
+
+  private normalizeActivity(raw: any): ActivityEventRecord {
+    const payload =
+      typeof raw?.payload === 'string'
+        ? raw.payload
+        : raw?.payload
+          ? JSON.stringify(raw.payload)
+          : null;
+
+    return {
+      id: this.normalizeId(raw?.id) ?? '',
+      actor_label: this.userLabel(raw?.actor),
+      target_user_label: this.userLabel(raw?.target_user),
+      action: this.pickString(raw?.action),
+      entity_type: this.pickString(raw?.entity_type),
+      entity_id: this.pickString(raw?.entity_id),
+      payload,
+      org_id: this.normalizeId(raw?.org_id),
+      date_created: this.pickString(raw?.date_created)
+    };
+  }
+
+  private requestRecipient(raw: any): string {
+    const user = raw?.requested_for_user;
+    const userName = this.userLabel(user);
+    if (userName) {
+      return userName;
+    }
+    const email = this.pickString(raw?.requested_for_email);
+    if (email) {
+      return email;
+    }
+    const phone = this.pickString(raw?.requested_for_phone);
+    if (phone) {
+      return phone;
+    }
+    return '-';
+  }
+
+  private userLabel(raw: any): string | null {
+    if (!raw) {
+      return null;
+    }
+    if (typeof raw === 'string') {
+      return raw;
+    }
+    const first = this.pickString(raw?.first_name);
+    const last = this.pickString(raw?.last_name);
+    const fullName = [first, last].filter(Boolean).join(' ').trim();
+    if (fullName) {
+      return fullName;
+    }
+    const email = this.pickString(raw?.email);
+    if (email) {
+      return email;
+    }
+    return this.normalizeId(raw?.id);
+  }
+
+  private isMembershipActive(status: string | null | undefined): boolean {
+    const normalized = (status ?? '').trim().toLowerCase();
+    return normalized === 'active' || normalized === 'approved' || normalized === 'accepted';
+  }
+
+  private parseFilters(value: string | null | undefined): unknown {
+    const raw = (value ?? '').trim();
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+
+  private buildInviteToken(): string {
+    const random = Math.random().toString(36).slice(2, 12);
+    const time = Date.now().toString(36);
+    return `${time}${random}`.slice(0, 20);
   }
 
   private requestOptions(token: string | null) {
@@ -418,8 +769,17 @@ export class BusinessCenterService {
     const token = this.getToken();
     const payload = token ? this.decodeJwtPayload(token) : null;
     const userIdValue = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
-    const userId = typeof userIdValue === 'string' && userIdValue ? userIdValue : null;
-    return { token, userId };
+    const orgIdValue =
+      payload?.['org_id'] ??
+      payload?.['organization_id'] ??
+      payload?.['org'] ??
+      payload?.['organization'];
+
+    return {
+      token,
+      userId: this.normalizeId(userIdValue),
+      orgId: this.normalizeId(orgIdValue)
+    };
   }
 
   private getToken(): string | null {
@@ -462,41 +822,97 @@ export class BusinessCenterService {
     return Math.floor(Date.now() / 1000) >= exp;
   }
 
+  private toFriendlyError(err: any, fallback: string): string {
+    const detail = this.readError(err, '');
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const normalized = detail.toLowerCase();
+
+    if (
+      status === 0 ||
+      normalized.includes('network') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('connection refused') ||
+      normalized.includes('timeout')
+    ) {
+      return `Network error: ${detail || fallback}`;
+    }
+    if (status >= 500) {
+      return `Server error (${status}): ${detail || fallback}`;
+    }
+    if (status >= 400) {
+      return `Request error (${status}): ${detail || fallback}`;
+    }
+    return detail || fallback;
+  }
+
   private readError(err: any, fallback: string): string {
+    if (!err) {
+      return fallback;
+    }
+    if (typeof err?.error === 'string' && err.error.trim()) {
+      return err.error;
+    }
     return (
-      err?.error?.errors?.[0]?.message ||
       err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.error?.message ||
       err?.message ||
       fallback
     );
   }
 
-  private rememberAccessError(err: any, fallback: string) {
-    if (typeof localStorage === 'undefined') {
-      return;
+  private shouldRetryWithMinimalPayload(err: any): boolean {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    if (status !== 400 && status !== 422) {
+      return false;
     }
 
-    const reason = this.readError(err, fallback);
-    try {
-      localStorage.setItem('business_center_last_error', reason);
-    } catch {
-      // ignore storage errors
-    }
+    const message = this.readError(err, '').toLowerCase();
+    return (
+      message.includes('field') ||
+      message.includes('payload') ||
+      message.includes('invalid') ||
+      message.includes('unknown') ||
+      message.includes('does not exist')
+    );
   }
 
-  private toNumber(value: unknown): number | undefined {
+  private pickString(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
     if (typeof value === 'number' && !Number.isNaN(value)) {
+      return String(value);
+    }
+    return null;
+  }
+
+  private normalizeId(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim()) {
       return value;
     }
-    if (typeof value === 'string' && value.trim()) {
-      const parsed = Number(value);
-      return Number.isNaN(parsed) ? undefined : parsed;
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return String(value);
     }
-    return undefined;
+    if (value && typeof value === 'object') {
+      return this.normalizeId((value as Record<string, unknown>)['id']);
+    }
+    return null;
   }
 
-  private isForbiddenError(err: any): boolean {
-    return err?.status === 401 || err?.status === 403;
+  private coerceBoolean(value: unknown): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return value === 1;
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'active';
+    }
+    return false;
   }
 }
-

@@ -4,6 +4,23 @@
   gap: 18px;
 }
 
+.span-2 {
+  grid-column: span 2;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  color: rgba(226, 232, 240, 0.95);
+}
+
+.metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .section-note {
   margin-bottom: 12px;
   color: rgba(251, 191, 36, 0.92);
@@ -111,10 +128,18 @@
   .business-grid {
     grid-template-columns: 1fr;
   }
+
+  .span-2 {
+    grid-column: span 1;
+  }
 }
 
 @media (max-width: 780px) {
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -473,7 +473,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
         ).pipe(
           timeout(this.submitTimeoutMs),
           catchError((err) => {
-            this.lastSubmitError = this.readApiError(
+            this.lastSubmitError = this.toFriendlyHttpError(
               err,
               'Request timed out. Please try again.'
             );
@@ -524,7 +524,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       error: (err) => {
         this.submitFeedback = {
           type: 'error',
-          message: this.readApiError(err, 'Failed to send requests.')
+          message: this.toFriendlyHttpError(err, 'Failed to send requests.')
         };
       }
     });
@@ -550,7 +550,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       inviteChannel
     ).pipe(
       catchError((err) => {
-        this.lastSubmitError = this.readApiError(err);
+        this.lastSubmitError = this.toFriendlyHttpError(err, 'Failed to send request.');
         return of(false);
       })
     );
@@ -625,14 +625,26 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
         }
         this.loadingPlanAccess = false;
       },
-      error: () => {
+      error: (err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.toFriendlyHttpError(err, 'Failed to load plan access.')
+        };
         this.loadingPlanAccess = false;
       }
     });
   }
 
   private loadOrganization() {
-    this.organizationService.getUserOrganization().subscribe((org) => {
+    this.organizationService.getUserOrganization().pipe(
+      catchError((err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.toFriendlyHttpError(err, 'Failed to load organization profile.')
+        };
+        return of(null);
+      })
+    ).subscribe((org) => {
       this.org = org;
       if (!this.form.target.trim()) {
         this.form.target = 'Business';
@@ -887,10 +899,36 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private toFriendlySubmitError(err: any): string {
-    if (err?.status === 500) {
-      return 'Unexpected server error while creating request. Please try again.';
+    return this.toFriendlyHttpError(err, 'Failed to create request.');
+  }
+
+  private toFriendlyHttpError(err: any, fallback: string): string {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const raw = this.readApiError(err, fallback);
+    const normalized = raw.toLowerCase();
+
+    if (
+      status === 0 ||
+      normalized.includes('network') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('connection refused')
+    ) {
+      return `Network error: ${raw || fallback}`;
     }
-    return this.readApiError(err);
+
+    if (normalized.includes('timeout')) {
+      return `Network error: ${raw || fallback}`;
+    }
+
+    if (status >= 500) {
+      return `Server error (${status}): ${raw || fallback}`;
+    }
+
+    if (status >= 400) {
+      return `Request error (${status}): ${raw || fallback}`;
+    }
+
+    return raw || fallback;
   }
 
   private readApiError(err: any, fallback = 'Failed to send request.'): string {

@@ -229,7 +229,6 @@ export class Requests implements OnInit {
     const fields = [
       'id',
       'Target',
-      'requested_for',
       'requested_for_user.id',
       'requested_for_user.email',
       'requested_for_user.first_name',
@@ -239,9 +238,7 @@ export class Requests implements OnInit {
       'requested_by_org.id',
       'requested_by_org.name',
       'required_state',
-      'status',
       'response_status',
-      'response_payload',
       'timestamp'
     ].join(',');
     const params = new URLSearchParams({
@@ -281,7 +278,7 @@ export class Requests implements OnInit {
     return {
       target: this.formatRequestTarget(request),
       required_state: request.required_state ?? 'Unknown',
-      status: this.normalizeStatus(request.status ?? request.response_status),
+      status: this.normalizeStatus(request.response_status),
       timestamp: this.formatTimestamp(request.timestamp ?? '')
     };
   }
@@ -332,23 +329,6 @@ export class Requests implements OnInit {
       }
     }
     return 'Unknown';
-  }
-
-  private parseResponsePayload(notes: string): string | Record<string, unknown> | undefined {
-    if (!notes) {
-      return undefined;
-    }
-    if (notes.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(notes);
-        if (parsed && typeof parsed === 'object') {
-          return parsed as Record<string, unknown>;
-        }
-      } catch {
-        return notes;
-      }
-    }
-    return notes;
   }
 
   private resolveRequestedFor(value: string, token: string | null) {
@@ -546,7 +526,7 @@ export class Requests implements OnInit {
     requestedBy: string,
     contact: { userId?: string; email?: string; phone?: string },
     requiredState: string,
-    notes: string,
+    _notes: string,
     token: string | null,
     createInvite = false,
     inviteChannel: InviteChannel = 'auto'
@@ -554,17 +534,11 @@ export class Requests implements OnInit {
     const payload: CreateRequestPayload = {
       Target: requestedBy,
       org_id: this.org?.id ?? undefined,
-      requested_by_user: this.getUserIdFromToken(token) ?? undefined,
       requested_by_org: this.org?.id ?? undefined,
       requested_for_user: contact.userId,
       requested_for_email: contact.email,
       requested_for_phone: contact.phone,
-      requested_for: contact.userId ?? contact.email ?? contact.phone,
-      required_state: requiredState,
-      status: 'Pending',
-      response_status: undefined,
-      response_payload: this.parseResponsePayload(notes),
-      timestamp: new Date().toISOString()
+      required_state: requiredState
     };
 
     this.createRequest(payload, token).subscribe({
@@ -691,9 +665,6 @@ export class Requests implements OnInit {
     if (request.requested_for_phone) {
       return request.requested_for_phone;
     }
-    if (request.requested_for) {
-      return String(request.requested_for);
-    }
     return this.formatTarget(request.Target);
   }
 
@@ -710,15 +681,12 @@ export class Requests implements OnInit {
 type RequestRecord = {
   id?: string;
   Target?: unknown;
-  requested_for?: string;
   requested_for_user?: unknown;
   requested_for_email?: string;
   requested_for_phone?: string;
   requested_by_org?: unknown;
   required_state?: string;
-  status?: string;
   response_status?: string;
-  response_payload?: unknown;
   timestamp?: string;
 };
 
@@ -732,17 +700,11 @@ type RequestRow = {
 type CreateRequestPayload = {
   Target: string;
   org_id?: string;
-  requested_by_user?: string;
   requested_by_org?: string;
-  requested_for?: string;
   requested_for_user?: string;
   requested_for_email?: string;
   requested_for_phone?: string;
   required_state: string;
-  status: string;
-  response_status?: string;
-  response_payload?: unknown;
-  timestamp: string;
 };
 
 type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';
