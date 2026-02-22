@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { Observable, of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, finalize, map, shareReplay, switchMap, tap } from 'rxjs/operators';
 
 export type Plan = {
   id?: string | number;
@@ -52,9 +52,12 @@ export class SubscriptionService {
   private readonly businessOnboardingStoragePrefix = 'wellar_business_onboarding_v1_';
   private readonly fallbackBusinessMonthlyPrice = 200;
   private readonly fallbackBusinessYearlyPrice = 1680;
+  private readonly snapshotCacheTtlMs = 15000;
   private plansEndpointForbidden = false;
   private subscriptionsEndpointForbidden = false;
   private businessUpgradeRequestsEndpointForbidden = false;
+  private snapshotCacheByUser = new Map<string, { snapshot: BusinessAccessSnapshot; cachedAt: number }>();
+  private snapshotInFlightByUser = new Map<string, Observable<BusinessAccessSnapshot>>();
   private readonly subscriptionFields = [
     'id',
     'status',
@@ -98,7 +101,8 @@ export class SubscriptionService {
     );
   }
 
-  getBusinessAccessSnapshot(): Observable<BusinessAccessSnapshot> {
+  getBusinessAccessSnapshot(options?: { forceRefresh?: boolean }): Observable<BusinessAccessSnapshot> {
+    const forceRefresh = options?.forceRefresh === true;
     const userId = this.getUserId();
     if (!userId) {
       return of({
@@ -111,10 +115,35 @@ export class SubscriptionService {
       });
     }
 
-    return this.getActiveSubscription().pipe(
+    const now = Date.now();
+    const cached = this.snapshotCacheByUser.get(userId);
+    if (!forceRefresh && cached && now - cached.cachedAt < this.snapshotCacheTtlMs) {
+      return of(cached.snapshot);
+    }
+
+    const inFlight = this.snapshotInFlightByUser.get(userId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request$ = this.getActiveSubscription().pipe(
       map((subscription) => this.buildBusinessAccessSnapshot(userId, subscription)),
-      catchError(() => of(this.buildBusinessAccessSnapshot(userId, null)))
+      catchError(() => {
+        const fallback = this.snapshotCacheByUser.get(userId)?.snapshot
+          ?? this.buildBusinessAccessSnapshot(userId, null);
+        return of(fallback);
+      }),
+      tap((snapshot) => {
+        this.snapshotCacheByUser.set(userId, { snapshot, cachedAt: Date.now() });
+      }),
+      finalize(() => {
+        this.snapshotInFlightByUser.delete(userId);
+      }),
+      shareReplay(1)
     );
+
+    this.snapshotInFlightByUser.set(userId, request$);
+    return request$;
   }
 
   getActiveSubscription(): Observable<UserSubscription | null> {
@@ -300,6 +329,7 @@ export class SubscriptionService {
       return;
     }
     this.writeBusinessOnboardingMarker(userId, true);
+    this.invalidateSnapshotState(userId);
   }
 
   grantLocalBusinessTrialNow(): void {
@@ -310,6 +340,7 @@ export class SubscriptionService {
 
     this.ensureLocalTrialState(userId);
     this.writeBusinessOnboardingMarker(userId, true);
+    this.invalidateSnapshotState(userId);
   }
 
   private createSubscription(
@@ -348,6 +379,10 @@ export class SubscriptionService {
           expires_at: typeof record.expires_at === 'string' ? record.expires_at : payload.expires_at,
           plan: this.normalizePlan(plan)
         };
+        const userId = this.getUserId();
+        if (userId) {
+          this.invalidateSnapshotState(userId);
+        }
         return this.withDerivedState(created);
       })
     );
@@ -559,6 +594,11 @@ export class SubscriptionService {
     return `${this.businessOnboardingStoragePrefix}${userId}`;
   }
 
+  private invalidateSnapshotState(userId: string): void {
+    this.snapshotCacheByUser.delete(userId);
+    this.snapshotInFlightByUser.delete(userId);
+  }
+
   private readBusinessOnboardingMarker(userId: string): boolean {
     if (typeof localStorage === 'undefined') {
       return false;
@@ -737,10 +777,7 @@ export class SubscriptionService {
   }
 
   private getUserId(): string | null {
-    if (typeof localStorage === 'undefined') {
-      return null;
-    }
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = this.getStoredSessionToken();
     if (!token) {
       return null;
     }
@@ -756,14 +793,38 @@ export class SubscriptionService {
   }
 
   private getUserToken(): string | null {
+    return this.getStoredSessionToken();
+  }
+
+  private getStoredSessionToken(): string | null {
     if (typeof localStorage === 'undefined') {
       return null;
     }
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
-    if (!token) {
-      return null;
+
+    const token = localStorage.getItem('token');
+    const accessToken = localStorage.getItem('access_token');
+    const candidates = [token, accessToken].filter(
+      (candidate, index, list): candidate is string =>
+        typeof candidate === 'string' &&
+        candidate.length > 0 &&
+        list.indexOf(candidate) === index
+    );
+
+    for (const candidate of candidates) {
+      if (!this.isTokenExpired(candidate)) {
+        if (token !== candidate || accessToken !== candidate) {
+          try {
+            localStorage.setItem('token', candidate);
+            localStorage.setItem('access_token', candidate);
+          } catch {
+            // ignore storage errors
+          }
+        }
+        return candidate;
+      }
     }
-    return this.isTokenExpired(token) ? null : token;
+
+    return null;
   }
 
   private decodeJwtPayload(token: string): Record<string, unknown> | null {

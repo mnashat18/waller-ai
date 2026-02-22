@@ -21,6 +21,7 @@ import { environment } from 'src/environments/environment';
 })
 export class Requests implements OnInit {
   showCreateModal = false;
+  loadingPlanAccess = true;
   requests: RequestRow[] = [];
   submitFeedback: SubmitFeedback | null = null;
   submittingRequest = false;
@@ -506,22 +507,30 @@ export class Requests implements OnInit {
   }
 
   private loadPlanAccess() {
-    this.subscriptionService.getBusinessAccessSnapshot().subscribe((snapshot) => {
-      this.currentPlanCode = snapshot.planCode || 'free';
-      this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
-      this.isBusinessTrial = snapshot.isBusinessTrial;
-      this.trialDaysRemaining =
-        typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
-      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
-      this.canCreateRequests = snapshot.hasBusinessAccess;
-      if (!this.requestedByDefault) {
-        this.requestedByDefault = this.currentPlanName;
+    this.loadingPlanAccess = true;
+    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
+      next: (snapshot) => {
+        this.currentPlanCode = snapshot.planCode || 'free';
+        this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+        this.isBusinessTrial = snapshot.isBusinessTrial;
+        this.trialDaysRemaining =
+          typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
+        this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
+        this.canCreateRequests = snapshot.hasBusinessAccess;
+        if (!this.requestedByDefault) {
+          this.requestedByDefault = this.currentPlanName;
+        }
+        if (this.pendingCreateModal && this.canCreateRequests) {
+          this.openCreateModal();
+        }
+        this.loadingPlanAccess = false;
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.loadingPlanAccess = false;
+        this.cdr.detectChanges();
       }
-      if (this.pendingCreateModal && this.canCreateRequests) {
-        this.openCreateModal();
-      }
-      this.cdr.detectChanges();
     });
   }
 

@@ -61,7 +61,7 @@ export class Dashboard implements OnInit {
   }
 
   private loadPlanState() {
-    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
+    this.subscriptions.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe((snapshot) => {
       this.hasBusinessAccess = snapshot.hasBusinessAccess;
       this.cdr.detectChanges();
     });

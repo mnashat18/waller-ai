@@ -1,13 +1,12 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { Observable, from, of, throwError } from 'rxjs';
-import { catchError, concatMap, finalize, map, switchMap, timeout, toArray } from 'rxjs/operators';
+import { catchError, concatMap, finalize, map, timeout, toArray } from 'rxjs/operators';
 import { Organization, OrganizationService } from '../../services/organization.service';
 import { SubscriptionService } from '../../services/subscription.service';
-import { AdminTokenService } from '../../services/admin-token';
 import { environment } from 'src/environments/environment';
 
 type Feedback = {
@@ -36,8 +35,9 @@ type PhoneCountry = {
   templateUrl: './create-request.html',
   styleUrl: './create-request.css'
 })
-export class CreateRequestComponent implements OnInit {
+export class CreateRequestComponent implements OnInit, OnDestroy {
   isAdminUser = false;
+  loadingPlanAccess = true;
   canCreateRequests = false;
   currentPlanName = 'Free';
   currentPlanCode = 'free';
@@ -46,9 +46,9 @@ export class CreateRequestComponent implements OnInit {
   businessTrialNotice = '';
   businessInviteTrialNotice = '';
   org: Organization | null = null;
-  requestedByDefault = '';
   submittingRequest = false;
   submitFeedback: Feedback | null = null;
+  private redirectAfterSubmitTimer: ReturnType<typeof setTimeout> | null = null;
   recipientMode: RecipientKind = 'email';
   recipientInput = '';
   selectedCountryCode = '+20';
@@ -274,8 +274,9 @@ export class CreateRequestComponent implements OnInit {
     { name: 'Zimbabwe', dial: '+263' }
   ];
 
+  readonly targetOptions = ['Business', 'Ops'];
   form = {
-    requestedBy: '',
+    target: 'Business',
     inviteChannel: 'auto' as InviteChannel,
     requiredState: 'Stable',
     notes: ''
@@ -285,14 +286,20 @@ export class CreateRequestComponent implements OnInit {
     private http: HttpClient,
     private router: Router,
     private subscriptionService: SubscriptionService,
-    private organizationService: OrganizationService,
-    private adminTokens: AdminTokenService
+    private organizationService: OrganizationService
   ) {}
 
   ngOnInit() {
     this.isAdminUser = this.checkAdminAccess();
     this.loadPlanAccess();
     this.loadOrganization();
+  }
+
+  ngOnDestroy(): void {
+    if (this.redirectAfterSubmitTimer) {
+      clearTimeout(this.redirectAfterSubmitTimer);
+      this.redirectAfterSubmitTimer = null;
+    }
   }
 
   trialDaysLabel(): string {
@@ -381,6 +388,10 @@ export class CreateRequestComponent implements OnInit {
       this.recipientError = 'Please enter a valid phone number.';
       return;
     }
+    if (!this.isValidE164(phone)) {
+      this.recipientError = 'Phone must be in E.164 format, for example +201012345678.';
+      return;
+    }
     if (this.hasRecipient('phone', phone)) {
       this.recipientError = 'This phone number is already added.';
       return;
@@ -408,13 +419,12 @@ export class CreateRequestComponent implements OnInit {
       return;
     }
 
-    const requestedBy = this.form.requestedBy.trim() || this.requestedByDefault;
+    const target = this.form.target.trim();
     const requiredState = this.form.requiredState.trim();
-    const notes = this.form.notes.trim();
     const inviteChannel = this.normalizeInviteChannel(this.form.inviteChannel);
 
-    if (!requestedBy) {
-      this.submitFeedback = { type: 'error', message: 'Requested by is required.' };
+    if (!target) {
+      this.submitFeedback = { type: 'error', message: 'Target is required.' };
       return;
     }
     if (!requiredState) {
@@ -455,10 +465,9 @@ export class CreateRequestComponent implements OnInit {
     from(recipientsSnapshot).pipe(
       concatMap((recipient) =>
         this.submitRecipientWorkflow(
-          requestedBy,
+          target,
           recipient,
           requiredState,
-          notes,
           token,
           inviteChannel
         ).pipe(
@@ -505,6 +514,12 @@ export class CreateRequestComponent implements OnInit {
         this.form.notes = '';
         this.form.inviteChannel = 'auto';
         this.form.requiredState = 'Stable';
+        if (this.redirectAfterSubmitTimer) {
+          clearTimeout(this.redirectAfterSubmitTimer);
+        }
+        this.redirectAfterSubmitTimer = setTimeout(() => {
+          this.router.navigate(['/requests']);
+        }, 900);
       },
       error: (err) => {
         this.submitFeedback = {
@@ -516,10 +531,9 @@ export class CreateRequestComponent implements OnInit {
   }
 
   private submitRecipientWorkflow(
-    requestedBy: string,
+    target: string,
     recipient: RequestRecipient,
     requiredState: string,
-    notes: string,
     token: string,
     inviteChannel: InviteChannel
   ): Observable<boolean> {
@@ -527,32 +541,14 @@ export class CreateRequestComponent implements OnInit {
       ? { email: recipient.value }
       : { phone: recipient.value };
 
-    return this.resolveRecipientUserId(contact, token).pipe(
-      switchMap((resolvedUserId) =>
-        this.submitRequestPayload(
-          requestedBy,
-          {
-            ...contact,
-            userId: resolvedUserId ?? undefined
-          },
-          requiredState,
-          notes,
-          token,
-          Boolean(contact.email || contact.phone),
-          inviteChannel
-        )
-      ),
-      catchError(() =>
-        this.submitRequestPayload(
-          requestedBy,
-          contact,
-          requiredState,
-          notes,
-          token,
-          Boolean(contact.email || contact.phone),
-          inviteChannel
-        )
-      ),
+    return this.submitRequestPayload(
+      target,
+      contact,
+      requiredState,
+      token,
+      Boolean(contact.email || contact.phone),
+      inviteChannel
+    ).pipe(
       catchError((err) => {
         this.lastSubmitError = this.readApiError(err);
         return of(false);
@@ -577,7 +573,7 @@ export class CreateRequestComponent implements OnInit {
 
     if (cleaned.startsWith('+')) {
       const digits = cleaned.replace(/[^\d]/g, '');
-      if (digits.length < 8) {
+      if (digits.length < 8 || digits.length > 15) {
         return null;
       }
       return `+${digits}`;
@@ -585,7 +581,7 @@ export class CreateRequestComponent implements OnInit {
 
     const localDigits = cleaned.replace(/[^\d]/g, '');
     const withoutLeadingZero = localDigits.replace(/^0+/, '');
-    if (withoutLeadingZero.length < 7) {
+    if (withoutLeadingZero.length < 7 || withoutLeadingZero.length > 15) {
       return null;
     }
 
@@ -600,6 +596,10 @@ export class CreateRequestComponent implements OnInit {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   }
 
+  private isValidE164(value: string): boolean {
+    return /^\+[1-9]\d{7,14}$/.test(value);
+  }
+
   private hasRecipient(kind: RecipientKind, value: string): boolean {
     return this.recipients.some((item) => item.kind === kind && item.value === value);
   }
@@ -609,20 +609,24 @@ export class CreateRequestComponent implements OnInit {
   }
 
   private loadPlanAccess() {
-    this.subscriptionService.getBusinessAccessSnapshot().subscribe((snapshot) => {
-      this.currentPlanCode = snapshot.planCode || 'free';
-      this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
-      this.isBusinessTrial = snapshot.isBusinessTrial;
-      this.trialDaysRemaining =
-        typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
-      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
-      this.canCreateRequests = snapshot.hasBusinessAccess;
-      if (!this.requestedByDefault) {
-        this.requestedByDefault = this.currentPlanName;
-      }
-      if (!this.form.requestedBy.trim()) {
-        this.form.requestedBy = this.requestedByDefault;
+    this.loadingPlanAccess = true;
+    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
+      next: (snapshot) => {
+        this.currentPlanCode = snapshot.planCode || 'free';
+        this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+        this.isBusinessTrial = snapshot.isBusinessTrial;
+        this.trialDaysRemaining =
+          typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
+        this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
+        this.canCreateRequests = snapshot.hasBusinessAccess;
+        if (!this.form.target.trim()) {
+          this.form.target = 'Business';
+        }
+        this.loadingPlanAccess = false;
+      },
+      error: () => {
+        this.loadingPlanAccess = false;
       }
     });
   }
@@ -630,98 +634,32 @@ export class CreateRequestComponent implements OnInit {
   private loadOrganization() {
     this.organizationService.getUserOrganization().subscribe((org) => {
       this.org = org;
-      this.requestedByDefault = org?.name ?? this.requestedByDefault;
-      if (!this.form.requestedBy.trim()) {
-        this.form.requestedBy = this.requestedByDefault;
+      if (!this.form.target.trim()) {
+        this.form.target = 'Business';
       }
     });
   }
 
-  private resolveRecipientUserId(
-    contact: { email?: string; phone?: string },
-    userToken: string | null
-  ): Observable<string | null> {
-    const email = contact.email?.trim().toLowerCase();
-    const phone = contact.phone?.trim();
-    const field: 'email' | 'phone' | null = email
-      ? 'email'
-      : phone
-        ? 'phone'
-        : null;
-    const value = email ?? phone ?? null;
-
-    if (!field || !value) {
-      return of(null);
-    }
-
-    return this.lookupUserIdByField(field, value, userToken).pipe(
-      switchMap((userId) => {
-        if (userId) {
-          return of(userId);
-        }
-        return this.adminTokens.getToken().pipe(
-          switchMap((adminToken) => this.lookupUserIdByField(field, value, adminToken)),
-          catchError(() => of(null))
-        );
-      }),
-      catchError(() =>
-        this.adminTokens.getToken().pipe(
-          switchMap((adminToken) => this.lookupUserIdByField(field, value, adminToken)),
-          catchError(() => of(null))
-        )
-      )
-    );
-  }
-
-  private lookupUserIdByField(
-    field: 'email' | 'phone',
-    value: string,
-    token: string | null
-  ): Observable<string | null> {
-    if (!value) {
-      return of(null);
-    }
-
-    const headers = this.buildAuthHeaders(token);
-    const params = new URLSearchParams({
-      [`filter[${field}][_eq]`]: value,
-      fields: 'id',
-      limit: '1'
-    });
-    const url = `${environment.API_URL}/users?${params.toString()}`;
-
-    return this.http.get<{ data?: Array<{ id?: string }> }>(
-      url,
-      headers ? { headers } : {}
-    ).pipe(
-      map((res) => res?.data?.[0]?.id ?? null),
-      catchError(() => of(null))
-    );
-  }
-
   private submitRequestPayload(
-    requestedBy: string,
+    target: string,
     contact: { userId?: string; email?: string; phone?: string },
     requiredState: string,
-    notes: string,
     token: string | null,
     createInvite = false,
     inviteChannel: InviteChannel = 'auto'
   ): Observable<boolean> {
+    const recipientPayload = this.buildRecipientPayload(contact);
+    if (!recipientPayload) {
+      this.lastSubmitError = 'Add one valid recipient (user, email, or phone).';
+      return of(false);
+    }
+
     const payload: CreateRequestPayload = {
-      Target: requestedBy,
-      org_id: this.org?.id ?? undefined,
-      requested_by_user: this.getUserIdFromToken(token) ?? undefined,
-      requested_by_org: this.org?.id ?? undefined,
-      requested_for_user: contact.userId,
-      requested_for_email: contact.email,
-      requested_for_phone: contact.phone,
-      requested_for: contact.userId ?? contact.email ?? contact.phone,
+      Target: target,
       required_state: requiredState,
-      status: 'Pending',
-      response_status: undefined,
-      response_payload: this.parseResponsePayload(notes),
-      timestamp: new Date().toISOString()
+      ...(this.org?.id ? { org_id: this.org.id } : {}),
+      ...(this.org?.id ? { requested_by_org: this.org.id } : {}),
+      ...recipientPayload
     };
 
     return this.createRequest(payload, token).pipe(
@@ -732,7 +670,7 @@ export class CreateRequestComponent implements OnInit {
         return true;
       }),
       catchError((err) => {
-        this.lastSubmitError = this.readApiError(err);
+        this.lastSubmitError = this.toFriendlySubmitError(err);
         return of(false);
       })
     );
@@ -740,12 +678,19 @@ export class CreateRequestComponent implements OnInit {
 
   private createRequest(payload: CreateRequestPayload, token: string | null) {
     const headers = this.buildAuthHeaders(token);
+    console.info('[create-request] final payload -> /items/requests', payload);
     return this.http.post<{ data?: { id?: string } }>(
       `${environment.API_URL}/items/requests`,
       payload,
       headers ? { headers } : {}
     ).pipe(
       catchError((err) => {
+        if (err?.status === 500) {
+          console.error('[create-request] requests API 500 response body:', err?.error ?? err);
+        } else {
+          console.error('[create-request] requests API error response body:', err?.error ?? err);
+        }
+
         if (!this.shouldRetryWithLowercaseTarget(err)) {
           return throwError(() => err);
         }
@@ -836,23 +781,6 @@ export class CreateRequestComponent implements OnInit {
     return 'email';
   }
 
-  private parseResponsePayload(notes: string): string | Record<string, unknown> | undefined {
-    if (!notes) {
-      return undefined;
-    }
-    if (notes.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(notes);
-        if (parsed && typeof parsed === 'object') {
-          return parsed as Record<string, unknown>;
-        }
-      } catch {
-        return notes;
-      }
-    }
-    return notes;
-  }
-
   private buildInviteToken() {
     const random = Math.random().toString(36).slice(2, 12);
     const time = Date.now().toString(36);
@@ -881,26 +809,6 @@ export class CreateRequestComponent implements OnInit {
     } catch {
       return null;
     }
-  }
-
-  private getUserIdFromToken(token: string | null): string | null {
-    if (!token) {
-      return null;
-    }
-
-    const payload = this.decodeJwtPayload(token);
-    if (!payload) {
-      return null;
-    }
-
-    const id = payload['id'] ?? payload['user_id'] ?? payload['sub'];
-    if (typeof id === 'string') {
-      return id;
-    }
-    if (typeof id === 'number' && !Number.isNaN(id)) {
-      return String(id);
-    }
-    return null;
   }
 
   private getUserToken(): string | null {
@@ -946,6 +854,45 @@ export class CreateRequestComponent implements OnInit {
     };
   }
 
+  private buildRecipientPayload(contact: {
+    userId?: string;
+    email?: string;
+    phone?: string;
+  }): Pick<CreateRequestPayload, 'requested_for_user' | 'requested_for_email' | 'requested_for_phone'> | null {
+    const userId = (contact.userId ?? '').trim();
+    const email = (contact.email ?? '').trim().toLowerCase();
+    const phone = (contact.phone ?? '').trim();
+
+    const provided = [userId, email, phone].filter((value) => value.length > 0);
+    if (provided.length !== 1) {
+      return null;
+    }
+
+    if (userId) {
+      return { requested_for_user: userId };
+    }
+    if (email) {
+      if (!this.isValidEmail(email)) {
+        return null;
+      }
+      return { requested_for_email: email };
+    }
+    if (phone) {
+      if (!this.isValidE164(phone)) {
+        return null;
+      }
+      return { requested_for_phone: phone };
+    }
+    return null;
+  }
+
+  private toFriendlySubmitError(err: any): string {
+    if (err?.status === 500) {
+      return 'Unexpected server error while creating request. Please try again.';
+    }
+    return this.readApiError(err);
+  }
+
   private readApiError(err: any, fallback = 'Failed to send request.'): string {
     return (
       err?.error?.errors?.[0]?.extensions?.reason ||
@@ -961,17 +908,12 @@ export class CreateRequestComponent implements OnInit {
 type CreateRequestPayload = {
   Target: string;
   org_id?: string;
-  requested_by_user?: string;
   requested_by_org?: string;
-  requested_for?: string;
+  scan_id?: string;
   requested_for_user?: string;
   requested_for_email?: string;
   requested_for_phone?: string;
   required_state: string;
-  status: string;
-  response_status?: string;
-  response_payload?: unknown;
-  timestamp: string;
 };
 
 type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';

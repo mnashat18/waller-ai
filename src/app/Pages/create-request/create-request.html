@@ -9,8 +9,8 @@
     </div>
 
     <div class="hero-actions">
-      <span class="chip">Plan: {{ currentPlanName }}</span>
-      <span *ngIf="isBusinessTrial" class="chip">{{ trialDaysLabel() }}</span>
+      <span class="chip">Plan: {{ loadingPlanAccess ? 'Checking...' : currentPlanName }}</span>
+      <span *ngIf="!loadingPlanAccess && isBusinessTrial" class="chip">{{ trialDaysLabel() }}</span>
       <a routerLink="/requests" class="chip">Back to Requests</a>
       <a *ngIf="canCreateRequests" routerLink="/business-center" class="chip">Business Center</a>
     </div>
@@ -20,7 +20,17 @@
     {{ feedback.message }}
   </div>
 
-  <div *ngIf="!canCreateRequests" class="panel">
+  <div *ngIf="loadingPlanAccess" class="panel">
+    <div class="panel-header">
+      <h3 class="panel-title">Checking Business Access</h3>
+      <span class="chip">Please wait</span>
+    </div>
+    <p class="text-slate-300">
+      Loading your subscription status...
+    </p>
+  </div>
+
+  <div *ngIf="!loadingPlanAccess && !canCreateRequests" class="panel">
     <div class="panel-header">
       <h3 class="panel-title">Business Access Required</h3>
       <span class="chip">Paid Feature</span>
@@ -34,7 +44,7 @@
     </div>
   </div>
 
-  <div *ngIf="canCreateRequests" class="create-layout">
+  <div *ngIf="!loadingPlanAccess && canCreateRequests" class="create-layout">
     <section class="panel form-panel">
       <div class="panel-header">
         <h3 class="panel-title">Request Form</h3>
@@ -44,14 +54,17 @@
       <p *ngIf="isBusinessTrial" class="section-note">{{ businessTrialNotice }}</p>
 
       <form class="form-grid" (ngSubmit)="submitRequest()">
-        <label for="requested-by">Requested By</label>
-        <input
-          id="requested-by"
-          name="requestedBy"
-          [(ngModel)]="form.requestedBy"
+        <label for="target">Target</label>
+        <select
+          id="target"
+          name="target"
+          [(ngModel)]="form.target"
           class="input"
-          placeholder="Company or admin name"
-          required />
+          required>
+          <option *ngFor="let targetOption of targetOptions" [value]="targetOption">
+            {{ targetOption }}
+          </option>
+        </select>
 
         <div class="recipient-box">
           <div class="recipient-box-head">
@@ -109,7 +122,7 @@
             Hint: if this number has WhatsApp, the invite can be sent to this number after submission.
           </p>
           <p *ngIf="recipientMode === 'email' && recipientInput.trim()" class="field-help invite-hint">
-            Hint: this email will receive a scan request from {{ form.requestedBy || 'your business' }} with a
+            Hint: this email will receive a scan request from {{ form.target || 'your business' }} with a
             "Scan now" message.
           </p>
           <p *ngIf="isBusinessTrial" class="section-note small">{{ businessInviteTrialNotice }}</p>
@@ -189,10 +202,10 @@
 
       <ul class="guide-list">
         <li>
-          <strong>Step 1:</strong> add team/manager name in Requested By.
+          <strong>Step 1:</strong> choose target (Business/Ops).
         </li>
         <li>
-          <strong>Step 2:</strong> add one or more recipients using + (email, phone, or both).
+          <strong>Step 2:</strong> add one or more recipients using + (email or phone).
         </li>
         <li>
           <strong>Step 3:</strong> define required state and submit.

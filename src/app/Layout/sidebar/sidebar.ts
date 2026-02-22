@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterModule } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterModule } from '@angular/router';
 import { Subscription as RxSubscription } from 'rxjs';
 import { BusinessAccessSnapshot, SubscriptionService } from '../../services/subscription.service';
 
@@ -17,17 +17,25 @@ export class SidebarComponent implements OnInit, OnDestroy {
   trialExpired = false;
   trialDaysRemaining: number | null = null;
   private snapshotSub?: RxSubscription;
+  private navSub?: RxSubscription;
 
-  constructor(private subscriptions: SubscriptionService) {}
+  constructor(
+    private subscriptions: SubscriptionService,
+    private router: Router
+  ) {}
 
   ngOnInit() {
-    this.snapshotSub = this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
-      this.applySnapshot(snapshot);
+    this.loadSnapshot(true);
+    this.navSub = this.router.events.subscribe((event) => {
+      if (event instanceof NavigationEnd) {
+        this.loadSnapshot(true);
+      }
     });
   }
 
   ngOnDestroy() {
     this.snapshotSub?.unsubscribe();
+    this.navSub?.unsubscribe();
   }
 
   statusText(): string {
@@ -70,5 +78,14 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.trialDaysRemaining = snapshot.daysRemaining;
 
     this.planLabel = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+  }
+
+  private loadSnapshot(forceRefresh = false): void {
+    this.snapshotSub?.unsubscribe();
+    this.snapshotSub = this.subscriptions
+      .getBusinessAccessSnapshot({ forceRefresh })
+      .subscribe((snapshot) => {
+        this.applySnapshot(snapshot);
+      });
   }
 }

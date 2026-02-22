@@ -10,28 +10,28 @@
     </div>
 
     <div class="hero-actions">
-      <span class="chip">Plan: {{ currentPlanName }}</span>
+      <span class="chip">Plan: {{ loadingPlanAccess ? 'Checking...' : currentPlanName }}</span>
       <a
-        *ngIf="isBusinessTrial"
+        *ngIf="!loadingPlanAccess && isBusinessTrial"
         routerLink="/pricing"
         class="chip">
         {{ trialDaysLabel() }}
       </a>
 
       <a
-        *ngIf="!canCreateRequests"
+        *ngIf="!loadingPlanAccess && !canCreateRequests"
         routerLink="/payment"
         class="chip">
         Billing
       </a>
 
       <a
-        *ngIf="canCreateRequests"
+        *ngIf="!loadingPlanAccess && canCreateRequests"
         routerLink="/requests/create"
         class="btn-primary px-5 py-2 rounded-full">
         + Create Scan Request
       </a>
-      <a *ngIf="canCreateRequests" routerLink="/business-center" class="chip">Business Center</a>
+      <a *ngIf="!loadingPlanAccess && canCreateRequests" routerLink="/business-center" class="chip">Business Center</a>
     </div>
 
     <div class="hero-visual">
