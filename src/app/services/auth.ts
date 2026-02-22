@@ -303,24 +303,37 @@ export class AuthService {
   }
 
   getStoredAccessToken(): string | null {
-    return localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token =
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token') ??
+      localStorage.getItem('directus_token');
+
+    if (token) {
+      this.syncAccessTokenAliases(token);
+    }
+
+    return token;
   }
 
   storeAccessToken(token: string) {
     localStorage.setItem('token', token);
     localStorage.setItem('access_token', token);
+    localStorage.setItem('directus_token', token);
     sessionStorage.setItem('is_logged_in', '1');
     localStorage.removeItem('auth_error');
   }
 
   storeRefreshToken(token: string) {
     localStorage.setItem('refresh_token', token);
+    localStorage.setItem('directus_refresh_token', token);
   }
 
   clearAuthState() {
     localStorage.removeItem('token');
     localStorage.removeItem('access_token');
+    localStorage.removeItem('directus_token');
     localStorage.removeItem('refresh_token');
+    localStorage.removeItem('directus_refresh_token');
     localStorage.removeItem('auth_error');
     localStorage.removeItem('user_email');
 
@@ -342,7 +355,7 @@ export class AuthService {
   }
 
   logout() {
-    const refreshToken = localStorage.getItem('refresh_token');
+    const refreshToken = this.getStoredRefreshToken();
     const body = refreshToken ? { refresh_token: refreshToken } : {};
 
     this.http.post(
@@ -429,7 +442,15 @@ export class AuthService {
   }
 
   private getStoredRefreshToken(): string | null {
-    return localStorage.getItem('refresh_token');
+    const refreshToken =
+      localStorage.getItem('refresh_token') ??
+      localStorage.getItem('directus_refresh_token');
+
+    if (refreshToken) {
+      this.syncRefreshTokenAliases(refreshToken);
+    }
+
+    return refreshToken;
   }
 
   private storeTokensFromAuthResponse(res: any): StoredTokens {
@@ -484,4 +505,26 @@ export class AuthService {
       return false;
     }
   }
+
+  private syncAccessTokenAliases(token: string): void {
+    if (localStorage.getItem('token') !== token) {
+      localStorage.setItem('token', token);
+    }
+    if (localStorage.getItem('access_token') !== token) {
+      localStorage.setItem('access_token', token);
+    }
+    if (localStorage.getItem('directus_token') !== token) {
+      localStorage.setItem('directus_token', token);
+    }
+  }
+
+  private syncRefreshTokenAliases(token: string): void {
+    if (localStorage.getItem('refresh_token') !== token) {
+      localStorage.setItem('refresh_token', token);
+    }
+    if (localStorage.getItem('directus_refresh_token') !== token) {
+      localStorage.setItem('directus_refresh_token', token);
+    }
+  }
 }
+

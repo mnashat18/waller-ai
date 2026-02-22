@@ -249,7 +249,7 @@ export class SubscriptionExpiryAdsComponent implements OnInit, OnDestroy {
   }
 
   private getUserId(): string | null {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token) {
       return null;
     }
@@ -292,3 +292,4 @@ export class SubscriptionExpiryAdsComponent implements OnInit, OnDestroy {
     this.timers = [];
   }
 }
+

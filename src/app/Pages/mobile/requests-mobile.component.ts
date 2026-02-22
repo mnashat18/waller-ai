@@ -1,4 +1,4 @@
-﻿import { CommonModule } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -11,7 +11,7 @@ import {
 } from '../../components/create-request-modal/create-request-modal';
 import { AdminTokenService } from '../../services/admin-token';
 import { Organization, OrganizationService } from '../../services/organization.service';
-import { SubscriptionService, UserSubscription } from '../../services/subscription.service';
+import { SubscriptionService } from '../../services/subscription.service';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import { environment } from 'src/environments/environment';
 
@@ -31,7 +31,6 @@ export class RequestsMobileComponent implements OnInit {
   canCreateRequests = false;
   currentPlanName = 'Free';
   currentPlanCode = 'free';
-  currentSubscription: UserSubscription | null = null;
   isBusinessTrial = false;
   trialDaysRemaining: number | null = null;
   businessTrialNotice = '';
@@ -77,7 +76,6 @@ export class RequestsMobileComponent implements OnInit {
     const requestedBy = form.requestedBy.trim() || this.requestedByDefault;
     const requestedFor = form.requestedFor.trim();
     const requiredState = form.requiredState.trim();
-    const notes = form.notes.trim();
     const inviteChannel = this.normalizeInviteChannel(form.inviteChannel);
 
     if (!requestedBy || !requestedFor || !requiredState) {
@@ -107,7 +105,7 @@ export class RequestsMobileComponent implements OnInit {
     const token = userToken;
 
     if (contact.userId) {
-      this.submitRequestPayload(requestedBy, contact, requiredState, notes, token);
+      this.submitRequestPayload(requestedBy, contact, requiredState, token);
       return;
     }
 
@@ -115,14 +113,13 @@ export class RequestsMobileComponent implements OnInit {
       this.resolveRequestedFor(contact.email, token).subscribe({
         next: (resolvedUserId) => {
           if (resolvedUserId) {
-            this.submitRequestPayload(requestedBy, { userId: resolvedUserId }, requiredState, notes, token);
+            this.submitRequestPayload(requestedBy, { userId: resolvedUserId }, requiredState, token);
             return;
           }
           this.submitRequestPayload(
             requestedBy,
             contact,
             requiredState,
-            notes,
             token,
             true,
             inviteChannel
@@ -133,7 +130,6 @@ export class RequestsMobileComponent implements OnInit {
             requestedBy,
             contact,
             requiredState,
-            notes,
             token,
             true,
             inviteChannel
@@ -147,7 +143,6 @@ export class RequestsMobileComponent implements OnInit {
       requestedBy,
       contact,
       requiredState,
-      notes,
       token,
       Boolean(contact.phone),
       inviteChannel
@@ -339,7 +334,7 @@ export class RequestsMobileComponent implements OnInit {
   }
 
   private checkAdminAccess(): boolean {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token) return false;
     const payload = this.decodeJwtPayload(token);
     return payload?.['admin_access'] === true;
@@ -364,7 +359,7 @@ export class RequestsMobileComponent implements OnInit {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!userToken || this.isTokenExpired(userToken)) return null;
     return userToken;
   }
@@ -383,28 +378,38 @@ export class RequestsMobileComponent implements OnInit {
   }
 
   private loadPlanAccess() {
-    this.subscriptionService.ensureBusinessTrial().subscribe((subscription) => {
-      this.currentSubscription = subscription;
-      this.currentPlanName = subscription?.plan?.name ?? (this.isBusinessSubscriptionActive(subscription) ? 'Business' : 'Free');
-      this.currentPlanCode = subscription?.plan?.code ?? 'free';
-      this.isBusinessTrial = Boolean(subscription?.is_trial);
-      this.trialDaysRemaining =
-        typeof subscription?.days_remaining === 'number' ? subscription.days_remaining : null;
-      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
-      this.canCreateRequests = this.isBusinessSubscriptionActive(subscription);
-      if (!this.requestedByDefault) {
-        this.requestedByDefault = this.currentPlanName;
+    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
+      next: (snapshot) => {
+        this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+        this.currentPlanCode = snapshot.planCode || 'free';
+        this.isBusinessTrial = snapshot.isBusinessTrial;
+        this.trialDaysRemaining =
+          typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
+        this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
+        this.canCreateRequests = snapshot.hasBusinessAccess;
+        if (!this.requestedByDefault) {
+          this.requestedByDefault = this.currentPlanName;
+        }
+        if (this.pendingCreateModal && this.canCreateRequests) {
+          this.openCreateModal();
+        }
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.describeHttpError(err, 'Failed to load plan access.')
+        };
+        this.cdr.detectChanges();
       }
-      if (this.pendingCreateModal && this.canCreateRequests) {
-        this.openCreateModal();
-      }
-      this.cdr.detectChanges();
     });
   }
 
   private loadOrganization() {
-    this.organizationService.getUserOrganization().subscribe((org) => {
+    this.organizationService.getUserOrganization().pipe(
+      catchError(() => of(null))
+    ).subscribe((org) => {
       this.org = org;
       this.requestedByDefault = org?.name ?? this.requestedByDefault;
       this.cdr.detectChanges();
@@ -415,7 +420,6 @@ export class RequestsMobileComponent implements OnInit {
     requestedBy: string,
     contact: { userId?: string; email?: string; phone?: string },
     requiredState: string,
-    _notes: string,
     token: string | null,
     createInvite = false,
     inviteChannel: InviteChannel = 'auto'
@@ -441,8 +445,11 @@ export class RequestsMobileComponent implements OnInit {
         this.loadRequests();
         this.cdr.detectChanges();
       },
-      error: () => {
-        this.submitFeedback = { type: 'error', message: 'Failed to send request.' };
+      error: (err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.describeHttpError(err, 'Failed to send request.')
+        };
         this.submittingRequest = false;
         this.cdr.detectChanges();
       }
@@ -470,6 +477,7 @@ export class RequestsMobileComponent implements OnInit {
 
     const channel = this.resolveInviteChannel(contact, inviteChannel);
     const payload = {
+      org_id: this.org?.id ?? undefined,
       request: requestId,
       email: contact.email ?? undefined,
       phone: contact.phone ?? undefined,
@@ -564,12 +572,38 @@ export class RequestsMobileComponent implements OnInit {
     }
   }
 
-  private isBusinessSubscriptionActive(subscription: UserSubscription | null): boolean {
-    if (!subscription) {
-      return false;
+  private describeHttpError(err: any, fallback: string): string {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const detail =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.error?.message ||
+      err?.message ||
+      '';
+    const normalized = String(detail).toLowerCase();
+
+    if (
+      status === 0 ||
+      normalized.includes('network') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('connection refused') ||
+      normalized.includes('timeout')
+    ) {
+      return `Network error: ${detail || fallback}`;
     }
-    return (subscription.status ?? '').trim().toLowerCase() === 'active';
+
+    if (status >= 500) {
+      return `Server error (${status}): ${detail || fallback}`;
+    }
+
+    if (status >= 400) {
+      return `Request error (${status}): ${detail || fallback}`;
+    }
+
+    return detail || fallback;
   }
+
 }
 
 type RequestRecord = {
@@ -602,3 +636,4 @@ type CreateRequestPayload = {
 };
 
 type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';
+

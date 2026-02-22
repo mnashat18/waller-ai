@@ -260,7 +260,7 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -373,3 +373,4 @@ type NotificationRecord = {
   link_id?: string | number;
   meta?: unknown;
 };
+

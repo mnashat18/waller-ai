@@ -184,7 +184,7 @@ export class UpgradePlanComponent implements OnInit {
   }
 
   private prefillFromToken() {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     const payload = token ? this.decodeJwtPayload(token) : null;
 
     const firstName = typeof payload?.['first_name'] === 'string' ? payload['first_name'] : '';
@@ -246,3 +246,4 @@ export class UpgradePlanComponent implements OnInit {
     return 'Failed to submit payment activation request. Please retry shortly.';
   }
 }
+

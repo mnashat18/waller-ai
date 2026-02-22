@@ -88,7 +88,6 @@ export class Requests implements OnInit {
     const requestedBy = form.requestedBy.trim() || this.requestedByDefault;
     const requestedFor = form.requestedFor.trim();
     const requiredState = form.requiredState.trim();
-    const notes = form.notes.trim();
     const inviteChannel = this.normalizeInviteChannel(form.inviteChannel);
 
     if (!requestedBy) {
@@ -130,7 +129,7 @@ export class Requests implements OnInit {
     const token = userToken;
 
     if (contact.userId) {
-      this.submitRequestPayload(requestedBy, contact, requiredState, notes, token);
+      this.submitRequestPayload(requestedBy, contact, requiredState, token);
       return;
     }
 
@@ -138,14 +137,13 @@ export class Requests implements OnInit {
       this.resolveRequestedFor(contact.email, token).subscribe({
         next: (resolvedUserId) => {
           if (resolvedUserId) {
-            this.submitRequestPayload(requestedBy, { userId: resolvedUserId }, requiredState, notes, token);
+            this.submitRequestPayload(requestedBy, { userId: resolvedUserId }, requiredState, token);
             return;
           }
           this.submitRequestPayload(
             requestedBy,
             contact,
             requiredState,
-            notes,
             token,
             true,
             inviteChannel
@@ -157,7 +155,6 @@ export class Requests implements OnInit {
             requestedBy,
             contact,
             requiredState,
-            notes,
             token,
             true,
             inviteChannel
@@ -171,7 +168,6 @@ export class Requests implements OnInit {
       requestedBy,
       contact,
       requiredState,
-      notes,
       token,
       Boolean(contact.phone),
       inviteChannel
@@ -380,7 +376,7 @@ export class Requests implements OnInit {
   }
 
   private checkAdminAccess(): boolean {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token) {
       return false;
     }
@@ -418,7 +414,7 @@ export class Requests implements OnInit {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -507,7 +503,11 @@ export class Requests implements OnInit {
         this.loadingPlanAccess = false;
         this.cdr.detectChanges();
       },
-      error: () => {
+      error: (err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.describeHttpError(err, 'Failed to load plan access.')
+        };
         this.loadingPlanAccess = false;
         this.cdr.detectChanges();
       }
@@ -515,7 +515,9 @@ export class Requests implements OnInit {
   }
 
   private loadOrganization() {
-    this.organizationService.getUserOrganization().subscribe((org) => {
+    this.organizationService.getUserOrganization().pipe(
+      catchError(() => of(null))
+    ).subscribe((org) => {
       this.org = org;
       this.requestedByDefault = org?.name ?? this.requestedByDefault;
       this.cdr.detectChanges();
@@ -526,7 +528,6 @@ export class Requests implements OnInit {
     requestedBy: string,
     contact: { userId?: string; email?: string; phone?: string },
     requiredState: string,
-    _notes: string,
     token: string | null,
     createInvite = false,
     inviteChannel: InviteChannel = 'auto'
@@ -555,7 +556,10 @@ export class Requests implements OnInit {
       },
       error: (err) => {
         console.error('[requests] create request error:', err);
-        this.submitFeedback = { type: 'error', message: 'Failed to send request.' };
+        this.submitFeedback = {
+          type: 'error',
+          message: this.describeHttpError(err, 'Failed to send request.')
+        };
         this.submittingRequest = false;
         this.cdr.detectChanges();
       }
@@ -587,11 +591,13 @@ export class Requests implements OnInit {
     const expiresAt = new Date(now);
     expiresAt.setDate(expiresAt.getDate() + 7);
 
+    const channel = this.resolveInviteChannel(contact, inviteChannel);
     const payload = {
       org_id: this.org?.id ?? undefined,
       request: requestId,
       email: contact.email ?? undefined,
       phone: contact.phone ?? undefined,
+      channel,
       token: inviteToken,
       status: 'Sent',
       sent_at: now.toISOString(),
@@ -643,6 +649,38 @@ export class Requests implements OnInit {
       return inviteChannel === 'sms' ? 'sms' : 'whatsapp';
     }
     return 'email';
+  }
+
+  private describeHttpError(err: any, fallback: string): string {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const detail =
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.error ||
+      err?.error?.message ||
+      err?.message ||
+      '';
+    const normalized = String(detail).toLowerCase();
+
+    if (
+      status === 0 ||
+      normalized.includes('network') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('connection refused') ||
+      normalized.includes('timeout')
+    ) {
+      return `Network error: ${detail || fallback}`;
+    }
+
+    if (status >= 500) {
+      return `Server error (${status}): ${detail || fallback}`;
+    }
+
+    if (status >= 400) {
+      return `Request error (${status}): ${detail || fallback}`;
+    }
+
+    return detail || fallback;
   }
 
   private formatRequestTarget(request: RequestRecord): string {
@@ -708,5 +746,6 @@ type CreateRequestPayload = {
 };
 
 type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';
+
 
 

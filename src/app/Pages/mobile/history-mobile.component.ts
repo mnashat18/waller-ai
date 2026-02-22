@@ -1,4 +1,4 @@
-﻿import { CommonModule } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
@@ -142,7 +142,7 @@ export class HistoryMobileComponent implements OnInit {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -286,3 +286,4 @@ type HistoryScan = {
   fatigueLevel: string;
   focusScore: string;
 };
+

@@ -803,7 +803,8 @@ export class SubscriptionService {
 
     const token = localStorage.getItem('token');
     const accessToken = localStorage.getItem('access_token');
-    const candidates = [token, accessToken].filter(
+    const directusToken = localStorage.getItem('directus_token');
+    const candidates = [token, accessToken, directusToken].filter(
       (candidate, index, list): candidate is string =>
         typeof candidate === 'string' &&
         candidate.length > 0 &&
@@ -812,10 +813,11 @@ export class SubscriptionService {
 
     for (const candidate of candidates) {
       if (!this.isTokenExpired(candidate)) {
-        if (token !== candidate || accessToken !== candidate) {
+        if (token !== candidate || accessToken !== candidate || directusToken !== candidate) {
           try {
             localStorage.setItem('token', candidate);
             localStorage.setItem('access_token', candidate);
+            localStorage.setItem('directus_token', candidate);
           } catch {
             // ignore storage errors
           }

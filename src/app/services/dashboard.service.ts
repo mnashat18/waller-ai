@@ -142,7 +142,7 @@ export class DashboardService {
       return null;
     }
 
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -243,3 +243,4 @@ export class DashboardService {
     return (state ?? '').trim() || 'Unknown';
   }
 }
+

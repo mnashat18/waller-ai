@@ -732,11 +732,13 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     const expiresAt = new Date(now);
     expiresAt.setDate(expiresAt.getDate() + 7);
 
+    const channel = this.resolveInviteChannel(contact, inviteChannel);
     const payload = {
       org_id: this.org?.id ?? undefined,
       request: requestId,
       email: contact.email ?? undefined,
       phone: contact.phone ?? undefined,
+      channel,
       token: inviteToken,
       status: 'Sent',
       sent_at: now.toISOString(),
@@ -800,7 +802,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private checkAdminAccess(): boolean {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token) {
       return false;
     }
@@ -824,7 +826,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -955,3 +957,4 @@ type CreateRequestPayload = {
 };
 
 type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';
+

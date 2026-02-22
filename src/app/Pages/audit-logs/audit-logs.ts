@@ -504,7 +504,7 @@ export class AuditLogs implements OnInit {
   }
 
   private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token');
+    const userToken = this.getStoredToken();
     if (!userToken || this.isTokenExpired(userToken)) {
       return null;
     }
@@ -531,7 +531,7 @@ export class AuditLogs implements OnInit {
   }
 
   private checkAdminAccess(payload?: Record<string, unknown> | null): boolean {
-    const data = payload ?? this.decodeJwtPayload(localStorage.getItem('token') ?? '');
+    const data = payload ?? this.decodeJwtPayload(this.getStoredToken() ?? '');
     return data?.['admin_access'] === true;
   }
 
@@ -550,7 +550,7 @@ export class AuditLogs implements OnInit {
   }
 
   private checkReviewAccess(payload?: Record<string, unknown> | null): boolean {
-    const data = payload ?? this.decodeJwtPayload(localStorage.getItem('token') ?? '');
+    const data = payload ?? this.decodeJwtPayload(this.getStoredToken() ?? '');
     if (!data) {
       return false;
     }
@@ -562,6 +562,14 @@ export class AuditLogs implements OnInit {
     const roleId = typeof data['role'] === 'string' ? data['role'] : '';
     const allowedRoles = environment.AUDIT_LOG_REVIEW_ROLE_IDS ?? [];
     return roleId !== '' && allowedRoles.includes(roleId);
+  }
+
+  private getStoredToken(): string | null {
+    return (
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token') ??
+      localStorage.getItem('directus_token')
+    );
   }
 
   private extractUserEmail(payload?: Record<string, unknown> | null): string {

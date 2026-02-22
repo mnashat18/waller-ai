@@ -58,7 +58,7 @@ const businessOnboardingGuard: CanActivateFn = (_, state) => {
     return true;
   }
 
-  const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+  const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
   if (!token) {
     return true;
   }
@@ -283,4 +283,5 @@ export const routes: Routes = [
 
 
 ];
+
 

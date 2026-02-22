@@ -173,7 +173,7 @@ export class BusinessUpgradeService {
   }
 
   private getToken(): string | null {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token || this.isTokenExpired(token)) {
       return null;
     }
@@ -316,3 +316,4 @@ export class BusinessUpgradeService {
     );
   }
 }
+

@@ -43,6 +43,18 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   };
 
   private routeSub?: Subscription;
+  private textRotationInterval: ReturnType<typeof setInterval> | null = null;
+  private textRotationSwapTimer: ReturnType<typeof setTimeout> | null = null;
+  private snowAnimationFrame: number | null = null;
+  private revealObserver: IntersectionObserver | null = null;
+  private snowCanvas: HTMLCanvasElement | null = null;
+  private readonly handleWindowResize = () => {
+    if (!this.snowCanvas) {
+      return;
+    }
+    this.snowCanvas.width = window.innerWidth;
+    this.snowCanvas.height = window.innerHeight;
+  };
 
   constructor(
     private auth: AuthService,
@@ -65,6 +77,24 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   ngOnDestroy() {
     this.routeSub?.unsubscribe();
+    if (this.textRotationInterval) {
+      clearInterval(this.textRotationInterval);
+      this.textRotationInterval = null;
+    }
+    if (this.textRotationSwapTimer) {
+      clearTimeout(this.textRotationSwapTimer);
+      this.textRotationSwapTimer = null;
+    }
+    if (this.snowAnimationFrame !== null) {
+      cancelAnimationFrame(this.snowAnimationFrame);
+      this.snowAnimationFrame = null;
+    }
+    if (this.revealObserver) {
+      this.revealObserver.disconnect();
+      this.revealObserver = null;
+    }
+    this.snowCanvas = null;
+    window.removeEventListener('resize', this.handleWindowResize);
   }
 
   openAuth(mode: 'signup' | 'login' = 'signup') {
@@ -241,11 +271,24 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     if (!el) {
       return;
     }
+
+    if (this.textRotationInterval) {
+      clearInterval(this.textRotationInterval);
+      this.textRotationInterval = null;
+    }
+    if (this.textRotationSwapTimer) {
+      clearTimeout(this.textRotationSwapTimer);
+      this.textRotationSwapTimer = null;
+    }
+
     let index = 0;
 
     const changeText = () => {
       el.classList.remove('show');
-      setTimeout(() => {
+      if (this.textRotationSwapTimer) {
+        clearTimeout(this.textRotationSwapTimer);
+      }
+      this.textRotationSwapTimer = setTimeout(() => {
         el.textContent = this.texts[index];
         el.classList.add('show');
         index = (index + 1) % this.texts.length;
@@ -253,7 +296,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     };
 
     changeText();
-    setInterval(changeText, 3000);
+    this.textRotationInterval = setInterval(changeText, 3000);
   }
 
   /* ===== SNOW PARTICLES ===== */
@@ -266,8 +309,9 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     if (!ctx) {
       return;
     }
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    this.snowCanvas = canvas;
+    this.handleWindowResize();
+    window.addEventListener('resize', this.handleWindowResize);
 
     const particles = Array.from({ length: 120 }).map(() => ({
       x: Math.random() * canvas.width,
@@ -293,7 +337,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         ctx.fill();
       });
 
-      requestAnimationFrame(animate);
+      this.snowAnimationFrame = requestAnimationFrame(animate);
     };
 
     animate();
@@ -310,12 +354,17 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       return;
     }
 
-    const observer = new IntersectionObserver(
+    if (this.revealObserver) {
+      this.revealObserver.disconnect();
+      this.revealObserver = null;
+    }
+
+    this.revealObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
             entry.target.classList.add('visible');
-            observer.unobserve(entry.target);
+            this.revealObserver?.unobserve(entry.target);
           }
         });
       },
@@ -324,7 +373,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
     elements.forEach((el) => {
       el.style.transitionDelay = '0s';
-      observer.observe(el);
+      this.revealObserver?.observe(el);
     });
   }
 

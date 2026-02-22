@@ -1,4 +1,4 @@
-﻿import { CommonModule } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -101,7 +101,7 @@ export class ProfileMobileComponent implements OnInit {
       return;
     }
 
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token || this.isTokenExpired(token)) {
       this.saveFeedback = { type: 'error', message: 'Session expired. Please login again.' };
       this.cdr.detectChanges();
@@ -164,7 +164,7 @@ export class ProfileMobileComponent implements OnInit {
   }
 
   private loadProfile() {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token');
+    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token || this.isTokenExpired(token)) {
       this.loading = false;
       this.errorMessage = 'You are not signed in.';
@@ -604,3 +604,4 @@ type UploadResult = {
   id: string | null;
   usedAdmin: boolean;
 };
+

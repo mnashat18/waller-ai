@@ -62,7 +62,10 @@ export class OrganizationService {
     if (typeof localStorage === 'undefined') {
       return null;
     }
-    const token = localStorage.getItem('token');
+    const token =
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token') ??
+      localStorage.getItem('directus_token');
     if (!token) {
       return null;
     }
