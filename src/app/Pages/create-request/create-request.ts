@@ -731,12 +731,24 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       return of(false);
     }
 
+    const currentUser = this.getCurrentUserContext();
+    const requestedForUser =
+      recipientPayload.requested_for_user ??
+      currentUser.id ??
+      undefined;
+    const requestedForEmail =
+      recipientPayload.requested_for_email ??
+      currentUser.email ??
+      undefined;
+
     const payload: CreateRequestPayload = {
       Target: target,
       required_state: requiredState,
       ...(this.org?.id ? { org_id: this.org.id } : {}),
       ...(this.org?.id ? { requested_by_org: this.org.id } : {}),
-      ...recipientPayload
+      ...recipientPayload,
+      requested_for_user: requestedForUser,
+      requested_for_email: requestedForEmail
     };
 
     return this.createRequest(payload, token).pipe(
@@ -1031,6 +1043,40 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       return '';
     }
     return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
+  }
+
+  private getCurrentUserContext(): { id: string | null; email: string | null } {
+    const token = this.getUserToken();
+    const payload = token ? this.decodeJwtPayload(token) : null;
+    const storedId =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('current_user_id') : null;
+    const storedEmail =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('user_email') : null;
+
+    const payloadId = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
+    const payloadEmail = payload?.['email'];
+    const id = this.normalizeId(payloadId) ?? this.normalizeId(storedId);
+    const email = this.normalizeEmail(payloadEmail) ?? this.normalizeEmail(storedEmail);
+    return { id, email };
+  }
+
+  private normalizeId(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return String(value);
+    }
+    return null;
+  }
+
+  private normalizeEmail(value: unknown): string | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const email = value.trim().toLowerCase();
+    return this.isValidEmail(email) ? email : null;
   }
 
 }

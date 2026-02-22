@@ -305,7 +305,17 @@ export class SubscriptionService {
 
     return this.getActiveSubscription().pipe(
       switchMap((subscription) => {
-        if (this.hasActiveBusinessStatus(subscription)) {
+        const hasBusinessContext =
+          this.hasActiveBusinessStatus(subscription) || this.hasBusinessRoleAccess();
+
+        if (!hasBusinessContext) {
+          return of(true);
+        }
+
+        const hasPaidBusinessAccess =
+          this.hasActiveBusinessStatus(subscription) &&
+          subscription?.is_trial !== true;
+        if (hasPaidBusinessAccess) {
           this.writeBusinessOnboardingMarker(userId, true);
           return of(true);
         }
@@ -321,15 +331,17 @@ export class SubscriptionService {
         );
       }),
       catchError(() =>
-        this.fetchLatestBusinessUpgradeRequest(userId).pipe(
-          map((hasUpgradeRequest) => {
-            if (hasUpgradeRequest) {
-              this.writeBusinessOnboardingMarker(userId, true);
-            }
-            return hasUpgradeRequest;
-          }),
-          catchError(() => of(localMarker))
-        )
+        this.hasBusinessRoleAccess()
+          ? this.fetchLatestBusinessUpgradeRequest(userId).pipe(
+            map((hasUpgradeRequest) => {
+              if (hasUpgradeRequest) {
+                this.writeBusinessOnboardingMarker(userId, true);
+              }
+              return hasUpgradeRequest;
+            }),
+            catchError(() => of(localMarker))
+          )
+          : of(true)
       )
     );
   }

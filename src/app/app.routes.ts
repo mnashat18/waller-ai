@@ -33,9 +33,18 @@ const paymentAccessGuard: CanActivateFn = () => {
   const subscriptions = inject(SubscriptionService);
   const router = inject(Router);
 
-  return subscriptions.hasActiveBusinessSubscription().pipe(
-    map((hasActiveSubscription) =>
-      hasActiveSubscription ? router.createUrlTree(['/dashboard']) : true
+  if (typeof localStorage === 'undefined') {
+    return true;
+  }
+
+  const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
+  if (!token) {
+    return true;
+  }
+
+  return subscriptions.isBusinessOnboardingComplete().pipe(
+    map((completed) =>
+      completed ? router.createUrlTree(['/dashboard']) : true
     ),
     catchError(() => of(true))
   );

@@ -422,6 +422,22 @@ export class Requests implements OnInit {
     return userToken;
   }
 
+  private getCurrentUserEmail(): string | null {
+    const storedEmail =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('user_email') : null;
+    if (storedEmail && storedEmail.includes('@')) {
+      return storedEmail.trim().toLowerCase();
+    }
+
+    const token = this.getUserToken();
+    const payload = token ? this.decodeJwtPayload(token) : null;
+    const email = payload?.['email'];
+    if (typeof email === 'string' && email.includes('@')) {
+      return email.trim().toLowerCase();
+    }
+    return null;
+  }
+
   private isTokenExpired(token: string): boolean {
     const parts = token.split('.');
     if (parts.length !== 3) {
@@ -532,12 +548,17 @@ export class Requests implements OnInit {
     createInvite = false,
     inviteChannel: InviteChannel = 'auto'
   ) {
+    const currentUserId =
+      this.getUserIdFromToken(token) ??
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('current_user_id') : null);
+    const currentUserEmail = this.getCurrentUserEmail();
+
     const payload: CreateRequestPayload = {
       Target: requestedBy,
       org_id: this.org?.id ?? undefined,
       requested_by_org: this.org?.id ?? undefined,
-      requested_for_user: contact.userId,
-      requested_for_email: contact.email,
+      requested_for_user: contact.userId ?? currentUserId ?? undefined,
+      requested_for_email: contact.email ?? currentUserEmail ?? undefined,
       requested_for_phone: contact.phone,
       required_state: requiredState
     };
