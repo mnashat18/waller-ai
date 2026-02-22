@@ -55,7 +55,7 @@
     <a routerLink="/requests/create"
        routerLinkActive="active"
        [routerLinkActiveOptions]="{ exact: true }"
-       *ngIf="hasBusinessAccess"
+       *ngIf="canUseBusinessFeatures"
        class="sidebar-item">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M12 5v14"></path>
@@ -66,7 +66,7 @@
 
     <a routerLink="/business-center"
        routerLinkActive="active"
-       *ngIf="hasBusinessAccess"
+       *ngIf="canOpenBusinessCenter"
        class="sidebar-item">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M4 20V8l8-4 8 4v12"></path>
@@ -79,7 +79,7 @@
 
     <a routerLink="/payment"
        routerLinkActive="active"
-       *ngIf="!hasBusinessAccess"
+       *ngIf="!hasBusinessAccess || trialExpired"
        class="sidebar-item">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="2.5" y="5" width="19" height="14" rx="2"></rect>
@@ -104,11 +104,12 @@
   <div class="sidebar-plan-card">
     <p class="sidebar-plan-title">Plan Status</p>
     <p class="sidebar-plan-name">{{ planLabel }}</p>
+    <p class="sidebar-plan-meta">Role: {{ memberRoleLabel }}</p>
     <p class="sidebar-plan-meta">{{ statusText() }}</p>
     <div class="sidebar-progress">
       <span [style.width.%]="trialProgressPercent()"></span>
     </div>
-    <a routerLink="/payment" class="sidebar-plan-link" *ngIf="!hasBusinessAccess">Open Payment</a>
-    <a routerLink="/business-center" class="sidebar-plan-link" *ngIf="hasBusinessAccess">Open Business</a>
+    <a routerLink="/payment" class="sidebar-plan-link" *ngIf="!hasBusinessAccess || trialExpired">Open Payment</a>
+    <a routerLink="/business-center" class="sidebar-plan-link" *ngIf="canOpenBusinessCenter">Open Business</a>
   </div>
 </div>

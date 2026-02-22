@@ -3,7 +3,7 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { forkJoin, Observable, of } from 'rxjs';
-import { catchError, finalize } from 'rxjs/operators';
+import { catchError, finalize, timeout } from 'rxjs/operators';
 import {
   ActivityEventRecord,
   BusinessCenterService,
@@ -38,7 +38,16 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   loadingAccess = true;
   loadingData = false;
   hasBusinessAccess = false;
+  missingBusinessProfile = false;
   accessReason = '';
+  memberRoleLabel = 'User';
+  canInvite = false;
+  canUpgrade = false;
+  canManageMembers = false;
+  canUseSystem = false;
+  isReadOnly = true;
+  trialDaysRemaining: number | null = null;
+  private readonly accessStateTimeoutMs = 15000;
 
   feedback: Feedback | null = null;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +114,20 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     return `Plan: ${plan}`;
   }
 
+  roleBadgeLabel(): string {
+    return `Role: ${this.memberRoleLabel}`;
+  }
+
+  trialBadgeLabel(): string {
+    if (typeof this.trialDaysRemaining !== 'number') {
+      return '';
+    }
+    if (this.trialDaysRemaining <= 1) {
+      return 'Trial ends today';
+    }
+    return `${this.trialDaysRemaining}d trial left`;
+  }
+
   requestStatusLabel(status?: string | null): string {
     const normalized = (status ?? '').trim().toLowerCase();
     if (normalized.includes('approved') || normalized.includes('accepted')) {
@@ -140,6 +163,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   submitUpgradeRequest(): void {
+    if (!this.canUpgrade) {
+      this.showFeedback('error', 'Only owner can submit upgrade requests.');
+      return;
+    }
+
     const orgId = this.accessState?.orgId ?? null;
     this.upgradeSubmitting = true;
     this.showFeedback('info', 'Submitting upgrade request...');
@@ -154,7 +182,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   submitExportRequest(): void {
-    if (!this.hasBusinessAccess) {
+    if (!this.hasBusinessAccess || !this.canUseSystem || this.isReadOnly) {
+      this.showFeedback('error', 'Your company role cannot create export jobs.');
       return;
     }
 
@@ -180,7 +209,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   submitInvite(): void {
-    if (!this.hasBusinessAccess) {
+    if (!this.hasBusinessAccess || !this.canInvite) {
+      this.showFeedback('error', 'Only owner can send invites.');
       return;
     }
 
@@ -221,7 +251,29 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private loadAccessState(): void {
     this.loadingAccess = true;
+    this.missingBusinessProfile = false;
     this.businessCenter.getHubAccessState().pipe(
+      timeout(this.accessStateTimeoutMs),
+      catchError((err) =>
+        of({
+          userId: null,
+          orgId: null,
+          profile: null,
+          membership: null,
+          hasPaidAccess: false,
+          memberRole: null,
+          permissions: {
+            canInvite: false,
+            canUpgrade: false,
+            canManageMembers: false,
+            canUseSystem: false,
+            isReadOnly: true
+          },
+          trialExpired: false,
+          trialExpiresAt: null,
+          reason: this.describeHttpError(err, 'Failed to load Business profile and access state.')
+        } as BusinessHubAccessState)
+      ),
       finalize(() => {
         this.loadingAccess = false;
       })
@@ -230,6 +282,16 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.profile = state.profile;
       this.hasBusinessAccess = state.hasPaidAccess;
       this.accessReason = state.reason;
+      this.memberRoleLabel = this.toTitleCase((state.memberRole ?? '').toString()) || 'User';
+      this.canInvite = Boolean(state.permissions?.canInvite);
+      this.canUpgrade = Boolean(state.permissions?.canUpgrade);
+      this.canManageMembers = Boolean(state.permissions?.canManageMembers);
+      this.canUseSystem = Boolean(state.permissions?.canUseSystem);
+      this.isReadOnly = Boolean(state.permissions?.isReadOnly);
+      this.trialDaysRemaining = state.trialExpiresAt ? this.daysUntil(state.trialExpiresAt) : null;
+      this.missingBusinessProfile =
+        !state.profile &&
+        state.reason.toLowerCase().includes('no business profile');
 
       if (!state.hasPaidAccess) {
         this.clearBusinessData();
@@ -417,5 +479,24 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     clearTimeout(this.feedbackTimer);
     this.feedbackTimer = null;
   }
-}
 
+  private daysUntil(value: string): number | null {
+    const ts = new Date(value).getTime();
+    if (Number.isNaN(ts)) {
+      return null;
+    }
+    const remaining = ts - Date.now();
+    if (remaining <= 0) {
+      return 0;
+    }
+    return Math.ceil(remaining / (24 * 60 * 60 * 1000));
+  }
+
+  private toTitleCase(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return '';
+    }
+    return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
+  }
+}

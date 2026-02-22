@@ -4,6 +4,7 @@ import { environment } from 'src/environments/environment';
 import { Observable, firstValueFrom, from, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, tap } from 'rxjs/operators';
 import { SubscriptionService } from './subscription.service';
+import { BusinessCenterService } from './business-center.service';
 
 type AuthCaptureResult = {
   stored: boolean;
@@ -25,7 +26,8 @@ export class AuthService {
 
   constructor(
     private http: HttpClient,
-    private subscriptions: SubscriptionService
+    private subscriptions: SubscriptionService,
+    private businessCenter: BusinessCenterService
   ) {}
 
   captureAuthFromUrl(): AuthCaptureResult {
@@ -285,6 +287,53 @@ export class AuthService {
           if (typeof user?.email === 'string' && user.email) {
             localStorage.setItem('user_email', user.email);
           }
+          const userId =
+            typeof user?.id === 'string'
+              ? user.id
+              : typeof user?.id === 'number' && !Number.isNaN(user.id)
+                ? String(user.id)
+                : null;
+          const orgId =
+            typeof user?.org_id === 'string'
+              ? user.org_id
+              : typeof user?.organization_id === 'string'
+                ? user.organization_id
+                : typeof user?.organization?.id === 'string'
+                  ? user.organization.id
+                  : null;
+
+          if (userId) {
+            localStorage.setItem('current_user_id', userId);
+          }
+          if (orgId) {
+            localStorage.setItem('current_user_org_id', orgId);
+          } else {
+            localStorage.removeItem('current_user_org_id');
+          }
+          const roleId =
+            typeof user?.role === 'string'
+              ? user.role
+              : typeof user?.role?.id === 'string'
+                ? user.role.id
+                : null;
+          const roleName =
+            typeof user?.role?.name === 'string'
+              ? user.role.name
+              : null;
+
+          if (roleId) {
+            localStorage.setItem('user_role_id', roleId);
+          }
+          if (roleName) {
+            localStorage.setItem('user_role_name', roleName);
+          }
+
+          const token = accessToken ?? this.getStoredAccessToken() ?? undefined;
+          this.businessCenter.ensureBusinessProfileForUser(user, token).subscribe({
+            next: () => void 0,
+            error: () => void 0
+          });
+          this.subscriptions.notifyAuthStateChanged();
         }
       }),
       catchError((err) => {
@@ -321,6 +370,7 @@ export class AuthService {
     localStorage.setItem('directus_token', token);
     sessionStorage.setItem('is_logged_in', '1');
     localStorage.removeItem('auth_error');
+    this.subscriptions.notifyAuthStateChanged();
   }
 
   storeRefreshToken(token: string) {
@@ -336,11 +386,17 @@ export class AuthService {
     localStorage.removeItem('directus_refresh_token');
     localStorage.removeItem('auth_error');
     localStorage.removeItem('user_email');
+    localStorage.removeItem('current_user_id');
+    localStorage.removeItem('current_user_org_id');
+    localStorage.removeItem('user_role_id');
+    localStorage.removeItem('user_role_name');
+    localStorage.removeItem('wellar_sidebar_business_state_v1');
 
     sessionStorage.removeItem('is_logged_in');
     sessionStorage.removeItem('auth_callback_pending');
     sessionStorage.removeItem('auth_refresh_attempted');
     sessionStorage.removeItem('auth_callback_raw_url');
+    this.subscriptions.notifyAuthStateChanged();
   }
 
   getAuthHeaders(accessToken?: string): HttpHeaders {

@@ -29,18 +29,6 @@ const mobileProfileMatch: CanMatchFn = () => isMobileViewport();
 const mobileAuditLogsMatch: CanMatchFn = () => isMobileViewport();
 const mobileBusinessCenterMatch: CanMatchFn = () => isMobileViewport();
 
-const paidBusinessGuard: CanActivateFn = () => {
-  const subscriptions = inject(SubscriptionService);
-  const router = inject(Router);
-
-  return subscriptions.hasActiveBusinessSubscription().pipe(
-    map((hasActiveSubscription) =>
-      hasActiveSubscription ? true : router.createUrlTree(['/payment'])
-    ),
-    catchError(() => of(router.createUrlTree(['/payment'])))
-  );
-};
-
 const paymentAccessGuard: CanActivateFn = () => {
   const subscriptions = inject(SubscriptionService);
   const router = inject(Router);
@@ -114,7 +102,7 @@ export const routes: Routes = [
 {
   path: 'requests/create',
   canMatch: [mobileCreateRequestMatch],
-  canActivate: [businessOnboardingGuard, paidBusinessGuard],
+  canActivate: [businessOnboardingGuard],
   loadComponent: () =>
     import('./Pages/create-request/create-request')
       .then(m => m.CreateRequestComponent)
@@ -140,7 +128,7 @@ export const routes: Routes = [
 {
   path: 'business-center',
   canMatch: [mobileBusinessCenterMatch],
-  canActivate: [businessOnboardingGuard, paidBusinessGuard],
+  canActivate: [businessOnboardingGuard],
   loadComponent: () =>
     import('./Pages/business-center/business-center')
       .then(m => m.BusinessCenterComponent)
@@ -241,7 +229,7 @@ export const routes: Routes = [
       },
       {
         path: 'requests/create',
-        canActivate: [businessOnboardingGuard, paidBusinessGuard],
+        canActivate: [businessOnboardingGuard],
         loadComponent: () =>
           import('./Pages/create-request/create-request')
             .then(m => m.CreateRequestComponent)
@@ -260,7 +248,7 @@ export const routes: Routes = [
       },
       {
         path: 'business-center',
-        canActivate: [businessOnboardingGuard, paidBusinessGuard],
+        canActivate: [businessOnboardingGuard],
         loadComponent: () =>
           import('./Pages/business-center/business-center')
             .then(m => m.BusinessCenterComponent)

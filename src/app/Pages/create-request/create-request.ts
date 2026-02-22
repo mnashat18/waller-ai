@@ -6,7 +6,7 @@ import { Router, RouterModule } from '@angular/router';
 import { Observable, from, of, throwError } from 'rxjs';
 import { catchError, concatMap, finalize, map, timeout, toArray } from 'rxjs/operators';
 import { Organization, OrganizationService } from '../../services/organization.service';
-import { SubscriptionService } from '../../services/subscription.service';
+import { BusinessCenterService, BusinessHubAccessState } from '../../services/business-center.service';
 import { environment } from 'src/environments/environment';
 
 type Feedback = {
@@ -37,14 +37,18 @@ type PhoneCountry = {
 })
 export class CreateRequestComponent implements OnInit, OnDestroy {
   isAdminUser = false;
-  loadingPlanAccess = true;
+  loadingBusinessProfile = true;
+  businessProfileMissing = false;
   canCreateRequests = false;
   currentPlanName = 'Free';
   currentPlanCode = 'free';
+  memberRoleLabel = 'User';
   isBusinessTrial = false;
   trialDaysRemaining: number | null = null;
   businessTrialNotice = '';
   businessInviteTrialNotice = '';
+  businessAccessReason = '';
+  accessState: BusinessHubAccessState | null = null;
   org: Organization | null = null;
   submittingRequest = false;
   submitFeedback: Feedback | null = null;
@@ -56,6 +60,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   recipients: RequestRecipient[] = [];
   private lastSubmitError = '';
   private readonly submitTimeoutMs = 30000;
+  private readonly businessProfileTimeoutMs = 15000;
   readonly phoneCountries: PhoneCountry[] = [
     { name: 'Afghanistan', dial: '+93' },
     { name: 'Albania', dial: '+355' },
@@ -285,13 +290,13 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   constructor(
     private http: HttpClient,
     private router: Router,
-    private subscriptionService: SubscriptionService,
-    private organizationService: OrganizationService
+    private organizationService: OrganizationService,
+    private businessCenterService: BusinessCenterService
   ) {}
 
   ngOnInit() {
     this.isAdminUser = this.checkAdminAccess();
-    this.loadPlanAccess();
+    this.loadBusinessProfileState();
     this.loadOrganization();
   }
 
@@ -414,8 +419,19 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   submitRequest() {
+    if (this.businessProfileMissing) {
+      this.submitFeedback = {
+        type: 'error',
+        message: 'No Business Profile Found. Create Business Profile first.'
+      };
+      return;
+    }
+
     if (!this.canCreateRequests) {
-      this.router.navigate(['/payment']);
+      this.submitFeedback = {
+        type: 'error',
+        message: this.businessAccessReason || 'Your Business role cannot create requests.'
+      };
       return;
     }
 
@@ -449,17 +465,6 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     this.submittingRequest = true;
     this.submitFeedback = { type: 'info', message: 'Sending request(s)...' };
     this.lastSubmitError = '';
-
-    const canInvite = this.canCreateRequests;
-
-    if (!canInvite) {
-      this.submitFeedback = {
-        type: 'error',
-        message: 'Email/phone invites are paid Business features. Open Billing to activate Business.'
-      };
-      this.submittingRequest = false;
-      return;
-    }
 
     const recipientsSnapshot = [...this.recipients];
     from(recipientsSnapshot).pipe(
@@ -608,33 +613,6 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  private loadPlanAccess() {
-    this.loadingPlanAccess = true;
-    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
-      next: (snapshot) => {
-        this.currentPlanCode = snapshot.planCode || 'free';
-        this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
-        this.isBusinessTrial = snapshot.isBusinessTrial;
-        this.trialDaysRemaining =
-          typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
-        this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
-        this.canCreateRequests = snapshot.hasBusinessAccess;
-        if (!this.form.target.trim()) {
-          this.form.target = 'Business';
-        }
-        this.loadingPlanAccess = false;
-      },
-      error: (err) => {
-        this.submitFeedback = {
-          type: 'error',
-          message: this.toFriendlyHttpError(err, 'Failed to load plan access.')
-        };
-        this.loadingPlanAccess = false;
-      }
-    });
-  }
-
   private loadOrganization() {
     this.organizationService.getUserOrganization().pipe(
       catchError((err) => {
@@ -649,6 +627,93 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       if (!this.form.target.trim()) {
         this.form.target = 'Business';
       }
+    });
+  }
+
+  private loadBusinessProfileState() {
+    this.loadingBusinessProfile = true;
+    this.businessProfileMissing = false;
+    this.businessAccessReason = '';
+    this.canCreateRequests = false;
+    this.accessState = null;
+
+    this.businessCenterService.getHubAccessState().pipe(
+      timeout(this.businessProfileTimeoutMs),
+      catchError((err) => {
+        this.submitFeedback = {
+          type: 'error',
+          message: this.toFriendlyHttpError(err, 'Failed to load business profile.')
+        };
+        return of(null);
+      }),
+      finalize(() => {
+        this.loadingBusinessProfile = false;
+      })
+    ).subscribe((state) => {
+      if (!state) {
+        return;
+      }
+
+      this.accessState = state;
+      const profile = state.profile;
+      this.businessAccessReason = state.reason || '';
+      this.memberRoleLabel = this.toTitleCase((state.memberRole ?? '').toString()) || 'User';
+
+      if (!profile?.id) {
+        this.businessProfileMissing = true;
+        this.currentPlanCode = 'free';
+        this.currentPlanName = 'Free';
+        this.isBusinessTrial = false;
+        this.trialDaysRemaining = null;
+        this.businessTrialNotice = '';
+        this.businessInviteTrialNotice = '';
+        this.canCreateRequests = false;
+        return;
+      }
+
+      this.businessProfileMissing = false;
+      const rawPlanCode = (profile.plan_code ?? '').toString().trim().toLowerCase();
+      this.currentPlanCode = rawPlanCode || 'business';
+      this.currentPlanName = this.currentPlanCode === 'business'
+        ? 'Business'
+        : this.toTitleCase(this.currentPlanCode);
+
+      const billingStatus = (profile.billing_status ?? '').toString().trim().toLowerCase();
+      this.isBusinessTrial = billingStatus === 'trial' && !state.trialExpired;
+      this.trialDaysRemaining = this.isBusinessTrial
+        ? this.daysUntil(state.trialExpiresAt)
+        : null;
+      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
+
+      this.canCreateRequests =
+        Boolean(state.hasPaidAccess) &&
+        Boolean(state.permissions?.canUseSystem) &&
+        !state.trialExpired;
+
+      if (!this.canCreateRequests && !this.businessAccessReason) {
+        if (state.trialExpired) {
+          this.businessAccessReason = 'Business trial expired. Please upgrade to continue.';
+        } else if (state.permissions?.isReadOnly) {
+          this.businessAccessReason = 'Your company role is viewer (read-only).';
+        } else {
+          this.businessAccessReason = 'Business access is not active for this account.';
+        }
+      }
+
+      if (!this.org?.id && state.orgId) {
+        const orgName = profile.business_name || profile.company_name || 'Business Profile';
+        this.org = {
+          id: state.orgId,
+          name: orgName
+        };
+      }
+    });
+  }
+
+  openCreateBusinessProfile() {
+    this.router.navigate(['/payment'], {
+      queryParams: { onboarding: 'required' }
     });
   }
 
@@ -690,11 +755,12 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
 
   private createRequest(payload: CreateRequestPayload, token: string | null) {
     const headers = this.buildAuthHeaders(token);
+    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
     console.info('[create-request] final payload -> /items/requests', payload);
     return this.http.post<{ data?: { id?: string } }>(
       `${environment.API_URL}/items/requests`,
       payload,
-      headers ? { headers } : {}
+      requestOptions
     ).pipe(
       catchError((err) => {
         if (err?.status === 500) {
@@ -715,7 +781,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
         return this.http.post<{ data?: { id?: string } }>(
           `${environment.API_URL}/items/requests`,
           fallbackPayload,
-          headers ? { headers } : {}
+          requestOptions
         );
       })
     );
@@ -746,10 +812,11 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     };
 
     const headers = this.buildAuthHeaders(token);
+    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
     this.http.post(
       `${environment.API_URL}/items/request_invites`,
       payload,
-      headers ? { headers } : {}
+      requestOptions
     ).pipe(
       catchError(() => of(null))
     ).subscribe();
@@ -941,6 +1008,29 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       err?.message ||
       fallback
     );
+  }
+
+  private daysUntil(value: string | null): number | null {
+    if (!value) {
+      return null;
+    }
+    const timestamp = new Date(value).getTime();
+    if (Number.isNaN(timestamp)) {
+      return null;
+    }
+    const remainingMs = timestamp - Date.now();
+    if (remainingMs <= 0) {
+      return 0;
+    }
+    return Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+  }
+
+  private toTitleCase(value: string): string {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return '';
+    }
+    return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
   }
 
 }

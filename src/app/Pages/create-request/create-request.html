@@ -9,8 +9,9 @@
     </div>
 
     <div class="hero-actions">
-      <span class="chip">Plan: {{ loadingPlanAccess ? 'Checking...' : currentPlanName }}</span>
-      <span *ngIf="!loadingPlanAccess && isBusinessTrial" class="chip">{{ trialDaysLabel() }}</span>
+      <span class="chip">Plan: {{ loadingBusinessProfile ? 'Checking...' : currentPlanName }}</span>
+      <span *ngIf="!loadingBusinessProfile" class="chip">Role: {{ memberRoleLabel }}</span>
+      <span *ngIf="!loadingBusinessProfile && isBusinessTrial" class="chip">{{ trialDaysLabel() }}</span>
       <a routerLink="/requests" class="chip">Back to Requests</a>
       <a *ngIf="canCreateRequests" routerLink="/business-center" class="chip">Business Center</a>
     </div>
@@ -20,7 +21,7 @@
     {{ feedback.message }}
   </div>
 
-  <div *ngIf="loadingPlanAccess" class="panel">
+  <div *ngIf="loadingBusinessProfile" class="panel">
     <div class="panel-header">
       <h3 class="panel-title">Checking Business Access</h3>
       <span class="chip">Please wait</span>
@@ -30,21 +31,38 @@
     </p>
   </div>
 
-  <div *ngIf="!loadingPlanAccess && !canCreateRequests" class="panel">
+  <div *ngIf="!loadingBusinessProfile && businessProfileMissing" class="panel">
+    <div class="panel-header">
+      <h3 class="panel-title">No Business Profile Found</h3>
+      <span class="chip">Setup Required</span>
+    </div>
+    <p class="text-slate-300">
+      We could not find a Business profile for your account. Create one first to continue with request creation.
+    </p>
+    <div class="mt-5 flex gap-3">
+      <button type="button" class="btn-primary px-5 py-2 rounded-full" (click)="openCreateBusinessProfile()">
+        Create Business Profile
+      </button>
+      <a routerLink="/requests" class="chip">Back to Requests</a>
+    </div>
+  </div>
+
+  <div *ngIf="!loadingBusinessProfile && !businessProfileMissing && !canCreateRequests" class="panel">
     <div class="panel-header">
       <h3 class="panel-title">Business Access Required</h3>
       <span class="chip">Paid Feature</span>
     </div>
     <p class="text-slate-300">
-      Create requests is a paid Business feature. Open Billing to unlock request creation and invite channels.
+      {{ businessAccessReason || 'Create requests is a paid Business feature. Open Billing to unlock request creation and invite channels.' }}
     </p>
     <div class="mt-5 flex gap-3">
-      <a routerLink="/payment" class="btn-primary px-5 py-2 rounded-full">Open Billing</a>
+      <a *ngIf="!businessAccessReason.toLowerCase().includes('viewer')" routerLink="/payment" class="btn-primary px-5 py-2 rounded-full">Open Billing</a>
+      <a routerLink="/business-center" class="chip">Open Business Center</a>
       <a routerLink="/requests" class="chip">View Requests</a>
     </div>
   </div>
 
-  <div *ngIf="!loadingPlanAccess && canCreateRequests" class="create-layout">
+  <div *ngIf="!loadingBusinessProfile && !businessProfileMissing && canCreateRequests" class="create-layout">
     <section class="panel form-panel">
       <div class="panel-header">
         <h3 class="panel-title">Request Form</h3>

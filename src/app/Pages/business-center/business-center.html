@@ -10,6 +10,8 @@
 
     <div class="hero-actions">
       <span class="chip">{{ accessBadgeLabel() }}</span>
+      <span class="chip">{{ roleBadgeLabel() }}</span>
+      <span class="chip" *ngIf="trialBadgeLabel()">{{ trialBadgeLabel() }}</span>
       <a routerLink="/pricing" class="chip">Compare Plans</a>
     </div>
   </div>
@@ -18,7 +20,21 @@
     Checking your Business profile and paid access...
   </div>
 
-  <div *ngIf="!loadingAccess && !hasBusinessAccess" class="panel">
+  <div *ngIf="!loadingAccess && missingBusinessProfile" class="panel">
+    <div class="panel-header">
+      <h3 class="panel-title">No Business Profile Found</h3>
+      <span class="chip">Setup Required</span>
+    </div>
+    <p class="text-slate-300">
+      We could not find a Business profile for your account. Create Business Profile first to continue.
+    </p>
+    <div class="mt-4 flex flex-wrap gap-3">
+      <a routerLink="/payment" class="btn-primary px-5 py-2 rounded-full">Create Business Profile</a>
+      <a routerLink="/dashboard" class="chip">Back to Dashboard</a>
+    </div>
+  </div>
+
+  <div *ngIf="!loadingAccess && !missingBusinessProfile && !hasBusinessAccess" class="panel">
     <div class="panel-header">
       <h3 class="panel-title">Business Paid Access Required</h3>
       <span class="chip">Upgrade</span>
@@ -27,7 +43,7 @@
       {{ accessReason || 'Your account is not on active paid Business yet.' }}
     </p>
     <div class="mt-4 flex flex-wrap gap-3">
-      <button class="btn-primary px-5 py-2 rounded-full" [disabled]="upgradeSubmitting" (click)="submitUpgradeRequest()">
+      <button *ngIf="canUpgrade" class="btn-primary px-5 py-2 rounded-full" [disabled]="upgradeSubmitting" (click)="submitUpgradeRequest()">
         {{ upgradeSubmitting ? 'Submitting...' : 'Request Business Upgrade' }}
       </button>
       <a routerLink="/payment" class="chip">Open Billing</a>
@@ -38,6 +54,10 @@
   <ng-container *ngIf="!loadingAccess && hasBusinessAccess">
     <div *ngIf="feedback as info" class="panel feedback-card" [ngClass]="info.type">
       {{ info.message }}
+    </div>
+
+    <div *ngIf="isReadOnly" class="panel">
+      Viewer mode is active for this business profile. You can read data, but mutating actions are disabled.
     </div>
 
     <div *ngIf="loadingData" class="panel">
@@ -64,6 +84,7 @@
         <div class="panel-header">
           <h3 class="panel-title">2) Team Members</h3>
           <span class="chip">{{ teamMembers.length }} members</span>
+          <span class="chip">{{ canManageMembers ? 'Can Manage' : 'Read Only' }}</span>
         </div>
         <div class="table-shell">
           <table>
@@ -129,31 +150,38 @@
           </table>
         </div>
 
-        <div class="form-grid mt-5">
-          <label>
-            Request
-            <select class="input" [(ngModel)]="inviteForm.requestId">
-              <option value="">Select request</option>
-              <option *ngFor="let req of requests; trackBy: trackById" [value]="req.id">
-                {{ req.id }} - {{ req.recipient }}
-              </option>
-            </select>
-          </label>
-          <label>
-            Invite Email
-            <input class="input" placeholder="user@example.com" [(ngModel)]="inviteForm.email" />
-          </label>
-          <label>
-            Invite Phone
-            <input class="input" placeholder="+2010..." [(ngModel)]="inviteForm.phone" />
-          </label>
-        </div>
+        <ng-container *ngIf="canInvite; else inviteReadonlyState">
+          <div class="form-grid mt-5">
+            <label>
+              Request
+              <select class="input" [(ngModel)]="inviteForm.requestId">
+                <option value="">Select request</option>
+                <option *ngFor="let req of requests; trackBy: trackById" [value]="req.id">
+                  {{ req.id }} - {{ req.recipient }}
+                </option>
+              </select>
+            </label>
+            <label>
+              Invite Email
+              <input class="input" placeholder="user@example.com" [(ngModel)]="inviteForm.email" />
+            </label>
+            <label>
+              Invite Phone
+              <input class="input" placeholder="+2010..." [(ngModel)]="inviteForm.phone" />
+            </label>
+          </div>
 
-        <div class="mt-4 flex items-center gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" [disabled]="inviteSubmitting" (click)="submitInvite()">
-            {{ inviteSubmitting ? 'Sending...' : 'Send Invite' }}
-          </button>
-        </div>
+          <div class="mt-4 flex items-center gap-3">
+            <button class="btn-primary px-4 py-2 rounded-full" [disabled]="inviteSubmitting" (click)="submitInvite()">
+              {{ inviteSubmitting ? 'Sending...' : 'Send Invite' }}
+            </button>
+          </div>
+        </ng-container>
+        <ng-template #inviteReadonlyState>
+          <div class="mt-4 text-slate-300">
+            Invite action is available for owner role only.
+          </div>
+        </ng-template>
 
         <div class="table-shell mt-5">
           <table>
@@ -205,10 +233,13 @@
         </div>
 
         <div class="mt-4 flex items-center gap-3">
-          <button class="btn-primary px-4 py-2 rounded-full" [disabled]="exportSubmitting" (click)="submitExportRequest()">
+          <button *ngIf="canUseSystem && !isReadOnly; else exportReadonlyState" class="btn-primary px-4 py-2 rounded-full" [disabled]="exportSubmitting" (click)="submitExportRequest()">
             {{ exportSubmitting ? 'Submitting...' : 'Create Export Job' }}
           </button>
         </div>
+        <ng-template #exportReadonlyState>
+          <div class="text-slate-300">Your role is read-only for export creation.</div>
+        </ng-template>
 
         <div class="table-shell mt-5">
           <table>
@@ -270,4 +301,3 @@
     </div>
   </ng-container>
 </div>
-

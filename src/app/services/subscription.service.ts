@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
-import { Observable, of } from 'rxjs';
+import { Observable, of, Subject } from 'rxjs';
 import { catchError, finalize, map, shareReplay, switchMap, tap } from 'rxjs/operators';
 
 export type Plan = {
@@ -58,6 +58,7 @@ export class SubscriptionService {
   private businessUpgradeRequestsEndpointForbidden = false;
   private snapshotCacheByUser = new Map<string, { snapshot: BusinessAccessSnapshot; cachedAt: number }>();
   private snapshotInFlightByUser = new Map<string, Observable<BusinessAccessSnapshot>>();
+  private snapshotRefreshSubject = new Subject<void>();
   private readonly subscriptionFields = [
     'id',
     'status',
@@ -77,6 +78,16 @@ export class SubscriptionService {
   ].join(',');
 
   constructor(private http: HttpClient) {}
+
+  snapshotRefreshEvents(): Observable<void> {
+    return this.snapshotRefreshSubject.asObservable();
+  }
+
+  notifyAuthStateChanged(): void {
+    this.snapshotCacheByUser.clear();
+    this.snapshotInFlightByUser.clear();
+    this.emitSnapshotRefresh();
+  }
 
   getPlans(): Observable<Plan[]> {
     if (this.plansEndpointForbidden) {
@@ -175,8 +186,8 @@ export class SubscriptionService {
   }
 
   hasActiveBusinessSubscription(): Observable<boolean> {
-    return this.getActiveSubscription().pipe(
-      map((subscription) => this.hasActiveBusinessStatus(subscription)),
+    return this.getBusinessAccessSnapshot({ forceRefresh: true }).pipe(
+      map((snapshot) => snapshot.hasBusinessAccess),
       catchError(() => of(false))
     );
   }
@@ -427,7 +438,9 @@ export class SubscriptionService {
     userId: string,
     subscription: UserSubscription | null
   ): BusinessAccessSnapshot {
-    const hasBusinessAccess = this.hasActiveBusinessStatus(subscription);
+    const hasSubscriptionBusinessAccess = this.hasActiveBusinessStatus(subscription);
+    const hasBusinessRoleAccess = !hasSubscriptionBusinessAccess && this.hasBusinessRoleAccess();
+    const hasBusinessAccess = hasSubscriptionBusinessAccess || hasBusinessRoleAccess;
     const planCode = hasBusinessAccess
       ? (subscription?.plan?.code ?? this.businessPlanCode).toLowerCase()
       : 'free';
@@ -507,6 +520,7 @@ export class SubscriptionService {
     };
 
     this.writeLocalTrialState(userId, created);
+    this.invalidateSnapshotState(userId);
     return created;
   }
 
@@ -597,6 +611,7 @@ export class SubscriptionService {
   private invalidateSnapshotState(userId: string): void {
     this.snapshotCacheByUser.delete(userId);
     this.snapshotInFlightByUser.delete(userId);
+    this.emitSnapshotRefresh();
   }
 
   private readBusinessOnboardingMarker(userId: string): boolean {
@@ -829,6 +844,55 @@ export class SubscriptionService {
     return null;
   }
 
+  private hasBusinessRoleAccess(): boolean {
+    const payload = this.getSessionPayload();
+    if (!payload) {
+      return false;
+    }
+
+    if (payload['admin_access'] === true) {
+      return true;
+    }
+
+    const planCode = this.readLowerString(payload['plan_code']);
+    if (planCode === this.businessPlanCode) {
+      return true;
+    }
+
+    const configuredBusinessRoleId = (environment.BUSINESS_ROLE_ID ?? '').trim();
+    const roleId = this.readString(payload['role']) || this.readStoredRoleId();
+    if (configuredBusinessRoleId && roleId && roleId === configuredBusinessRoleId) {
+      return true;
+    }
+
+    const storedRoleName = this.readStoredRoleName();
+    if (storedRoleName.includes('business')) {
+      return true;
+    }
+
+    const roleCandidates = [
+      payload['role_name'],
+      payload['role_label'],
+      payload['account_type'],
+      payload['plan'],
+      payload['role'],
+      storedRoleName
+    ];
+
+    return roleCandidates.some((candidate) => {
+      const value = this.readLowerString(candidate);
+      return value.includes('business');
+    });
+  }
+
+  private getSessionPayload(): Record<string, unknown> | null {
+    const token = this.getStoredSessionToken();
+    if (!token) {
+      return null;
+    }
+    return this.decodeJwtPayload(token);
+  }
+
   private decodeJwtPayload(token: string): Record<string, unknown> | null {
     const parts = token.split('.');
     if (parts.length !== 3) {
@@ -856,4 +920,35 @@ export class SubscriptionService {
     return err?.status === 401 || err?.status === 403;
   }
 
+  private readString(value: unknown): string {
+    if (typeof value === 'string') {
+      return value.trim();
+    }
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return String(value);
+    }
+    return '';
+  }
+
+  private readLowerString(value: unknown): string {
+    return this.readString(value).toLowerCase();
+  }
+
+  private readStoredRoleId(): string {
+    if (typeof localStorage === 'undefined') {
+      return '';
+    }
+    return this.readString(localStorage.getItem('user_role_id'));
+  }
+
+  private readStoredRoleName(): string {
+    if (typeof localStorage === 'undefined') {
+      return '';
+    }
+    return this.readLowerString(localStorage.getItem('user_role_name'));
+  }
+
+  private emitSnapshotRefresh(): void {
+    this.snapshotRefreshSubject.next();
+  }
 }
