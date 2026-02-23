@@ -10,89 +10,49 @@
     </div>
 
     <div class="hero-actions">
-      <span class="chip">Plan: {{ loadingPlanAccess ? 'Checking...' : currentPlanName }}</span>
-      <a
-        *ngIf="!loadingPlanAccess && isBusinessTrial"
-        routerLink="/pricing"
-        class="chip">
-        {{ trialDaysLabel() }}
-      </a>
-
-      <a
-        *ngIf="!loadingPlanAccess && !canCreateRequests"
-        routerLink="/payment"
-        class="chip">
-        Billing
-      </a>
-
       <button
-        *ngIf="!loadingPlanAccess && canCreateRequests"
+        *ngIf="canCreateRequests"
         type="button"
         class="btn-primary px-5 py-2 rounded-full"
-        (click)="openCreateModal()">
+        (click)="showCreateModal = true">
         + Create Scan Request
       </button>
-      <a *ngIf="!loadingPlanAccess && canCreateRequests" routerLink="/business-center" class="chip">Business Center</a>
-    </div>
 
-    <div class="hero-visual">
-      <span class="hero-orb"></span>
-      <span class="hero-orb gold"></span>
-      <span class="hero-orb indigo"></span>
-      <span class="sparkle" style="top: 18px; left: 36px;"></span>
-      <span class="sparkle gold" style="bottom: 18px; right: 34px;"></span>
-      <svg viewBox="0 0 220 160" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="18" y="18" width="184" height="124" rx="16" stroke="rgba(125,211,252,0.6)" stroke-width="2"/>
-        <path class="pulse-line" d="M40 52h80" stroke="#7dd3fc" stroke-width="3" stroke-linecap="round"/>
-        <path d="M40 78h120" stroke="rgba(226,232,240,0.6)" stroke-width="3" stroke-linecap="round"/>
-        <path d="M40 104h90" stroke="rgba(226,232,240,0.4)" stroke-width="3" stroke-linecap="round"/>
-        <circle class="pulse-dot" cx="160" cy="52" r="10" fill="#f5c451"/>
-        <path d="M156 52l3 3 6-7" stroke="#0b1020" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+      <a
+        *ngIf="canCreateRequests"
+        routerLink="/business-center"
+        class="chip">
+        Business Center
+      </a>
     </div>
   </div>
 
+
+  <!-- KPI GRID -->
   <div class="kpi-grid">
     <div class="kpi-card">
-      <div class="kpi-icon">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M4 4h16v16H4z"></path>
-        </svg>
-      </div>
       <p class="text-sm text-slate-400">Total Requests</p>
       <p class="kpi-value">{{ requestStats.total }}</p>
     </div>
+
     <div class="kpi-card">
-      <div class="kpi-icon">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 6v6l4 2"></path>
-          <circle cx="12" cy="12" r="9"></circle>
-        </svg>
-      </div>
       <p class="text-sm text-slate-400">Pending</p>
       <p class="kpi-value text-amber-300">{{ requestStats.pending }}</p>
     </div>
+
     <div class="kpi-card">
-      <div class="kpi-icon">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M5 12l4 4 10-10"></path>
-        </svg>
-      </div>
       <p class="text-sm text-slate-400">Approved</p>
       <p class="kpi-value text-emerald-300">{{ requestStats.approved }}</p>
     </div>
+
     <div class="kpi-card">
-      <div class="kpi-icon">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M6 6l12 12"></path>
-          <path d="M6 18L18 6"></path>
-        </svg>
-      </div>
       <p class="text-sm text-slate-400">Denied</p>
       <p class="kpi-value text-red-300">{{ requestStats.denied }}</p>
     </div>
   </div>
 
+
+  <!-- REQUEST TABLE -->
   <div class="panel">
     <div class="panel-header">
       <h3 class="panel-title">Latest Requests</h3>
@@ -110,94 +70,84 @@
             <th class="th">Actions</th>
           </tr>
         </thead>
+
         <tbody>
+
           <tr class="row" *ngFor="let req of requests">
-            <td>{{ req.target }}</td>
+
+            <!-- TARGET -->
             <td>
-              <span class="badge" [ngClass]="badgeClass(req.required_state)">
+              {{ req.target }}
+            </td>
+
+            <!-- REQUIRED STATE -->
+            <td>
+              <span
+                class="badge"
+                [ngClass]="badgeClass(req.required_state)">
                 {{ req.required_state }}
               </span>
             </td>
+
+            <!-- STATUS (USING response_status DIRECTLY) -->
             <td>
               <span
                 class="badge"
                 [ngClass]="{
-                  'badge-stable': req.status === 'Approved',
-                  'badge-low': req.status === 'Pending',
-                  'badge-risk': req.status === 'Denied'
+                  'badge-stable': (req.response_status || '').toLowerCase() === 'approved',
+                  'badge-low': (req.response_status || '').toLowerCase() === 'pending',
+                  'badge-risk': (req.response_status || '').toLowerCase() === 'denied',
+                  'badge-fatigue': (req.response_status || '').toLowerCase() === 'delayed'
                 }">
-                {{ req.status }}
+                {{ req.response_status }}
               </span>
             </td>
+
+            <!-- DATE -->
             <td class="text-slate-400">
               {{ req.timestamp }}
             </td>
+
+            <!-- ACTIONS -->
             <td>
-              <span class="text-slate-400" *ngIf="req.status !== 'Pending'">
-                Response received
-              </span>
-              <span *ngIf="req.status === 'Pending'" class="text-slate-400">
-                Waiting for user response
-              </span>
-              <a
-                *ngIf="req.status === 'Pending'"
-                routerLink="/download-app"
-                class="ml-3 inline-flex items-center gap-2 text-amber-300 hover:text-amber-200 transition">
-                Download app
-                <span aria-hidden="true">&rarr;</span>
-              </a>
+              <ng-container *ngIf="(req.response_status || '').toLowerCase() === 'pending'; else respondedBlock">
+                <span class="text-slate-400">
+                  Waiting for user response
+                </span>
+
+                <a
+                  routerLink="/download-app"
+                  class="ml-3 inline-flex items-center gap-2 text-amber-300 hover:text-amber-200 transition">
+                  Download app →
+                </a>
+              </ng-container>
+
+              <ng-template #respondedBlock>
+                <span class="text-slate-400">
+                  Response received
+                </span>
+              </ng-template>
+            </td>
+
+          </tr>
+
+          <tr *ngIf="!requests || requests.length === 0">
+            <td colspan="5" class="text-center py-6 text-slate-400">
+              No requests found.
             </td>
           </tr>
+
         </tbody>
       </table>
     </div>
   </div>
 
+
+  <!-- CREATE MODAL -->
   <app-create-request-modal
     *ngIf="showCreateModal"
-    [feedback]="submitFeedback"
-    [submitting]="submittingRequest"
-    [businessTrialNotice]="businessTrialNotice"
-    [businessInviteTrialNotice]="businessInviteTrialNotice"
     [requiredStateOptions]="requiredStateOptions"
-    (submitRequest)="handleCreateRequest($event)"
     (close)="showCreateModal = false">
   </app-create-request-modal>
-
-  <div
-    *ngIf="submitFeedback?.type === 'success'"
-    class="fixed right-6 top-6 z-[1350] rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-lg">
-    {{ submitFeedback?.message }}
-  </div>
-
-  <div
-    *ngIf="showPermissionNotice"
-    class="fixed inset-0 z-[1250] flex items-center justify-center bg-slate-950/40 px-6">
-    <div class="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
-      <div class="flex items-start justify-between">
-        <div>
-          <p class="text-xs uppercase tracking-wide text-slate-400">Permission Required</p>
-          <h2 class="mt-2 text-xl font-semibold text-slate-100">Business Paid Feature</h2>
-        </div>
-        <button
-          class="text-slate-400 hover:text-slate-200"
-          (click)="dismissPermissionNotice()">
-          x
-        </button>
-      </div>
-      <p class="mt-3 text-sm text-slate-400">
-        Creating requests is part of Business paid features.
-        If your account is new, your first 14 days are unlocked for free, then paid features are locked.
-      </p>
-      <div class="mt-6 flex justify-end gap-3">
-        <a routerLink="/payment" class="bg-[#f5c451] text-slate-900 px-4 py-2 rounded-full">Open Billing</a>
-        <button
-          class="px-4 py-2 rounded-full border border-slate-700 text-slate-300"
-          (click)="dismissPermissionNotice()">
-          Got it
-        </button>
-      </div>
-    </div>
-  </div>
 
 </div>
