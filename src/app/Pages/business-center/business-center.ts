@@ -3,12 +3,15 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { forkJoin, Observable, of } from 'rxjs';
-import { catchError, finalize, timeout } from 'rxjs/operators';
+import { catchError, finalize, switchMap, timeout } from 'rxjs/operators';
 import {
+  ActivityQueryOptions,
   ActivityEventRecord,
   BusinessCenterService,
   BusinessHubAccessState,
   BusinessProfileMember,
+  CreateReportExportInput,
+  CreateScanRequestResult,
   ManageTeamMemberRole,
   ReportExportRecord,
   RequestInviteRecord,
@@ -25,6 +28,22 @@ type InviteMetrics = {
   sent: number;
   claimed: number;
   expired: number;
+};
+
+type RequiredState = 'Stable' | 'Low Focus' | 'Elevated Fatigue' | 'High Risk';
+const REQUIRED_STATE_OPTIONS: readonly RequiredState[] = [
+  'Stable',
+  'Low Focus',
+  'Elevated Fatigue',
+  'High Risk'
+];
+
+type ExportScope = 'team' | 'selected';
+
+type ExportSelection = {
+  scope: ExportScope;
+  userIds: string[];
+  labels: string[];
 };
 
 @Component({
@@ -52,6 +71,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   trialDaysRemaining: number | null = null;
   private readonly accessStateTimeoutMs = 15000;
+  private readonly actionTimeoutMs = 15000;
 
   feedback: Feedback | null = null;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,7 +85,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   requests: any[] = [];
   requestInvites: any[] = [];
   reportExports: any[] = [];
-  activityEvents: any[] = [];
+  activityEvents: ActivityEventRecord[] = [];
+  filteredActivityEvents: ActivityEventRecord[] = [];
 
   inviteMetrics: InviteMetrics = {
     pending: 0,
@@ -76,9 +97,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   upgradeSubmitting = false;
   exportSubmitting = false;
-  inviteSubmitting = false;
+  requestSubmitting = false;
   memberSubmitting = false;
   showTeamMemberManager = false;
+  readonly dailyRequestLimit = 5;
+  readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
+  todayRequestCount = 0;
 
   readonly memberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [
     { value: 'member', label: 'Member' },
@@ -96,13 +120,17 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   exportForm = {
     format: 'csv' as 'csv' | 'pdf',
-    filters: ''
+    scope: 'team' as ExportScope,
+    filters: '',
+    selectedMemberIds: [] as string[]
   };
 
-  inviteForm = {
-    requestId: '',
-    email: '',
-    phone: ''
+  requestForm: {
+    recipientEmails: string[];
+    requiredState: RequiredState | '';
+  } = {
+    recipientEmails: [''],
+    requiredState: ''
   };
 
   constructor(private businessCenter: BusinessCenterService) {}
@@ -171,6 +199,14 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     return 'Pending';
   }
 
+  canCreateRequestsFromCenter(): boolean {
+    return this.hasBusinessAccess && this.canUseSystem && !this.isReadOnly;
+  }
+
+  dailyRequestsRemaining(): number {
+    return Math.max(0, this.dailyRequestLimit - this.todayRequestCount);
+  }
+
   inviteStatusLabel(invite: any): 'Pending' | 'Sent' | 'Claimed' | 'Expired' {
     if (invite?.claimed_at) return 'Claimed';
 
@@ -186,6 +222,55 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   trackById(index: number, row: any): string {
     return row?.id ?? String(index);
+  }
+
+  exportMemberLabel(member: any): string {
+    return member?.user_label || member?.user_id || '-';
+  }
+
+  selectedExportMembersCount(): number {
+    return this.resolveExportSelection(false).userIds.length;
+  }
+
+  isExportMemberSelected(member: any): boolean {
+    const memberId = this.pickId(member?.user_id);
+    if (!memberId) {
+      return false;
+    }
+    return this.exportForm.selectedMemberIds.includes(memberId);
+  }
+
+  setExportMemberSelection(member: any, checked: boolean): void {
+    const memberId = this.pickId(member?.user_id);
+    if (!memberId) {
+      return;
+    }
+
+    const set = new Set(this.exportForm.selectedMemberIds);
+    if (checked) {
+      set.add(memberId);
+    } else {
+      set.delete(memberId);
+    }
+    this.exportForm.selectedMemberIds = Array.from(set);
+    this.refreshFilteredActivityEvents();
+  }
+
+  selectAllExportMembers(): void {
+    this.exportForm.selectedMemberIds = this.allTeamUserIds();
+    this.refreshFilteredActivityEvents();
+  }
+
+  clearExportMemberSelection(): void {
+    this.exportForm.selectedMemberIds = [];
+    this.refreshFilteredActivityEvents();
+  }
+
+  onExportScopeChanged(): void {
+    if (this.exportForm.scope === 'selected' && !this.exportForm.selectedMemberIds.length) {
+      this.exportForm.selectedMemberIds = this.allTeamUserIds();
+    }
+    this.refreshFilteredActivityEvents();
   }
 
   // ===============================
@@ -215,13 +300,24 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return;
     }
 
+    const selection = this.resolveExportSelection(true);
+    if (this.exportForm.scope === 'selected' && !selection.userIds.length) {
+      this.showFeedback('error', 'Select at least one team member before creating a separate report.');
+      return;
+    }
+
+    const payload: CreateReportExportInput = {
+      format: this.exportForm.format,
+      filters: this.buildExportFilters(selection),
+      scope: selection.scope,
+      memberUserIds: selection.userIds,
+      memberLabels: selection.labels
+    };
+
     this.exportSubmitting = true;
     this.showFeedback('info', 'Submitting export request...');
 
-    this.businessCenter.createReportExport(
-      { format: this.exportForm.format, filters: this.exportForm.filters },
-      this.accessState?.orgId ?? null
-    ).pipe(
+    this.businessCenter.createReportExport(payload, this.accessState?.orgId ?? null).pipe(
       finalize(() => (this.exportSubmitting = false))
     ).subscribe((res: any) => {
       this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Export request finished.');
@@ -229,40 +325,223 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     });
   }
 
-  submitInvite(): void {
-    if (!this.hasBusinessAccess || !this.canInvite) {
-      this.showFeedback('error', 'Only owner can send invites.');
+  downloadActivityCsvNow(): void {
+    const selection = this.resolveExportSelection(true);
+    if (this.exportForm.scope === 'selected' && !selection.userIds.length) {
+      this.showFeedback('error', 'Select at least one team member before exporting.');
       return;
     }
 
-    const requestId = this.inviteForm.requestId.trim();
-    const email = this.inviteForm.email.trim();
-    const phone = this.inviteForm.phone.trim();
-
-    if (!requestId) {
-      this.showFeedback('error', 'Request ID is required.');
-      return;
-    }
-    if (!email && !phone) {
-      this.showFeedback('error', 'Email or phone is required.');
+    const rows = this.eventsForSelection(selection);
+    if (!rows.length) {
+      this.showFeedback('error', 'No activity events found for the selected scope.');
       return;
     }
 
-    this.inviteSubmitting = true;
-    this.showFeedback('info', 'Sending invite...');
+    const header = ['Actor', 'Action', 'Entity', 'Target', 'Date'];
+    const lines = rows.map((event) => [
+      event.actor_label ?? '-',
+      event.action ?? '-',
+      `${event.entity_type ?? '-'} #${event.entity_id ?? '-'}`,
+      event.target_user_label ?? '-',
+      this.formatDate(event.date_created)
+    ]);
 
-    this.businessCenter.createRequestInvite(
-      { requestId, email, phone },
-      this.accessState?.orgId ?? null
-    ).pipe(
-      finalize(() => (this.inviteSubmitting = false))
-    ).subscribe((res: any) => {
-      this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Invite finished.');
-      if (res?.ok) {
-        this.inviteForm.email = '';
-        this.inviteForm.phone = '';
-        this.reloadInvites();
+    const csv = [
+      header.map((cell) => this.escapeCsvCell(cell)).join(','),
+      ...lines.map((row) => row.map((cell) => this.escapeCsvCell(cell)).join(','))
+    ].join('\r\n');
+
+    this.downloadTextFile(
+      csv,
+      `activity-report-${this.todayDateKey()}-${this.exportForm.scope}.csv`,
+      'text/csv;charset=utf-8;'
+    );
+    this.showFeedback('success', `CSV exported (${rows.length} events).`);
+  }
+
+  downloadActivityPdfNow(): void {
+    const selection = this.resolveExportSelection(true);
+    if (this.exportForm.scope === 'selected' && !selection.userIds.length) {
+      this.showFeedback('error', 'Select at least one team member before exporting.');
+      return;
+    }
+
+    const rows = this.eventsForSelection(selection);
+    if (!rows.length) {
+      this.showFeedback('error', 'No activity events found for the selected scope.');
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      this.showFeedback('error', 'PDF export is only available in browser sessions.');
+      return;
+    }
+
+    const popup = window.open('', '_blank', 'noopener,noreferrer,width=1080,height=820');
+    if (!popup) {
+      this.showFeedback('error', 'Popup blocked. Allow popups to export PDF.');
+      return;
+    }
+
+    const scopeLabel = selection.scope === 'selected' ? 'Selected Members' : 'Entire Team';
+    const generatedAt = this.formatDate(new Date().toISOString());
+    const tableRows = rows.map((event) => `
+      <tr>
+        <td>${this.escapeHtml(event.actor_label ?? '-')}</td>
+        <td>${this.escapeHtml(event.action ?? '-')}</td>
+        <td>${this.escapeHtml(`${event.entity_type ?? '-'} #${event.entity_id ?? '-'}`)}</td>
+        <td>${this.escapeHtml(event.target_user_label ?? '-')}</td>
+        <td>${this.escapeHtml(this.formatDate(event.date_created))}</td>
+      </tr>
+    `).join('');
+
+    popup.document.open();
+    popup.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Activity Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }
+            h1 { margin: 0 0 8px; font-size: 20px; }
+            p { margin: 0 0 12px; color: #475569; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
+            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
+            th { background: #e2e8f0; font-weight: 700; }
+          </style>
+        </head>
+        <body>
+          <h1>Business Activity Report</h1>
+          <p>Scope: ${this.escapeHtml(scopeLabel)}</p>
+          <p>Generated at: ${this.escapeHtml(generatedAt)}</p>
+          <p>Events: ${rows.length}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Actor</th>
+                <th>Action</th>
+                <th>Entity</th>
+                <th>Target</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    popup.document.close();
+    popup.focus();
+    setTimeout(() => popup.print(), 250);
+  }
+
+  addRecipientEmailField(): void {
+    const rows = this.requestForm.recipientEmails;
+    if (!rows.length || rows[rows.length - 1].trim()) {
+      this.requestForm.recipientEmails = [...rows, ''];
+      return;
+    }
+    this.showFeedback('info', 'Enter the current email first, then add another one.');
+  }
+
+  removeRecipientEmailField(index: number): void {
+    if (this.requestForm.recipientEmails.length <= 1) {
+      this.requestForm.recipientEmails = [''];
+      return;
+    }
+
+    this.requestForm.recipientEmails = this.requestForm.recipientEmails.filter((_, i) => i !== index);
+  }
+
+  submitRequests(): void {
+    if (!this.canCreateRequestsFromCenter()) {
+      this.showFeedback('error', 'Your role cannot create requests.');
+      return;
+    }
+
+    const requiredState = this.normalizeRequiredState(this.requestForm.requiredState);
+    if (!requiredState) {
+      this.showFeedback('error', 'Select a required state.');
+      return;
+    }
+
+    const normalizedEmails = this.requestForm.recipientEmails
+      .map((email) => this.normalizeEmail(email))
+      .filter((email) => Boolean(email));
+
+    if (!normalizedEmails.length) {
+      this.showFeedback('error', 'Enter at least one recipient email.');
+      return;
+    }
+
+    const invalidEmail = normalizedEmails.find((email) => !this.isValidEmail(email));
+    if (invalidEmail) {
+      this.showFeedback('error', `Invalid email: ${invalidEmail}`);
+      return;
+    }
+
+    const uniqueEmails = Array.from(new Set(normalizedEmails));
+    const currentUserEmail = this.currentUserEmail();
+    if (currentUserEmail && uniqueEmails.some((email) => email === currentUserEmail)) {
+      this.showFeedback('error', 'You cannot send a request to yourself.');
+      return;
+    }
+
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      this.showFeedback('error', `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`);
+      return;
+    }
+    if (uniqueEmails.length > remaining) {
+      this.showFeedback(
+        'error',
+        `You can send ${remaining} more request(s) today. Reduce recipients and try again.`
+      );
+      return;
+    }
+
+    this.requestSubmitting = true;
+    this.showFeedback('info', 'Sending requests...');
+
+    const requestCalls = uniqueEmails.map((email) =>
+      this.businessCenter.createScanRequest({
+        requested_for_email: email,
+        required_state: requiredState
+      })
+    );
+
+    forkJoin(requestCalls).pipe(
+      finalize(() => (this.requestSubmitting = false))
+    ).subscribe((results: CreateScanRequestResult[]) => {
+      const succeeded = results.filter((item) => item?.ok);
+      const failed = results.filter((item) => !item?.ok);
+
+      if (!succeeded.length) {
+        this.showFeedback(
+          'error',
+          failed[0]?.message || 'Failed to send requests.'
+        );
+        return;
       }
+
+      this.incrementDailyRequestCount(succeeded.length);
+      this.requestForm = {
+        recipientEmails: [''],
+        requiredState: ''
+      };
+
+      if (!failed.length) {
+        this.showFeedback('success', `Sent ${succeeded.length} request(s) successfully.`);
+      } else {
+        this.showFeedback(
+          'info',
+          `Sent ${succeeded.length} request(s). ${failed.length} failed.`
+        );
+      }
+
+      this.reloadRequestsAndInvites();
     });
   }
 
@@ -302,6 +581,13 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.showFeedback('info', 'Saving team member...');
 
     this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
+      timeout(this.actionTimeoutMs),
+      catchError((err) =>
+        of({
+          ok: false,
+          message: this.describeHttpError(err, 'Saving team member timed out. Please try again.')
+        })
+      ),
       finalize(() => (this.memberSubmitting = false))
     ).subscribe((res: any) => {
       this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Member update finished.');
@@ -349,6 +635,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       })
     ).subscribe((state) => {
       this.accessState = state;
+      this.hydrateDailyRequestCount();
 
       // profile any عشان template
       this.profile = (state as any)?.profile ?? null;
@@ -390,56 +677,72 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return;
     }
 
+    const profileId = this.pickId((this.profile as any)?.id);
+    if (!profileId) {
+      this.clearBusinessData();
+      this.showFeedback('error', 'Business profile is missing.');
+      return;
+    }
+
     this.loadingData = true;
     this.clearBusinessData();
+    const orgId = (state as any)?.orgId ?? null;
 
-    const team$ = this.businessCenter.listTeamMembers((this.profile as any)?.id).pipe(
-      catchError((err) => this.sectionFallback(err, 'team members'))
-    );
+    this.businessCenter.listTeamMembers(profileId).pipe(
+      catchError((err) => this.sectionFallback<BusinessProfileMember[]>(err, 'team members', [])),
+      switchMap((teamRows) => {
+        const team = (teamRows as any[]) ?? [];
+        const activityOptions = this.activityQueryOptions(team, state);
 
-    const requests$ = this.businessCenter.listRequests((state as any)?.orgId ?? null).pipe(
-      catchError((err) => this.sectionFallback(err, 'requests'))
-    );
-
-    const invites$ = this.businessCenter.listRequestInvites((state as any)?.orgId ?? null).pipe(
-      catchError((err) => this.sectionFallback(err, 'request invites'))
-    );
-
-    const exports$ = this.businessCenter.listReportExports((state as any)?.orgId ?? null).pipe(
-      catchError((err) => this.sectionFallback(err, 'export jobs'))
-    );
-
-    const activity$ = this.businessCenter.listActivityEvents((state as any)?.orgId ?? null).pipe(
-      catchError((err) => this.sectionFallback(err, 'activity log'))
-    );
-
-    forkJoin({
-      team: team$ as Observable<BusinessProfileMember[]>,
-      requests: requests$ as Observable<RequestRecord[]>,
-      invites: invites$ as Observable<RequestInviteRecord[]>,
-      exports: exports$ as Observable<ReportExportRecord[]>,
-      events: activity$ as Observable<ActivityEventRecord[]>
-    }).pipe(
+        return forkJoin({
+          team: of(team) as Observable<BusinessProfileMember[]>,
+          requests: this.businessCenter.listRequests(orgId).pipe(
+            catchError((err) => this.sectionFallback<RequestRecord[]>(err, 'requests', []))
+          ),
+          invites: this.businessCenter.listRequestInvites(orgId).pipe(
+            catchError((err) => this.sectionFallback<RequestInviteRecord[]>(err, 'request invites', []))
+          ),
+          exports: this.businessCenter.listReportExports(orgId, 40, activityOptions.teamUserIds).pipe(
+            catchError((err) => this.sectionFallback<ReportExportRecord[]>(err, 'export jobs', []))
+          ),
+          events: this.businessCenter.listActivityEvents(orgId, 80, activityOptions).pipe(
+            catchError((err) => this.sectionFallback<ActivityEventRecord[]>(err, 'activity log', []))
+          )
+        });
+      }),
       finalize(() => (this.loadingData = false))
     ).subscribe(({ team, requests, invites, exports, events }) => {
       this.teamMembers = (team as any[]) ?? [];
       this.requests = (requests as any[]) ?? [];
       this.requestInvites = (invites as any[]) ?? [];
       this.reportExports = (exports as any[]) ?? [];
-      this.activityEvents = (events as any[]) ?? [];
+      this.activityEvents = (events as ActivityEventRecord[]) ?? [];
       this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
+      this.syncExportSelectionWithTeam();
+      this.refreshFilteredActivityEvents();
     });
   }
 
-  private reloadInvites(): void {
-    this.businessCenter.listRequestInvites(this.accessState?.orgId ?? null).subscribe({
-      next: (rows: any) => {
-        this.requestInvites = rows ?? [];
-        this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
-      },
-      error: (err: any) => {
-        this.showFeedback('error', this.describeHttpError(err, 'Failed to reload invites.'));
-      }
+  private reloadRequestsAndInvites(): void {
+    const orgId = this.accessState?.orgId ?? null;
+
+    forkJoin({
+      requests: this.businessCenter.listRequests(orgId).pipe(
+        catchError((err) => {
+          this.showFeedback('error', this.describeHttpError(err, 'Failed to reload requests.'));
+          return of([]);
+        })
+      ),
+      invites: this.businessCenter.listRequestInvites(orgId).pipe(
+        catchError((err) => {
+          this.showFeedback('error', this.describeHttpError(err, 'Failed to reload invites.'));
+          return of([]);
+        })
+      )
+    }).subscribe(({ requests, invites }) => {
+      this.requests = (requests as any[]) ?? [];
+      this.requestInvites = (invites as any[]) ?? [];
+      this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
     });
   }
 
@@ -451,7 +754,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }
 
     this.businessCenter.listTeamMembers(profileId).subscribe({
-      next: (rows: any) => (this.teamMembers = rows ?? []),
+      next: (rows: any) => {
+        this.teamMembers = rows ?? [];
+        this.syncExportSelectionWithTeam();
+        this.reloadExports();
+        this.reloadActivityEvents();
+      },
       error: (err: any) => {
         this.showFeedback('error', this.describeHttpError(err, 'Failed to reload team members.'));
       }
@@ -459,10 +767,27 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   private reloadExports(): void {
-    this.businessCenter.listReportExports(this.accessState?.orgId ?? null).subscribe({
+    this.businessCenter.listReportExports(
+      this.accessState?.orgId ?? null,
+      40,
+      this.allTeamUserIds()
+    ).subscribe({
       next: (rows: any) => (this.reportExports = rows ?? []),
       error: (err: any) => {
         this.showFeedback('error', this.describeHttpError(err, 'Failed to reload export jobs.'));
+      }
+    });
+  }
+
+  private reloadActivityEvents(): void {
+    const options = this.activityQueryOptions(this.teamMembers, this.accessState);
+    this.businessCenter.listActivityEvents(this.accessState?.orgId ?? null, 80, options).subscribe({
+      next: (rows: any) => {
+        this.activityEvents = (rows as ActivityEventRecord[]) ?? [];
+        this.refreshFilteredActivityEvents();
+      },
+      error: (err: any) => {
+        this.showFeedback('error', this.describeHttpError(err, 'Failed to reload activity log.'));
       }
     });
   }
@@ -495,12 +820,14 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.requestInvites = [];
     this.reportExports = [];
     this.activityEvents = [];
+    this.filteredActivityEvents = [];
+    this.exportForm.selectedMemberIds = [];
     this.inviteMetrics = { pending: 0, sent: 0, claimed: 0, expired: 0 };
   }
 
-  private sectionFallback(err: any, section: string): Observable<never[]> {
+  private sectionFallback<T>(err: any, section: string, fallback: T): Observable<T> {
     this.showFeedback('error', this.describeHttpError(err, `Failed to load ${section}.`));
-    return of([]);
+    return of(fallback);
   }
 
   private describeHttpError(err: any, fallback: string): string {
@@ -568,6 +895,333 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private normalizeEmail(value: string): string {
     return (value ?? '').trim().toLowerCase();
+  }
+
+  private normalizeRequiredState(value: string): RequiredState | null {
+    const normalized = (value ?? '').trim();
+    if ((this.requiredStateOptions as readonly string[]).includes(normalized)) {
+      return normalized as RequiredState;
+    }
+    return null;
+  }
+
+  private activityQueryOptions(teamRows: any[], state: BusinessHubAccessState | null): ActivityQueryOptions {
+    const stateUserId = this.pickId((state as any)?.userId);
+    const teamUserIds = this.uniqueIds([
+      ...(teamRows ?? []).map((row) => this.pickId(row?.user_id)),
+      stateUserId,
+      this.currentUserId()
+    ]);
+
+    const teamUserEmails = this.uniqueStrings([
+      ...(teamRows ?? []).map((row) => this.pickString(row?.user_label)),
+      this.currentUserEmail()
+    ]).filter((value) => this.isValidEmail(value));
+
+    return {
+      teamUserIds,
+      teamUserEmails
+    };
+  }
+
+  private allTeamUserIds(): string[] {
+    const options = this.activityQueryOptions(this.teamMembers, this.accessState);
+    return options.teamUserIds ?? [];
+  }
+
+  private allTeamMemberLabels(): string[] {
+    const labels = (this.teamMembers ?? []).map((member) => this.pickString(member?.user_label));
+    const fallback = this.currentUserEmail();
+    return this.uniqueStrings([...labels, fallback]);
+  }
+
+  private resolveExportSelection(requireSelectedMembers: boolean): ExportSelection {
+    const scope = this.normalizeScope(this.exportForm.scope);
+    const allTeamIds = this.allTeamUserIds();
+    const allLabels = this.allTeamMemberLabels();
+
+    if (scope === 'team') {
+      return {
+        scope,
+        userIds: allTeamIds,
+        labels: allLabels
+      };
+    }
+
+    const allowedIds = new Set(allTeamIds);
+    const selectedIds = this.uniqueIds(this.exportForm.selectedMemberIds).filter((id) => allowedIds.has(id));
+    if (requireSelectedMembers && !selectedIds.length) {
+      return { scope, userIds: [], labels: [] };
+    }
+
+    return {
+      scope,
+      userIds: selectedIds,
+      labels: selectedIds
+        .map((id) => this.memberLabelById(id))
+        .filter((value): value is string => Boolean(value))
+    };
+  }
+
+  private buildExportFilters(selection: ExportSelection): Record<string, unknown> {
+    const parsedUserFilters = this.parseOptionalJson(this.exportForm.filters);
+    const metadata: Record<string, unknown> = {
+      report_type: 'activity_log',
+      scope: selection.scope === 'selected' ? 'selected_members' : 'team',
+      member_user_ids: selection.userIds,
+      member_labels: selection.labels,
+      generated_at: new Date().toISOString()
+    };
+
+    if (parsedUserFilters === null || parsedUserFilters === undefined) {
+      return metadata;
+    }
+    if (typeof parsedUserFilters === 'object' && !Array.isArray(parsedUserFilters)) {
+      return {
+        ...(parsedUserFilters as Record<string, unknown>),
+        ...metadata
+      };
+    }
+    if (Array.isArray(parsedUserFilters)) {
+      return {
+        ...metadata,
+        custom_filters: parsedUserFilters
+      };
+    }
+
+    return {
+      ...metadata,
+      custom_filters_raw: String(parsedUserFilters)
+    };
+  }
+
+  private eventsForSelection(selection: ExportSelection): ActivityEventRecord[] {
+    if (!this.activityEvents.length) {
+      return [];
+    }
+
+    if (selection.scope === 'team' && !selection.userIds.length && !selection.labels.length) {
+      return [...this.activityEvents];
+    }
+
+    return this.activityEvents.filter((event) => this.eventMatchesSelection(event, selection));
+  }
+
+  private eventMatchesSelection(event: ActivityEventRecord, selection: ExportSelection): boolean {
+    const actorId = this.pickId(event?.actor_id);
+    const targetId = this.pickId(event?.target_user_id);
+    const selectedIds = new Set(selection.userIds);
+
+    if (selectedIds.size > 0 && ((actorId && selectedIds.has(actorId)) || (targetId && selectedIds.has(targetId)))) {
+      return true;
+    }
+
+    if (!selection.labels.length) {
+      return selection.scope === 'team' && selectedIds.size === 0;
+    }
+
+    const selectedLabels = new Set(selection.labels.map((value) => value.toLowerCase()));
+    const actorLabel = this.pickString(event?.actor_label)?.toLowerCase() ?? '';
+    const targetLabel = this.pickString(event?.target_user_label)?.toLowerCase() ?? '';
+    return selectedLabels.has(actorLabel) || selectedLabels.has(targetLabel);
+  }
+
+  private syncExportSelectionWithTeam(): void {
+    const allIds = this.allTeamUserIds();
+    if (!allIds.length) {
+      this.exportForm.selectedMemberIds = [];
+      return;
+    }
+
+    const allowed = new Set(allIds);
+    const current = this.uniqueIds(this.exportForm.selectedMemberIds).filter((id) => allowed.has(id));
+    this.exportForm.selectedMemberIds = current.length ? current : [...allIds];
+  }
+
+  private refreshFilteredActivityEvents(): void {
+    this.filteredActivityEvents = this.eventsForSelection(this.resolveExportSelection(false));
+  }
+
+  private memberLabelById(memberId: string): string | null {
+    const normalizedMemberId = this.pickId(memberId);
+    if (!normalizedMemberId) {
+      return null;
+    }
+
+    const row = (this.teamMembers ?? []).find((member) => this.pickId(member?.user_id) === normalizedMemberId);
+    return this.pickString(row?.user_label) ?? normalizedMemberId;
+  }
+
+  private normalizeScope(value: string | null | undefined): ExportScope {
+    return (value ?? '').toLowerCase() === 'selected' ? 'selected' : 'team';
+  }
+
+  private parseOptionalJson(value: string): unknown {
+    const raw = (value ?? '').trim();
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+
+  private uniqueIds(values: Array<string | null | undefined>): string[] {
+    const seen = new Set<string>();
+    for (const value of values ?? []) {
+      const id = this.pickId(value);
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+    }
+    return Array.from(seen);
+  }
+
+  private uniqueStrings(values: Array<string | null | undefined>): string[] {
+    const seen = new Map<string, string>();
+    for (const value of values ?? []) {
+      const text = this.pickString(value);
+      if (!text) {
+        continue;
+      }
+      const key = text.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.set(key, text);
+    }
+    return Array.from(seen.values());
+  }
+
+  private escapeCsvCell(value: string): string {
+    const raw = (value ?? '').toString();
+    if (!/[",\r\n]/.test(raw)) {
+      return raw;
+    }
+    return `"${raw.replace(/"/g, '""')}"`;
+  }
+
+  private escapeHtml(value: string): string {
+    return (value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private downloadTextFile(content: string, filename: string, mimeType: string): void {
+    if (typeof document === 'undefined' || typeof URL === 'undefined') {
+      this.showFeedback('error', 'Download is only available in browser sessions.');
+      return;
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }
+
+  private pickString(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return String(value);
+    }
+    return null;
+  }
+
+  private hydrateDailyRequestCount(): void {
+    this.todayRequestCount = this.readDailyRequestCount();
+  }
+
+  private incrementDailyRequestCount(incrementBy: number): void {
+    if (incrementBy <= 0) return;
+    this.todayRequestCount = this.readDailyRequestCount() + incrementBy;
+    this.writeDailyRequestCount(this.todayRequestCount);
+  }
+
+  private readDailyRequestCount(): number {
+    const key = this.dailyRequestStorageKey();
+    if (!key || typeof localStorage === 'undefined') return 0;
+
+    const raw = localStorage.getItem(key);
+    if (!raw) return 0;
+
+    const parsed = Number(raw);
+    if (Number.isNaN(parsed) || parsed < 0) return 0;
+    return Math.floor(parsed);
+  }
+
+  private writeDailyRequestCount(value: number): void {
+    const key = this.dailyRequestStorageKey();
+    if (!key || typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, String(Math.max(0, Math.floor(value))));
+  }
+
+  private dailyRequestStorageKey(): string | null {
+    const userId = this.currentUserId();
+    if (!userId) return null;
+    return `wellar_business_request_daily_v1:${userId}:${this.todayDateKey()}`;
+  }
+
+  private todayDateKey(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  private currentUserId(): string | null {
+    const fromAccess = this.pickId(this.accessState?.userId);
+    if (fromAccess) return fromAccess;
+
+    if (typeof localStorage === 'undefined') return null;
+    return this.pickId(localStorage.getItem('current_user_id'));
+  }
+
+  private currentUserEmail(): string | null {
+    const token = this.getSessionToken();
+    const payload = token ? this.decodeJwtPayload(token) : null;
+    const payloadEmail = typeof payload?.['email'] === 'string' ? payload['email'] : '';
+    const storedEmail =
+      typeof localStorage !== 'undefined' ? (localStorage.getItem('user_email') ?? '') : '';
+
+    const normalizedPayloadEmail = this.normalizeEmail(payloadEmail);
+    if (this.isValidEmail(normalizedPayloadEmail)) return normalizedPayloadEmail;
+
+    const normalizedStoredEmail = this.normalizeEmail(storedEmail);
+    if (this.isValidEmail(normalizedStoredEmail)) return normalizedStoredEmail;
+
+    return null;
+  }
+
+  private getSessionToken(): string | null {
+    if (typeof localStorage === 'undefined') return null;
+    return (
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token') ??
+      localStorage.getItem('directus_token')
+    );
+  }
+
+  private decodeJwtPayload(token: string): Record<string, unknown> | null {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    try {
+      return JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
   }
 
   private pickId(value: unknown): string | null {

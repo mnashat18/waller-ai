@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { catchError, map, switchMap, timeout } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
 
 export type ActionResult = {
@@ -56,10 +56,21 @@ export type RequestRecord = {
   id: string;
   target: string;
   recipient: string;
+  requested_for_email?: string | null;
+  recipient_industry?: string | null;
   required_state: string;
   response_status: string;
   timestamp?: string | null;
   org_id?: string | null;
+};
+
+export type CreateScanRequestPayload = {
+  requested_for_email: string;
+  required_state: string;
+};
+
+export type CreateScanRequestResult = ActionResult & {
+  id?: string | null;
 };
 
 export type RequestInviteRecord = {
@@ -88,9 +99,21 @@ export type ReportExportRecord = {
   date_created?: string | null;
 };
 
+export type ExportAudience = 'team' | 'selected';
+
+export type CreateReportExportInput = {
+  format: 'csv' | 'pdf';
+  filters?: string | Record<string, unknown> | null;
+  scope?: ExportAudience;
+  memberUserIds?: string[];
+  memberLabels?: string[];
+};
+
 export type ActivityEventRecord = {
   id: string;
+  actor_id?: string | null;
   actor_label?: string | null;
+  target_user_id?: string | null;
   target_user_label?: string | null;
   action?: string | null;
   entity_type?: string | null;
@@ -119,9 +142,15 @@ type AccessContext = {
   orgId: string | null;
 };
 
+export type ActivityQueryOptions = {
+  teamUserIds?: string[];
+  teamUserEmails?: string[];
+};
+
 @Injectable({ providedIn: 'root' })
 export class BusinessCenterService {
   private api = environment.API_URL;
+  private readonly requestTimeoutMs = 15000;
 
   constructor(private http: HttpClient) {}
 
@@ -262,6 +291,7 @@ export class BusinessCenterService {
     const backendRole = this.mapManagedRole(role);
 
     return this.findUserIdByEmail(normalizedEmail, access.token).pipe(
+      timeout(this.requestTimeoutMs),
       switchMap((userId) => {
         if (!userId) {
           return of({
@@ -313,7 +343,49 @@ export class BusinessCenterService {
       `${this.api}/items/requests?${params.toString()}`,
       this.requestOptions(access.token)
     ).pipe(
-      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row)))
+      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+      switchMap((rows) => this.attachRecipientIndustries(rows, access.token))
+    );
+  }
+
+  createScanRequest(payload: CreateScanRequestPayload): Observable<CreateScanRequestResult> {
+    const access = this.getAccessContext();
+    if (!access.token && !access.userId) {
+      return of({ ok: false, message: 'Please sign in first.' });
+    }
+
+    const requestedForEmail = this.pickString(payload.requested_for_email)?.toLowerCase() ?? '';
+    const requiredState = this.pickString(payload.required_state) ?? '';
+
+    if (!this.isEmailLike(requestedForEmail)) {
+      return of({ ok: false, message: 'Recipient email is invalid.' });
+    }
+    if (!requiredState) {
+      return of({ ok: false, message: 'Required state is missing.' });
+    }
+
+    const body: CreateScanRequestPayload = {
+      requested_for_email: requestedForEmail,
+      required_state: requiredState
+    };
+
+    return this.http.post<{ data?: { id?: unknown } }>(
+      `${this.api}/items/requests`,
+      body,
+      this.requestOptions(access.token)
+    ).pipe(
+      timeout(this.requestTimeoutMs),
+      map((res) => ({
+        ok: true,
+        message: 'Request sent successfully.',
+        id: this.normalizeId(res?.data?.id)
+      })),
+      catchError((err) =>
+        of({
+          ok: false,
+          message: this.toFriendlyError(err, 'Failed to send request.')
+        })
+      )
     );
   }
 
@@ -391,21 +463,28 @@ export class BusinessCenterService {
       body,
       this.requestOptions(access.token)
     ).pipe(
-      map(() => ({ ok: true, message: 'Invite sent successfully.' })),
+      timeout(this.requestTimeoutMs),
+      map(() => ({ ok: true, message: 'Invite created successfully.' })),
       catchError((err) =>
         of({
           ok: false,
-          message: this.toFriendlyError(err, 'Failed to send invite.')
+          message: this.toFriendlyError(err, 'Failed to create invite.')
         })
       )
     );
   }
 
-  listReportExports(orgId: string | null, limit = 40): Observable<ReportExportRecord[]> {
+  listReportExports(
+    orgId: string | null,
+    limit = 40,
+    teamUserIds?: string[] | null
+  ): Observable<ReportExportRecord[]> {
     const access = this.getAccessContext();
     if (!access.token && !access.userId) {
       return of([]);
     }
+
+    const normalizedTeamUserIds = this.uniqueIds(teamUserIds ?? []);
 
     const params = new URLSearchParams({
       sort: '-date_created',
@@ -414,6 +493,8 @@ export class BusinessCenterService {
     });
     if (orgId) {
       params.set('filter[org_id][_eq]', orgId);
+    } else if (normalizedTeamUserIds.length) {
+      params.set('filter[user][_in]', normalizedTeamUserIds.join(','));
     } else if (access.userId) {
       params.set('filter[user][_eq]', access.userId);
     } else {
@@ -428,19 +509,21 @@ export class BusinessCenterService {
     );
   }
 
-  createReportExport(
-    input: { format: 'csv' | 'pdf'; filters?: string | null },
-    orgId: string | null
-  ): Observable<ActionResult> {
+  createReportExport(input: CreateReportExportInput, orgId: string | null): Observable<ActionResult> {
     const access = this.getAccessContext();
     if (!access.token && !access.userId) {
       return of({ ok: false, message: 'Please sign in first.' });
     }
 
+    const normalizedFormat = this.normalizeExportFormat(input.format);
+    const preparedFilters = this.buildReportExportFilters(input);
+
     const primary: Record<string, unknown> = {
-      format: input.format,
-      filters: this.parseFilters(input.filters)
+      format: normalizedFormat
     };
+    if (preparedFilters !== null) {
+      primary['filters'] = preparedFilters;
+    }
     if (orgId) {
       primary['org_id'] = orgId;
     }
@@ -453,6 +536,7 @@ export class BusinessCenterService {
       primary,
       this.requestOptions(access.token)
     ).pipe(
+      timeout(this.requestTimeoutMs),
       map(() => ({ ok: true, message: 'Export request queued.' })),
       catchError((err) => {
         if (!this.shouldRetryWithMinimalPayload(err)) {
@@ -462,63 +546,219 @@ export class BusinessCenterService {
           });
         }
 
-        const fallback: Record<string, unknown> = { format: input.format };
+        const fallbackWithSerializedFilters: Record<string, unknown> = { format: normalizedFormat };
         if (orgId) {
-          fallback['org_id'] = orgId;
+          fallbackWithSerializedFilters['org_id'] = orgId;
+        }
+        if (access.userId) {
+          fallbackWithSerializedFilters['user'] = access.userId;
+        }
+        if (preparedFilters !== null && preparedFilters !== undefined) {
+          fallbackWithSerializedFilters['filters'] =
+            typeof preparedFilters === 'string'
+              ? preparedFilters
+              : JSON.stringify(preparedFilters);
         }
 
         return this.http.post(
           `${this.api}/items/reports_exports`,
-          fallback,
+          fallbackWithSerializedFilters,
           this.requestOptions(access.token)
         ).pipe(
+          timeout(this.requestTimeoutMs),
           map(() => ({ ok: true, message: 'Export request queued.' })),
-          catchError((retryErr) =>
-            of({
-              ok: false,
-              message: this.toFriendlyError(retryErr, 'Failed to queue export request.')
-            })
-          )
+          catchError(() => {
+            const fallback: Record<string, unknown> = { format: normalizedFormat };
+            if (orgId) {
+              fallback['org_id'] = orgId;
+            }
+            if (access.userId) {
+              fallback['user'] = access.userId;
+            }
+
+            return this.http.post(
+              `${this.api}/items/reports_exports`,
+              fallback,
+              this.requestOptions(access.token)
+            ).pipe(
+              timeout(this.requestTimeoutMs),
+              map(() => ({ ok: true, message: 'Export request queued.' })),
+              catchError((retryErr) =>
+                of({
+                  ok: false,
+                  message: this.toFriendlyError(retryErr, 'Failed to queue export request.')
+                })
+              )
+            );
+          })
         );
       })
     );
   }
 
-  listActivityEvents(orgId: string | null, limit = 60): Observable<ActivityEventRecord[]> {
+  listActivityEvents(
+    orgId: string | null,
+    limit = 60,
+    options?: ActivityQueryOptions
+  ): Observable<ActivityEventRecord[]> {
     const access = this.getAccessContext();
-    if (!orgId) {
+    if (!access.token && !access.userId) {
+      return of([]);
+    }
+
+    const storedEmail =
+      typeof localStorage !== 'undefined' ? this.pickString(localStorage.getItem('user_email')) : null;
+    const teamUserIds = this.uniqueIds([...(options?.teamUserIds ?? []), access.userId]);
+    const teamUserEmails = this.uniqueNonEmptyStrings([...(options?.teamUserEmails ?? []), storedEmail]);
+
+    const source$ = orgId
+      ? this.fetchActivityEventsByOrg(orgId, limit, access.token)
+      : teamUserIds.length
+        ? this.fetchActivityEventsByUsers(teamUserIds, limit, access.token)
+        : of([]);
+
+    return source$.pipe(
+      switchMap((events) => {
+        if (events.length) {
+          return of(events);
+        }
+
+        if (orgId && teamUserIds.length) {
+          return this.fetchActivityEventsByUsers(teamUserIds, limit, access.token).pipe(
+            switchMap((fallbackEvents) =>
+              fallbackEvents.length
+                ? of(fallbackEvents)
+                : this.fetchAuditActivityEvents(teamUserIds, teamUserEmails, limit, access.token)
+            )
+          );
+        }
+
+        return this.fetchAuditActivityEvents(teamUserIds, teamUserEmails, limit, access.token);
+      }),
+      catchError(() =>
+        this.fetchAuditActivityEvents(teamUserIds, teamUserEmails, limit, access.token).pipe(
+          catchError(() => of([]))
+        )
+      )
+    );
+  }
+
+  private fetchActivityEventsByOrg(
+    orgId: string,
+    limit: number,
+    token: string | null
+  ): Observable<ActivityEventRecord[]> {
+    const params = new URLSearchParams({
+      sort: '-date_created',
+      limit: String(limit),
+      fields: this.activityEventFields()
+    });
+    params.set('filter[org_id][_eq]', orgId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/activity_events?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeActivity(row))),
+      catchError(() => of([]))
+    );
+  }
+
+  private fetchActivityEventsByUsers(
+    userIds: string[],
+    limit: number,
+    token: string | null
+  ): Observable<ActivityEventRecord[]> {
+    const normalizedUserIds = this.uniqueIds(userIds);
+    if (!normalizedUserIds.length) {
       return of([]);
     }
 
     const params = new URLSearchParams({
       sort: '-date_created',
       limit: String(limit),
-      fields: [
-        'id',
-        'action',
-        'entity_type',
-        'entity_id',
-        'payload',
-        'org_id',
-        'date_created',
-        'actor.id',
-        'actor.email',
-        'actor.first_name',
-        'actor.last_name',
-        'target_user.id',
-        'target_user.email',
-        'target_user.first_name',
-        'target_user.last_name'
-      ].join(',')
+      fields: this.activityEventFields()
     });
-    params.set('filter[org_id][_eq]', orgId);
+    params.set('filter[_or][0][actor][_in]', normalizedUserIds.join(','));
+    params.set('filter[_or][1][target_user][_in]', normalizedUserIds.join(','));
 
     return this.http.get<{ data?: any[] }>(
       `${this.api}/items/activity_events?${params.toString()}`,
-      this.requestOptions(access.token)
+      this.requestOptions(token)
     ).pipe(
-      map((res) => (res.data ?? []).map((row) => this.normalizeActivity(row)))
+      map((res) => (res.data ?? []).map((row) => this.normalizeActivity(row))),
+      catchError(() => of([]))
     );
+  }
+
+  private fetchAuditActivityEvents(
+    userIds: string[],
+    emails: string[],
+    limit: number,
+    token: string | null
+  ): Observable<ActivityEventRecord[]> {
+    const normalizedUserIds = this.uniqueIds(userIds);
+    const normalizedEmails = this.uniqueNonEmptyStrings(emails).filter((value) => this.isEmailLike(value));
+    if (!normalizedUserIds.length && !normalizedEmails.length) {
+      return of([]);
+    }
+
+    const params = new URLSearchParams({
+      sort: '-timestamp',
+      limit: String(limit),
+      fields: [
+        'id',
+        'type',
+        'description',
+        'timestamp',
+        'date_created',
+        'user',
+        'user.id',
+        'user.email',
+        'user.first_name',
+        'user.last_name',
+        'user_email',
+        'metadata',
+        'meta'
+      ].join(',')
+    });
+
+    let clause = 0;
+    if (normalizedUserIds.length) {
+      params.set(`filter[_or][${clause}][user][_in]`, normalizedUserIds.join(','));
+      clause += 1;
+    }
+    if (normalizedEmails.length) {
+      params.set(`filter[_or][${clause}][user_email][_in]`, normalizedEmails.join(','));
+    }
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/audit_logs?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeAuditActivity(row))),
+      catchError(() => of([]))
+    );
+  }
+
+  private activityEventFields(): string {
+    return [
+      'id',
+      'action',
+      'entity_type',
+      'entity_id',
+      'payload',
+      'org_id',
+      'date_created',
+      'actor.id',
+      'actor.email',
+      'actor.first_name',
+      'actor.last_name',
+      'target_user.id',
+      'target_user.email',
+      'target_user.first_name',
+      'target_user.last_name'
+    ].join(',');
   }
 
   submitUpgradeRequest(orgId: string | null): Observable<ActionResult> {
@@ -768,15 +1008,68 @@ export class BusinessCenterService {
   }
 
   private normalizeRequest(raw: any): RequestRecord {
+    const requestedForEmail = this.pickString(raw?.requested_for_email);
     return {
       id: this.normalizeId(raw?.id) ?? '',
       target: 'scan',
       recipient: this.requestRecipient(raw),
+      requested_for_email: requestedForEmail,
+      recipient_industry: null,
       required_state: this.pickString(raw?.required_state) ?? 'Unknown',
       response_status: this.pickString(raw?.response_status) ?? 'Pending',
       timestamp: this.pickString(raw?.timestamp),
       org_id: this.normalizeId(raw?.org_id) ?? this.normalizeId(raw?.requested_by_org)
     };
+  }
+
+  private attachRecipientIndustries(
+    rows: RequestRecord[],
+    token: string | null
+  ): Observable<RequestRecord[]> {
+    const emails = Array.from(
+      new Set(
+        (rows ?? [])
+          .map((row) => this.pickString(row.requested_for_email)?.toLowerCase())
+          .filter((row): row is string => Boolean(row))
+      )
+    );
+
+    if (!emails.length) {
+      return of(rows);
+    }
+
+    const params = new URLSearchParams({
+      limit: String(Math.max(100, emails.length)),
+      fields: 'id,work_email,industry'
+    });
+    params.set('filter[work_email][_in]', emails.join(','));
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/business_profiles?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => {
+        const industryByEmail = new Map<string, string>();
+
+        for (const row of res.data ?? []) {
+          const email = this.pickString(row?.work_email)?.toLowerCase();
+          const industry = this.pickString(row?.industry);
+          if (!email || !industry || industryByEmail.has(email)) {
+            continue;
+          }
+          industryByEmail.set(email, industry);
+        }
+
+        return (rows ?? []).map((row) => {
+          const email = this.pickString(row.requested_for_email)?.toLowerCase();
+          return {
+            ...row,
+            recipient_industry: email ? (industryByEmail.get(email) ?? null) : null
+          };
+        });
+      }),
+      catchError(() => of(rows))
+    );
   }
 
   private normalizeInvite(raw: any): RequestInviteRecord {
@@ -831,7 +1124,9 @@ export class BusinessCenterService {
 
     return {
       id: this.normalizeId(raw?.id) ?? '',
+      actor_id: this.normalizeId(raw?.actor?.id ?? raw?.actor),
       actor_label: this.userLabel(raw?.actor),
+      target_user_id: this.normalizeId(raw?.target_user?.id ?? raw?.target_user),
       target_user_label: this.userLabel(raw?.target_user),
       action: this.pickString(raw?.action),
       entity_type: this.pickString(raw?.entity_type),
@@ -839,6 +1134,35 @@ export class BusinessCenterService {
       payload,
       org_id: this.normalizeId(raw?.org_id),
       date_created: this.pickString(raw?.date_created)
+    };
+  }
+
+  private normalizeAuditActivity(raw: any): ActivityEventRecord {
+    const actor = raw?.user;
+    const actorId = this.normalizeId(actor?.id ?? actor ?? raw?.user_id);
+    const actorLabel =
+      this.userLabel(actor) ??
+      this.pickString(raw?.user_email) ??
+      this.pickString(raw?.created_by) ??
+      actorId;
+
+    const metadata = raw?.metadata ?? raw?.meta ?? null;
+    const payload = metadata
+      ? (typeof metadata === 'string' ? metadata : JSON.stringify(metadata))
+      : this.pickString(raw?.description);
+
+    return {
+      id: this.normalizeId(raw?.id) ?? '',
+      actor_id: actorId,
+      actor_label: actorLabel,
+      target_user_id: null,
+      target_user_label: null,
+      action: this.pickString(raw?.type) ?? 'audit_log',
+      entity_type: 'audit_log',
+      entity_id: this.normalizeId(raw?.id),
+      payload,
+      org_id: this.normalizeId(raw?.org_id),
+      date_created: this.pickString(raw?.timestamp) ?? this.pickString(raw?.date_created)
     };
   }
 
@@ -884,17 +1208,67 @@ export class BusinessCenterService {
     return normalized === 'active' || normalized === 'approved' || normalized === 'accepted';
   }
 
-  private parseFilters(value: string | null | undefined): unknown {
-    const raw = (value ?? '').trim();
-    if (!raw) {
+  private parseFilters(value: unknown): unknown {
+    if (value === null || value === undefined) {
       return null;
     }
+    if (typeof value === 'string') {
+      const raw = value.trim();
+      if (!raw) {
+        return null;
+      }
 
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return raw;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
     }
+    if (typeof value === 'object') {
+      return value;
+    }
+    return value;
+  }
+
+  private buildReportExportFilters(input: CreateReportExportInput): unknown {
+    const parsed = this.parseFilters(input.filters);
+    const scope = input.scope === 'selected' ? 'selected_members' : 'team';
+    const memberUserIds = this.uniqueIds(input.memberUserIds ?? []);
+    const memberLabels = this.uniqueNonEmptyStrings(input.memberLabels ?? []);
+
+    const metadata: Record<string, unknown> = {
+      report_type: 'activity_log',
+      scope,
+      member_user_ids: memberUserIds,
+      member_labels: memberLabels,
+      generated_at: new Date().toISOString()
+    };
+
+    if (parsed === null || parsed === undefined) {
+      return metadata;
+    }
+    if (typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return {
+        ...(parsed as Record<string, unknown>),
+        ...metadata
+      };
+    }
+    if (Array.isArray(parsed)) {
+      return {
+        ...metadata,
+        custom_filters: parsed
+      };
+    }
+
+    return {
+      ...metadata,
+      custom_filters_raw: String(parsed)
+    };
+  }
+
+  private normalizeExportFormat(value: unknown): 'csv' | 'pdf' {
+    const normalized = (this.pickString(value) ?? 'csv').trim().toLowerCase();
+    return normalized === 'pdf' ? 'pdf' : 'csv';
   }
 
   private buildInviteToken(): string {
@@ -920,7 +1294,6 @@ export class BusinessCenterService {
       payload?.['organization_id'] ??
       payload?.['org'] ??
       payload?.['organization'];
-
     const storedUserId =
       typeof localStorage !== 'undefined' ? localStorage.getItem('current_user_id') : null;
     const storedOrgId =
@@ -934,7 +1307,11 @@ export class BusinessCenterService {
   }
 
   private resolveAccessContext(access: AccessContext): Observable<AccessContext> {
-    if (access.userId) {
+    if (!access.token) {
+      return of(access);
+    }
+
+    if (access.userId && access.orgId) {
       return of(access);
     }
 
@@ -1224,6 +1601,34 @@ export class BusinessCenterService {
       return this.normalizeId((value as Record<string, unknown>)['id']);
     }
     return null;
+  }
+
+  private uniqueIds(values: Array<string | null | undefined>): string[] {
+    const seen = new Set<string>();
+    for (const value of values ?? []) {
+      const id = this.normalizeId(value);
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+    }
+    return Array.from(seen);
+  }
+
+  private uniqueNonEmptyStrings(values: Array<string | null | undefined>): string[] {
+    const seen = new Map<string, string>();
+    for (const value of values ?? []) {
+      const normalized = this.pickString(value);
+      if (!normalized) {
+        continue;
+      }
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.set(key, normalized);
+    }
+    return Array.from(seen.values());
   }
 
   private coerceBoolean(value: unknown): boolean {

@@ -17,6 +17,19 @@ import { Plan, SubscriptionService } from '../../services/subscription.service';
 })
 export class UpgradePlanComponent implements OnInit {
   private readonly submitTimeoutMs = 30000;
+  readonly industryOptions: readonly string[] = [
+    'Transport',
+    'Logistics',
+    'Manufacturing',
+    'Healthcare',
+    'Construction',
+    'Education',
+    'Technology',
+    'Energy',
+    'Retail',
+    'Other'
+  ];
+
   loading = true;
   submitting = false;
   feedback = '';
@@ -179,9 +192,16 @@ export class UpgradePlanComponent implements OnInit {
     const businessName = this.form.businessName.trim();
     const workEmail = this.form.workEmail.trim().toLowerCase();
     const phone = this.form.phone.trim();
+    const industry = this.form.industry.trim();
 
     if (!ownerName || !companyName || !businessName || !workEmail || !phone || !this.form.acceptTerms) {
       return 'Please complete all required fields and accept terms.';
+    }
+    if (!industry) {
+      return 'Industry is required.';
+    }
+    if (!this.industryOptions.includes(industry)) {
+      return 'Please select a valid industry option.';
     }
 
     if (!this.isEmail(workEmail)) {

@@ -44,8 +44,12 @@
         </label>
 
         <label class="field">
-          <span>Industry</span>
-          <input [(ngModel)]="form.industry" placeholder="Transport / Factory / Clinic ..." />
+          <span>Industry *</span>
+          <select [(ngModel)]="form.industry">
+            <option value="">Select industry</option>
+            <option *ngFor="let option of industryOptions" [value]="option">{{ option }}</option>
+          </select>
+          <small>Choose the company sector used across Business workflows.</small>
         </label>
 
         <label class="field">

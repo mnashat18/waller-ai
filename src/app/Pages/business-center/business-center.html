@@ -191,6 +191,7 @@
                 <th class="th">Request ID</th>
                 <th class="th">Target</th>
                 <th class="th">Recipient</th>
+                <th class="th">Industry</th>
                 <th class="th">Required State</th>
                 <th class="th">Status</th>
                 <th class="th">Timestamp</th>
@@ -202,54 +203,83 @@
                 <td>{{ req?.id || '-' }}</td>
                 <td>{{ requestTarget(req) }}</td>
                 <td>{{ requestRecipient(req) }}</td>
+                <td>{{ req?.recipient_industry || '-' }}</td>
                 <td>{{ req?.required_state || '-' }}</td>
                 <td>{{ requestStatusLabel(req?.response_status) }}</td>
                 <td>{{ formatDate(req?.timestamp) }}</td>
               </tr>
 
               <tr *ngIf="!requests.length">
-                <td colspan="6" class="empty-cell">No requests found.</td>
+                <td colspan="7" class="empty-cell">No requests found.</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <ng-container *ngIf="canInvite; else inviteReadonlyState">
-          <div class="form-grid mt-5">
+        <ng-container *ngIf="canCreateRequestsFromCenter(); else inviteReadonlyState">
+          <div class="request-limit-hint mt-5">
+            Business plan: you can send up to {{ dailyRequestLimit }} requests per day.
+            <strong>Remaining today: {{ dailyRequestsRemaining() }}</strong>
+          </div>
+
+          <div class="form-grid mt-4">
+            <label class="full-width">
+              Recipient Email(s)
+              <div class="email-list">
+                <div class="email-row" *ngFor="let email of requestForm.recipientEmails; let i = index">
+                  <input
+                    class="input"
+                    type="email"
+                    placeholder="user@example.com"
+                    autocomplete="email"
+                    [(ngModel)]="requestForm.recipientEmails[i]"
+                    [ngModelOptions]="{ standalone: true }" />
+
+                  <button
+                    type="button"
+                    class="email-action-btn add"
+                    *ngIf="i === requestForm.recipientEmails.length - 1"
+                    (click)="addRecipientEmailField()"
+                    aria-label="Add email">
+                    +
+                  </button>
+
+                  <button
+                    type="button"
+                    class="email-action-btn remove"
+                    *ngIf="requestForm.recipientEmails.length > 1"
+                    (click)="removeRecipientEmailField(i)"
+                    aria-label="Remove email">
+                    &times;
+                  </button>
+                </div>
+              </div>
+            </label>
+
             <label>
-              Request
-              <select class="input" [(ngModel)]="inviteForm.requestId">
-                <option value="">Select request</option>
-                <option *ngFor="let req of requests; trackBy: trackById" [value]="req?.id">
-                  {{ req?.id }} - {{ requestRecipient(req) }}
+              Required State
+              <select class="input" [(ngModel)]="requestForm.requiredState">
+                <option value="">Select required state</option>
+                <option *ngFor="let state of requiredStateOptions" [ngValue]="state">
+                  {{ state }}
                 </option>
               </select>
-            </label>
-
-            <label>
-              Invite Email
-              <input class="input" placeholder="user@example.com" [(ngModel)]="inviteForm.email" />
-            </label>
-
-            <label>
-              Invite Phone
-              <input class="input" placeholder="+2010..." [(ngModel)]="inviteForm.phone" />
             </label>
           </div>
 
           <div class="mt-4 flex items-center gap-3">
             <button
               class="btn-primary px-4 py-2 rounded-full"
-              [disabled]="inviteSubmitting"
-              (click)="submitInvite()">
-              {{ inviteSubmitting ? 'Sending...' : 'Send Invite' }}
+              [disabled]="requestSubmitting"
+              (click)="submitRequests()">
+              {{ requestSubmitting ? 'Sending...' : 'Send Request(s)' }}
             </button>
           </div>
         </ng-container>
 
         <ng-template #inviteReadonlyState>
           <div class="mt-4 text-slate-300">
-            Invite action is available for owner role only.
+            Request creation is available for Business members with write access.
           </div>
         </ng-template>
 
@@ -300,19 +330,61 @@
             </select>
           </label>
 
+          <label>
+            Audience
+            <select class="input" [(ngModel)]="exportForm.scope" (ngModelChange)="onExportScopeChanged()">
+              <option value="team">Entire Team</option>
+              <option value="selected">Selected Members</option>
+            </select>
+          </label>
+
           <label class="full-width">
             Filters (optional JSON)
             <textarea class="input" rows="3" [(ngModel)]="exportForm.filters"></textarea>
           </label>
+
+          <label class="full-width" *ngIf="exportForm.scope === 'selected'">
+            Team Members
+            <div class="member-picker-actions">
+              <button type="button" class="chip chip-button" (click)="selectAllExportMembers()">Select all</button>
+              <button type="button" class="chip chip-button" (click)="clearExportMemberSelection()">Clear</button>
+              <span class="chip">{{ selectedExportMembersCount() }} selected</span>
+            </div>
+
+            <div class="member-picker-grid">
+              <label class="member-picker-item" *ngFor="let member of teamMembers; trackBy: trackById">
+                <input
+                  type="checkbox"
+                  [ngModel]="isExportMemberSelected(member)"
+                  (ngModelChange)="setExportMemberSelection(member, $event)"
+                  [ngModelOptions]="{ standalone: true }" />
+                <span>{{ exportMemberLabel(member) }}</span>
+              </label>
+            </div>
+          </label>
         </div>
 
-        <div class="mt-4 flex items-center gap-3">
+        <div class="mt-4 flex flex-wrap items-center gap-3">
           <button
             *ngIf="canUseSystem && !isReadOnly; else exportReadonlyState"
             class="btn-primary px-4 py-2 rounded-full"
             [disabled]="exportSubmitting"
             (click)="submitExportRequest()">
             {{ exportSubmitting ? 'Submitting...' : 'Create Export Job' }}
+          </button>
+          <button
+            type="button"
+            class="chip chip-button"
+            [disabled]="!filteredActivityEvents.length"
+            (click)="downloadActivityCsvNow()">
+            Export Activity CSV
+          </button>
+          <button
+            type="button"
+            class="chip chip-button"
+            [disabled]="!filteredActivityEvents.length"
+            (click)="downloadActivityPdfNow()">
+            Export Activity PDF
           </button>
         </div>
 
@@ -353,7 +425,10 @@
       <section class="panel">
         <div class="panel-header">
           <h3 class="panel-title">5) Activity Log</h3>
-          <span class="chip">{{ activityEvents.length }} events</span>
+          <span class="chip">{{ filteredActivityEvents.length }} events</span>
+          <span class="chip" *ngIf="filteredActivityEvents.length !== activityEvents.length">
+            total: {{ activityEvents.length }}
+          </span>
         </div>
 
         <div class="table-shell">
@@ -363,20 +438,22 @@
                 <th class="th">Actor</th>
                 <th class="th">Action</th>
                 <th class="th">Entity</th>
+                <th class="th">Target</th>
                 <th class="th">Date</th>
               </tr>
             </thead>
 
             <tbody>
-              <tr class="row" *ngFor="let event of activityEvents; trackBy: trackById">
+              <tr class="row" *ngFor="let event of filteredActivityEvents; trackBy: trackById">
                 <td>{{ event?.actor_label || '-' }}</td>
                 <td>{{ event?.action || '-' }}</td>
                 <td>{{ event?.entity_type || '-' }} #{{ event?.entity_id || '-' }}</td>
+                <td>{{ event?.target_user_label || '-' }}</td>
                 <td>{{ formatDate(event?.date_created) }}</td>
               </tr>
 
-              <tr *ngIf="!activityEvents.length">
-                <td colspan="4" class="empty-cell">No activity events found.</td>
+              <tr *ngIf="!filteredActivityEvents.length">
+                <td colspan="5" class="empty-cell">No activity events found for the selected audience.</td>
               </tr>
             </tbody>
           </table>
