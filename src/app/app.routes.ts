@@ -125,14 +125,7 @@ export const routes: Routes = [
   canActivate: [businessOnboardingGuard],
   component: ProfileMobileComponent
 },
-{
-  path: 'business-center',
-  canMatch: [mobileBusinessCenterMatch],
-  canActivate: [businessOnboardingGuard],
-  loadComponent: () =>
-    import('./Pages/business-center/business-center')
-      .then(m => m.BusinessCenterComponent)
-},
+
 
   /* ================= PUBLIC ================= */
   {
