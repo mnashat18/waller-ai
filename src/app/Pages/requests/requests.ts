@@ -68,47 +68,111 @@ export class Requests implements OnInit {
     this.cdr.detectChanges();
   }
 
-  handleCreateRequest(form: CreateRequestForm) {
-    if (!this.canCreateRequests) {
+handleCreateRequest(form: CreateRequestForm) {
+
+  if (!this.canCreateRequests) {
+    this.submitFeedback = {
+      type: 'error',
+      message: 'You do not have permission to create requests.'
+    };
+    this.cdr.detectChanges();
+    return;
+  }
+
+  const requestedForEmail = this.normalizeEmail(form.requestedForEmail);
+  const requiredState = this.normalizeRequiredState(form.requiredState);
+
+  if (!requestedForEmail) {
+    this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
+    this.cdr.detectChanges();
+    return;
+  }
+
+  if (!requiredState) {
+    this.submitFeedback = { type: 'error', message: 'Select a required state.' };
+    this.cdr.detectChanges();
+    return;
+  }
+
+  const token = this.getUserToken();
+  if (!token) {
+    this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+    this.cdr.detectChanges();
+    return;
+  }
+
+  const currentUserEmail = this.getUserEmailFromToken(token);
+  if (currentUserEmail && requestedForEmail === currentUserEmail) {
+    this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
+    this.cdr.detectChanges();
+    return;
+  }
+
+  this.submittingRequest = true;
+  this.cdr.detectChanges();
+
+  const payload = {
+    requested_for_email: requestedForEmail,
+    required_state: requiredState
+  };
+
+  const headers = new HttpHeaders({
+    Authorization: `Bearer ${token}`
+  });
+
+  this.http.post<{ data?: { id?: string } }>(
+    `${environment.API_URL}/items/requests`,
+    payload,
+    { headers, withCredentials: true }
+  ).subscribe({
+
+    next: (res) => {
+
+      // 🚀 Optimistic Update
+      const optimisticRow: RequestRow = {
+        id: res?.data?.id ?? crypto.randomUUID(),
+        target: requestedForEmail,
+        required_state: requiredState,
+        response_status: 'Pending',
+        timestamp: new Date().toLocaleString(),
+      };
+
+      this.requests.unshift(optimisticRow);
+
+      this.requestStats.total += 1;
+      this.requestStats.pending += 1;
+
+      this.showCreateModal = false;
+      this.submittingRequest = false;
+
+      this.submitFeedback = {
+        type: 'success',
+        message: 'Request sent successfully.'
+      };
+
+      this.cdr.detectChanges();
+
+      // sync مع السيرفر بعد ثانية
+      setTimeout(() => {
+        this.loadRequests();
+      }, 1000);
+    },
+
+    error: (err: unknown) => {
+
+      console.error('Create request error:', err);
+
       this.submitFeedback = {
         type: 'error',
-        message: 'You do not have permission to create requests.'
+        message: 'Failed to send request.'
       };
+
+      this.submittingRequest = false;
       this.cdr.detectChanges();
-      return;
     }
 
-    const requestedForEmail = this.normalizeEmail(form.requestedForEmail);
-    const requiredState = this.normalizeRequiredState(form.requiredState);
-
-    if (!requestedForEmail) {
-      this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    if (!requiredState) {
-      this.submitFeedback = { type: 'error', message: 'Select a required state.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    const token = this.getUserToken();
-    if (!token) {
-      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    const currentUserEmail = this.getUserEmailFromToken(token);
-    if (currentUserEmail && requestedForEmail === currentUserEmail) {
-      this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    this.submitRequestPayload(requestedForEmail, requiredState, token);
-  }
+  });
+}
 
   private loadPlanAccess() {
     this.loadingPlanAccess = true;
