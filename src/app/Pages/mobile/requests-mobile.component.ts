@@ -239,16 +239,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     const fields = [
       'id',
-      'target',
-      'Target',
-      'requested_by_user.id',
-      'requested_by_user.email',
-      'requested_by_user.first_name',
-      'requested_by_user.last_name',
-      'requested_for_user.id',
-      'requested_for_user.email',
-      'requested_for_user.first_name',
-      'requested_for_user.last_name',
       'requested_for_email',
       'requested_for_phone',
       'required_state',
@@ -333,11 +323,9 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     const params = new URLSearchParams({
       fields: [
         'id',
-        'target',
-        'Target',
         'requested_for_email',
-        'requested_for_user.id',
-        'requested_by_user.id',
+        'requested_for_phone',
+        'required_state',
         'response_status',
         'timestamp'
       ].join(',')
@@ -451,32 +439,9 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   }
 
   private formatRequestTarget(request: RequestRecord): string {
-    if (request.requested_for_user) {
-      const user = request.requested_for_user as Record<string, unknown>;
-      const first = typeof user['first_name'] === 'string' ? user['first_name'] : '';
-      const last = typeof user['last_name'] === 'string' ? user['last_name'] : '';
-      const name = [first, last].filter(Boolean).join(' ');
-      if (name) return name;
-      const email = typeof user['email'] === 'string' ? user['email'] : '';
-      if (email) return email;
-    }
     if (request.requested_for_email) return request.requested_for_email;
     if (request.requested_for_phone) return request.requested_for_phone;
-    return this.formatTarget(request.target ?? request.Target);
-  }
-
-  private formatTarget(value: unknown): string {
-    if (!value) return 'Unknown';
-    if (typeof value === 'string') return value;
-    if (typeof value === 'object') {
-      const target = value as Record<string, unknown>;
-      const name = typeof target['name'] === 'string' ? target['name'] : '';
-      const email = typeof target['email'] === 'string' ? target['email'] : '';
-      if (name) return name;
-      if (email) return email;
-      if (typeof target['id'] === 'string') return target['id'];
-    }
-    return 'Unknown';
+    return 'scan';
   }
 
   private describeHttpError(err: any, fallback: string): string {

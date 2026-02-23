@@ -264,16 +264,11 @@ export class BusinessCenterService {
       limit: String(limit),
       fields: [
         'id',
-        'Target',
         'required_state',
         'response_status',
         'timestamp',
         'org_id',
         'requested_by_org',
-        'requested_for_user.id',
-        'requested_for_user.email',
-        'requested_for_user.first_name',
-        'requested_for_user.last_name',
         'requested_for_email',
         'requested_for_phone'
       ].join(',')
@@ -742,7 +737,7 @@ export class BusinessCenterService {
   private normalizeRequest(raw: any): RequestRecord {
     return {
       id: this.normalizeId(raw?.id) ?? '',
-      target: this.pickString(raw?.Target) ?? 'Business',
+      target: 'scan',
       recipient: this.requestRecipient(raw),
       required_state: this.pickString(raw?.required_state) ?? 'Unknown',
       response_status: this.pickString(raw?.response_status) ?? 'Pending',
@@ -838,10 +833,10 @@ export class BusinessCenterService {
     if (typeof raw === 'string') {
       return raw;
     }
-    const first = this.pickString(raw?.first_name);
-    const last = this.pickString(raw?.last_name);
+    const first = this.readString(raw?.first_name);
+    const last = this.readString(raw?.last_name);
     const fullName = [first, last].filter(Boolean).join(' ').trim();
-    if (fullName) {
+    if (fullName && /[A-Za-z\u0600-\u06FF]/.test(fullName)) {
       return fullName;
     }
     const email = this.pickString(raw?.email);

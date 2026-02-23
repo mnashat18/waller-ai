@@ -259,15 +259,6 @@ export class Requests implements OnInit, OnDestroy {
       limit: '50',
       fields: [
         'id',
-        'Target',
-        'requested_for_user.id',
-        'requested_for_user.first_name',
-        'requested_for_user.last_name',
-        'requested_for_user.email',
-        'requested_by_user.id',
-        'requested_by_user.email',
-        'requested_by_user.first_name',
-        'requested_by_user.last_name',
         'requested_for_email',
         'requested_for_phone',
         'required_state',
@@ -326,20 +317,11 @@ export class Requests implements OnInit, OnDestroy {
   }
 
   private formatTarget(r: RequestRecord): string {
-    if (r.requested_for_user && typeof r.requested_for_user === 'object') {
-      const u = r.requested_for_user as Record<string, unknown>;
-      const first = typeof u['first_name'] === 'string' ? u['first_name'] : '';
-      const last = typeof u['last_name'] === 'string' ? u['last_name'] : '';
-      const email = typeof u['email'] === 'string' ? u['email'] : '';
-      const name = [first, last].filter(Boolean).join(' ');
-      if (name) return name;
-      if (email) return email;
-    }
     if (r.requested_for_email) return r.requested_for_email;
     if (r.requested_for_phone) return r.requested_for_phone;
     if (typeof r.target === 'string') return r.target;
     if (typeof r.Target === 'string') return r.Target;
-    return 'Unknown';
+    return 'scan';
   }
 
   private formatTimestamp(value?: string): string {

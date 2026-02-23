@@ -107,12 +107,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   requestRecipient(req: any): string {
-    return req?.requested_for_email || req?.requested_for_phone || '-';
+    return req?.recipient || req?.requested_for_email || req?.requested_for_phone || '-';
   }
 
   requestTarget(req: any): string {
-    // في Directus عندك Target (capital) و target (small)
-    return req?.Target || req?.target || 'Scan';
+    return req?.target || req?.Target || 'scan';
   }
 
   // ===============================
