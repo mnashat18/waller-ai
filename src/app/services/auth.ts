@@ -357,6 +357,11 @@ export class AuthService {
       localStorage.getItem('access_token') ??
       localStorage.getItem('directus_token');
 
+    if (token && this.isTokenExpired(token)) {
+      this.clearStoredAccessTokenAliases();
+      return null;
+    }
+
     if (token) {
       this.syncAccessTokenAliases(token);
     }
@@ -400,7 +405,13 @@ export class AuthService {
   }
 
   getAuthHeaders(accessToken?: string): HttpHeaders {
-    const token = accessToken ?? this.getStoredAccessToken();
+    const candidate = accessToken ?? this.getStoredAccessToken();
+    const token = candidate && this.isTokenExpired(candidate) ? null : candidate;
+
+    if (candidate && !token) {
+      this.clearStoredAccessTokenAliases();
+    }
+
     return token
       ? new HttpHeaders({ Authorization: `Bearer ${token}` })
       : new HttpHeaders();
@@ -560,6 +571,31 @@ export class AuthService {
     } catch {
       return false;
     }
+  }
+
+  private isTokenExpired(token: string): boolean {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const exp = payload?.exp;
+      if (typeof exp !== 'number') {
+        return false;
+      }
+      return Math.floor(Date.now() / 1000) >= exp;
+    } catch {
+      return false;
+    }
+  }
+
+  private clearStoredAccessTokenAliases(): void {
+    localStorage.removeItem('token');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('directus_token');
+    sessionStorage.removeItem('is_logged_in');
   }
 
   private syncAccessTokenAliases(token: string): void {
