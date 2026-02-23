@@ -70,10 +70,11 @@ export class UpgradePlanComponent implements OnInit {
   }
 
   submitUpgradeRequest() {
-    if (this.submitting || !this.isFormValid()) {
-      if (!this.isFormValid()) {
+    const validationError = this.validateForm();
+    if (this.submitting || validationError) {
+      if (validationError) {
         this.feedbackType = 'error';
-        this.feedback = 'Please complete all required fields and accept terms.';
+        this.feedback = validationError;
       }
       return;
     }
@@ -172,15 +173,34 @@ export class UpgradePlanComponent implements OnInit {
     return Math.round(monthly);
   }
 
-  private isFormValid(): boolean {
-    return Boolean(
-      this.form.ownerName.trim() &&
-      this.form.companyName.trim() &&
-      this.form.businessName.trim() &&
-      this.form.workEmail.trim() &&
-      this.form.phone.trim() &&
-      this.form.acceptTerms
-    );
+  private validateForm(): string | null {
+    const ownerName = this.form.ownerName.trim();
+    const companyName = this.form.companyName.trim();
+    const businessName = this.form.businessName.trim();
+    const workEmail = this.form.workEmail.trim().toLowerCase();
+    const phone = this.form.phone.trim();
+
+    if (!ownerName || !companyName || !businessName || !workEmail || !phone || !this.form.acceptTerms) {
+      return 'Please complete all required fields and accept terms.';
+    }
+
+    if (!this.isEmail(workEmail)) {
+      return 'Work email format is invalid.';
+    }
+
+    if (this.isEmail(companyName)) {
+      return 'Company name must be your company name, not an email.';
+    }
+
+    if (this.isEmail(businessName)) {
+      return 'Business name must be your business name, not an email.';
+    }
+
+    return null;
+  }
+
+  private isEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   }
 
   private prefillFromToken() {

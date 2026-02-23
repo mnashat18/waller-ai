@@ -1,3 +1,5 @@
-<router-outlet></router-outlet>
+<div class="root-route-shell" [class.is-transitioning]="isRouteTransitioning">
+  <router-outlet></router-outlet>
+</div>
 <app-new-user-guide></app-new-user-guide>
 <app-subscription-expiry-ads></app-subscription-expiry-ads>

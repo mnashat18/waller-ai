@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
-import { Component, AfterViewInit, HostListener } from '@angular/core';
-import { RouterModule, RouterOutlet } from '@angular/router';
+import { AfterViewInit, Component, HostListener, OnDestroy } from '@angular/core';
+import { NavigationEnd, Router, RouterModule, RouterOutlet } from '@angular/router';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-public.layout',
@@ -9,13 +10,26 @@ import { RouterModule, RouterOutlet } from '@angular/router';
   templateUrl: './public.layout.html',
   styleUrl: './public.layout.css'
 })
-export class PublicLayout implements AfterViewInit {
+export class PublicLayout implements AfterViewInit, OnDestroy {
   showScrollTop = false;
+  isTransitioning = false;
+
+  private navSub?: Subscription;
+  private transitionStartTimer: ReturnType<typeof setTimeout> | null = null;
+  private transitionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private router: Router) {}
 
   ngAfterViewInit() {
     this.startSnow();
     // Defer first check to the next tick to avoid NG0100 during first render cycle.
     setTimeout(() => this.updateScrollTop(), 0);
+
+    this.navSub = this.router.events.subscribe((event) => {
+      if (event instanceof NavigationEnd) {
+        this.triggerTransition();
+      }
+    });
   }
 
   @HostListener('window:scroll')
@@ -71,5 +85,32 @@ export class PublicLayout implements AfterViewInit {
     };
 
     animate();
+  }
+
+  private triggerTransition() {
+    if (this.transitionStartTimer) {
+      clearTimeout(this.transitionStartTimer);
+    }
+    if (this.transitionTimer) {
+      clearTimeout(this.transitionTimer);
+    }
+
+    this.isTransitioning = false;
+    this.transitionStartTimer = setTimeout(() => {
+      this.isTransitioning = true;
+      this.transitionTimer = setTimeout(() => {
+        this.isTransitioning = false;
+      }, 420);
+    }, 0);
+  }
+
+  ngOnDestroy() {
+    this.navSub?.unsubscribe();
+    if (this.transitionStartTimer) {
+      clearTimeout(this.transitionStartTimer);
+    }
+    if (this.transitionTimer) {
+      clearTimeout(this.transitionTimer);
+    }
   }
 }

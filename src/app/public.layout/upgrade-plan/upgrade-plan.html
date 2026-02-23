@@ -16,21 +16,25 @@
         <label class="field">
           <span>Your name *</span>
           <input [(ngModel)]="form.ownerName" placeholder="Example: Ahmed Ali" />
+          <small>Full owner/contact person name.</small>
         </label>
 
         <label class="field">
           <span>Company name *</span>
           <input [(ngModel)]="form.companyName" placeholder="Example: Delta Logistics" />
+          <small>Official company legal name (not email).</small>
         </label>
 
         <label class="field">
           <span>Business name *</span>
           <input [(ngModel)]="form.businessName" placeholder="Example: Delta Fleet Wellness" />
+          <small>Brand or operating name shown to team/users.</small>
         </label>
 
         <label class="field">
           <span>Work email *</span>
           <input [(ngModel)]="form.workEmail" type="email" placeholder="name@company.com" />
+          <small>Company email used for business communication.</small>
         </label>
 
         <label class="field">

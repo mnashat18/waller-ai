@@ -491,15 +491,27 @@ body {
 }
 
 .app-content.is-transitioning {
-  animation: pageTransition 0.38s ease;
+  animation: pageTransition 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: 50% 0;
+  will-change: transform, opacity, filter;
 }
 
 @keyframes pageTransition {
   from {
-    opacity: 0.6;
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+    filter: blur(2px);
   }
   to {
     opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-content.is-transitioning {
+    animation: none;
   }
 }
 

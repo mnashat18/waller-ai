@@ -76,6 +76,11 @@
   color: rgba(226, 232, 240, 0.86);
 }
 
+.field small {
+  font-size: 0.76rem;
+  color: rgba(148, 163, 184, 0.95);
+}
+
 .field input,
 .field textarea {
   width: 100%;

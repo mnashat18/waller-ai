@@ -122,7 +122,6 @@ type AccessContext = {
 @Injectable({ providedIn: 'root' })
 export class BusinessCenterService {
   private api = environment.API_URL;
-  private readonly trialDays = 14;
 
   constructor(private http: HttpClient) {}
 
@@ -145,8 +144,7 @@ export class BusinessCenterService {
           } as BusinessHubAccessState);
         }
 
-        return this.ensureBusinessProfileForUserId(resolved.userId, resolved.token).pipe(
-          switchMap(() => this.fetchOwnedProfile(resolved.userId as string, resolved.token)),
+        return this.fetchOwnedProfile(resolved.userId as string, resolved.token).pipe(
           switchMap((ownedProfile) => {
             if (ownedProfile) {
               return of({
@@ -209,17 +207,7 @@ export class BusinessCenterService {
             map(() => owned)
           );
         }
-
-        return this.createOwnedProfile(user, userId, token).pipe(
-          switchMap((created) => {
-            if (!created?.id) {
-              return of(null);
-            }
-            return this.ensureOwnerMembership(created.id, userId, token).pipe(
-              map(() => created)
-            );
-          })
-        );
+        return of(null);
       }),
       catchError(() => of(null))
     );
@@ -251,7 +239,7 @@ export class BusinessCenterService {
       `${this.api}/items/business_profile_members?${params.toString()}`,
       this.requestOptions(access.token)
     ).pipe(
-      map((res) => (res.data ?? []).map((row) => this.normalizeMember(row)))
+      map((res) => this.dedupeMembers((res.data ?? []).map((row) => this.normalizeMember(row))))
     );
   }
 
@@ -582,7 +570,7 @@ export class BusinessCenterService {
   private fetchOwnedProfile(userId: string, token: string | null): Observable<BusinessProfile | null> {
     const params = new URLSearchParams({
       sort: '-id',
-      limit: '1',
+      limit: '20',
       fields: [
         'id',
         'owner_user',
@@ -611,7 +599,7 @@ export class BusinessCenterService {
       `${this.api}/items/business_profiles?${params.toString()}`,
       this.requestOptions(token)
     ).pipe(
-      map((res) => this.normalizeProfile((res.data ?? [])[0])),
+      map((res) => this.pickBestOwnedProfile(res.data ?? [])),
       catchError(() => of(null))
     );
   }
@@ -991,76 +979,6 @@ export class BusinessCenterService {
     );
   }
 
-  private ensureBusinessProfileForUserId(
-    userId: string,
-    token: string | null
-  ): Observable<BusinessProfile | null> {
-    return this.fetchOwnedProfile(userId, token).pipe(
-      switchMap((owned) => {
-        if (owned?.id) {
-          return this.ensureOwnerMembership(owned.id, userId, token).pipe(
-            map(() => owned)
-          );
-        }
-
-        const user = {
-          id: userId,
-          email: this.readString(typeof localStorage !== 'undefined' ? localStorage.getItem('user_email') : '')
-        } as Record<string, unknown>;
-
-        return this.createOwnedProfile(user, userId, token).pipe(
-          switchMap((created) => {
-            if (!created?.id) {
-              return of(null);
-            }
-            return this.ensureOwnerMembership(created.id, userId, token).pipe(
-              map(() => created)
-            );
-          })
-        );
-      }),
-      catchError(() => of(null))
-    );
-  }
-
-  private createOwnedProfile(
-    user: Record<string, unknown> | null | undefined,
-    userId: string,
-    token: string | null
-  ): Observable<BusinessProfile | null> {
-    const fullName = this.buildName(
-      this.readString(user?.['first_name']),
-      this.readString(user?.['last_name'])
-    );
-    const email = this.readString(user?.['email']);
-    const companyFallback = fullName || email || 'Business Account';
-    const businessFallback = fullName ? `${fullName} Business` : 'My Business';
-    const now = new Date();
-    const trialExpiresAt = new Date(now.getTime() + this.trialDays * 24 * 60 * 60 * 1000);
-
-    const payload: Record<string, unknown> = {
-      owner_user: userId,
-      company_name: companyFallback,
-      business_name: businessFallback,
-      contact_name: fullName || companyFallback,
-      work_email: email || null,
-      plan_code: 'business',
-      billing_status: 'trial',
-      trial_started_at: now.toISOString(),
-      trial_expires_at: trialExpiresAt.toISOString(),
-      is_active: true
-    };
-
-    return this.http.post<{ data?: any }>(
-      `${this.api}/items/business_profiles`,
-      payload,
-      this.requestOptions(token)
-    ).pipe(
-      map((res) => this.normalizeProfile(res?.data)),
-      catchError(() => of(null))
-    );
-  }
-
   private ensureOwnerMembership(
     profileId: string,
     userId: string,
@@ -1395,8 +1313,73 @@ export class BusinessCenterService {
     };
   }
 
-  private buildName(first: string, last: string): string {
-    return [first.trim(), last.trim()].filter(Boolean).join(' ').trim();
+  private pickBestOwnedProfile(rows: any[]): BusinessProfile | null {
+    const profiles = (rows ?? [])
+      .map((row) => this.normalizeProfile(row))
+      .filter((row): row is BusinessProfile => Boolean(row));
+
+    if (!profiles.length) {
+      return null;
+    }
+
+    const scored = profiles.map((profile) => ({
+      profile,
+      score: this.profileCompletenessScore(profile)
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0].profile;
+  }
+
+  private profileCompletenessScore(profile: BusinessProfile): number {
+    const fields = [
+      profile.company_name,
+      profile.business_name,
+      profile.contact_name,
+      profile.work_email,
+      profile.phone,
+      profile.industry,
+      profile.team_size,
+      profile.country,
+      profile.city,
+      profile.address,
+      profile.website
+    ];
+
+    let score = fields.reduce((sum, value) => sum + (this.pickString(value) ? 1 : 0), 0);
+
+    if (this.isEmailLike(profile.company_name)) {
+      score -= 3;
+    }
+    if (this.isEmailLike(profile.business_name)) {
+      score -= 2;
+    }
+
+    return score;
+  }
+
+  private dedupeMembers(rows: BusinessProfileMember[]): BusinessProfileMember[] {
+    const mapByUser = new Map<string, BusinessProfileMember>();
+
+    for (const row of rows ?? []) {
+      const key = this.pickString(row.user_id) ?? this.pickString(row.id);
+      if (!key) {
+        continue;
+      }
+      if (!mapByUser.has(key)) {
+        mapByUser.set(key, row);
+      }
+    }
+
+    return Array.from(mapByUser.values());
+  }
+
+  private isEmailLike(value: string | null | undefined): boolean {
+    const raw = this.pickString(value);
+    if (!raw) {
+      return false;
+    }
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
   }
 
   private mapManagedRole(role: ManageTeamMemberRole): BusinessMemberRole {

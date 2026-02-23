@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, Component, OnDestroy } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { HeaderComponent } from './header/header';
@@ -39,33 +39,44 @@ import { SidebarComponent } from './sidebar/sidebar';
     </div>
   `
 })
-export class LayoutComponent implements OnDestroy, AfterViewInit {
+export class LayoutComponent implements OnDestroy, OnInit {
   isTransitioning = false;
   private navSub?: Subscription;
+  private transitionStartTimer: ReturnType<typeof setTimeout> | null = null;
   private transitionTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private router: Router) {}
 
-  ngAfterViewInit() {
+  ngOnInit() {
     this.navSub = this.router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
-        setTimeout(() => this.triggerTransition(), 0);
+        this.triggerTransition();
       }
     });
   }
 
   private triggerTransition() {
-    this.isTransitioning = true;
+    if (this.transitionStartTimer) {
+      clearTimeout(this.transitionStartTimer);
+    }
     if (this.transitionTimer) {
       clearTimeout(this.transitionTimer);
     }
-    this.transitionTimer = setTimeout(() => {
-      this.isTransitioning = false;
-    }, 380);
+
+    this.isTransitioning = false;
+    this.transitionStartTimer = setTimeout(() => {
+      this.isTransitioning = true;
+      this.transitionTimer = setTimeout(() => {
+        this.isTransitioning = false;
+      }, 420);
+    }, 0);
   }
 
   ngOnDestroy() {
     this.navSub?.unsubscribe();
+    if (this.transitionStartTimer) {
+      clearTimeout(this.transitionStartTimer);
+    }
     if (this.transitionTimer) {
       clearTimeout(this.transitionTimer);
     }
