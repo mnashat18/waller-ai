@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
 import { of, throwError } from 'rxjs';
@@ -7,7 +7,8 @@ import { map } from 'rxjs/operators';
 import {
   CreateRequestModalComponent,
   type CreateRequestForm,
-  type RequestTarget,
+  REQUIRED_STATE_OPTIONS,
+  type RequiredState,
   type SubmitFeedback
 } from '../../components/create-request-modal/create-request-modal';
 import { SubscriptionService } from '../../services/subscription.service';
@@ -19,7 +20,7 @@ import { environment } from 'src/environments/environment';
   templateUrl: './requests.html',
   styleUrl: './requests.css',
 })
-export class Requests implements OnInit {
+export class Requests implements OnInit, OnDestroy {
   showCreateModal = false;
   loadingPlanAccess = true;
   requests: RequestRow[] = [];
@@ -34,7 +35,8 @@ export class Requests implements OnInit {
   trialDaysRemaining: number | null = null;
   businessTrialNotice = '';
   businessInviteTrialNotice = '';
-  readonly fixedRequestTarget: RequestTarget = 'scan';
+  readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
+  private successToastTimer: ReturnType<typeof setTimeout> | null = null;
   requestStats = {
     total: 0,
     pending: 0,
@@ -50,6 +52,13 @@ export class Requests implements OnInit {
 
   ngOnInit() {
     this.loadPlanAccess();
+  }
+
+  ngOnDestroy() {
+    if (this.successToastTimer) {
+      clearTimeout(this.successToastTimer);
+      this.successToastTimer = null;
+    }
   }
 
   badgeClass(state: string): string {
@@ -76,9 +85,17 @@ export class Requests implements OnInit {
       return;
     }
 
-    const requestedFor = this.normalizeEmail(form.requestedFor);
+    const requestedFor = this.normalizeEmail(form.requestedForEmail);
+    const requiredState = this.normalizeRequiredState(form.requiredState);
+
     if (!requestedFor) {
       this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (!requiredState) {
+      this.submitFeedback = { type: 'error', message: 'Select a required state.' };
       this.cdr.detectChanges();
       return;
     }
@@ -101,7 +118,7 @@ export class Requests implements OnInit {
     this.submitFeedback = { type: 'info', message: 'Sending request...' };
     this.cdr.detectChanges();
 
-    this.submitRequestPayload(this.fixedRequestTarget, requestedFor, userToken);
+    this.submitRequestPayload(requestedFor, requiredState, userToken);
   }
 
   dismissPermissionNotice() {
@@ -441,8 +458,8 @@ export class Requests implements OnInit {
   }
 
   private submitRequestPayload(
-    target: RequestTarget,
     requestedForEmail: string,
+    requiredState: RequiredState,
     token: string | null
   ) {
     const email = this.normalizeEmail(requestedForEmail);
@@ -455,14 +472,14 @@ export class Requests implements OnInit {
 
     const payload: CreateRequestPayload = {
       requested_for_email: email,
-      target
+      required_state: requiredState
     };
 
     this.createRequest(payload, token).subscribe({
       next: (res) => {
         const createdId = this.normalizeId(res?.data?.id);
         if (!createdId) {
-          this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
+          this.showSuccessToast('Request sent successfully.');
           this.submittingRequest = false;
           this.showCreateModal = false;
           this.loadRequests();
@@ -472,7 +489,7 @@ export class Requests implements OnInit {
 
         this.fetchCreatedRequestById(createdId, token).subscribe({
           next: () => {
-            this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
+            this.showSuccessToast('Request sent successfully.');
             this.submittingRequest = false;
             this.showCreateModal = false;
             this.loadRequests();
@@ -568,6 +585,16 @@ export class Requests implements OnInit {
     return this.isValidEmail(normalized) ? normalized : null;
   }
 
+  private normalizeRequiredState(value: unknown): RequiredState | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const normalized = value.trim();
+    return (REQUIRED_STATE_OPTIONS as readonly string[]).includes(normalized)
+      ? normalized as RequiredState
+      : null;
+  }
+
   private normalizeId(value: unknown): string | null {
     if (typeof value === 'string') {
       const trimmed = value.trim();
@@ -589,6 +616,19 @@ export class Requests implements OnInit {
       ? localStorage.getItem('user_email')
       : null;
     return this.normalizeEmail(payloadEmail) ?? this.normalizeEmail(storedEmail);
+  }
+
+  private showSuccessToast(message: string): void {
+    this.submitFeedback = { type: 'success', message };
+    if (this.successToastTimer) {
+      clearTimeout(this.successToastTimer);
+    }
+    this.successToastTimer = setTimeout(() => {
+      if (this.submitFeedback?.type === 'success') {
+        this.submitFeedback = null;
+        this.cdr.detectChanges();
+      }
+    }, 3000);
   }
 }
 
@@ -612,6 +652,6 @@ type RequestRow = {
 };
 
 type CreateRequestPayload = {
-  target: RequestTarget;
-  requested_for_email?: string;
+  requested_for_email: string;
+  required_state: RequiredState;
 };

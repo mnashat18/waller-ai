@@ -112,9 +112,16 @@
     [submitting]="submittingRequest"
     [businessTrialNotice]="businessTrialNotice"
     [businessInviteTrialNotice]="businessInviteTrialNotice"
+    [requiredStateOptions]="requiredStateOptions"
     (submitRequest)="handleCreateRequest($event)"
     (close)="showCreateModal = false">
   </app-create-request-modal>
+
+  <div
+    *ngIf="submitFeedback?.type === 'success'"
+    class="fixed left-1/2 top-4 z-[1350] w-[calc(100%-2.5rem)] -translate-x-1/2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-lg">
+    {{ submitFeedback?.message }}
+  </div>
 
   <div
     *ngIf="showPermissionNotice"

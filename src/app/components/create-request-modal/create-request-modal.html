@@ -18,20 +18,30 @@
       {{ businessTrialNotice }}
     </div>
 
-    <!-- Requested For -->
+    <!-- Recipient Email -->
     <div>
-      <label class="label" for="request-user-id">Requested For (Email)</label>
+      <label class="label" for="request-user-id">Recipient Email</label>
       <input
-        #requestedForInput
+        #requestedForEmailInput
         class="input"
         id="request-user-id"
+        type="email"
+        required
         placeholder="name@email.com" />
-      <p class="text-xs text-slate-500 mt-2">
-        We will send an invite if the user is not registered yet.
-      </p>
-      <p
-        *ngIf="businessInviteTrialNotice"
-        class="text-xs text-amber-600 mt-2">
+    </div>
+
+    <!-- Required State -->
+    <div>
+      <label class="label" for="required-state">Required State</label>
+      <select
+        #requiredStateInput
+        id="required-state"
+        class="input"
+        required>
+        <option value="" selected disabled>Select required state</option>
+        <option *ngFor="let state of requiredStateOptions" [value]="state">{{ state }}</option>
+      </select>
+      <p *ngIf="businessInviteTrialNotice" class="text-xs text-amber-600 mt-2">
         {{ businessInviteTrialNotice }}
       </p>
     </div>
@@ -40,7 +50,7 @@
       type="button"
       class="btn-primary w-full disabled:opacity-60 disabled:cursor-not-allowed"
       [disabled]="submitting"
-      (click)="onSubmit(requestedForInput.value)">
+      (click)="onSubmit(requestedForEmailInput.value, requiredStateInput.value)">
       Send Request
     </button>
     <p

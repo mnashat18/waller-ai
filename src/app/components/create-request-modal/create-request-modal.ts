@@ -14,18 +14,24 @@ export class CreateRequestModalComponent {
   @Input() submitting = false;
   @Input() businessTrialNotice = '';
   @Input() businessInviteTrialNotice = '';
+  @Input() requiredStateOptions: readonly RequiredState[] = REQUIRED_STATE_OPTIONS;
 
-  onSubmit(requestedFor: string): void {
+  onSubmit(requestedForEmail: string, requiredState: string): void {
+    const normalizedState = this.isRequiredState(requiredState) ? requiredState : '';
     this.submitRequest.emit({
-      target: 'scan',
-      requestedFor
+      requestedForEmail,
+      requiredState: normalizedState
     });
+  }
+
+  private isRequiredState(value: string): value is RequiredState {
+    return (REQUIRED_STATE_OPTIONS as readonly string[]).includes(value);
   }
 }
 
 export type CreateRequestForm = {
-  target: RequestTarget;
-  requestedFor: string;
+  requestedForEmail: string;
+  requiredState: RequiredState | '';
 };
 
 export type SubmitFeedback = {
@@ -33,4 +39,11 @@ export type SubmitFeedback = {
   message: string;
 };
 
-export type RequestTarget = 'scan';
+export type RequiredState = 'Stable' | 'Low Focus' | 'Elevated Fatigue' | 'High Risk';
+
+export const REQUIRED_STATE_OPTIONS: readonly RequiredState[] = [
+  'Stable',
+  'Low Focus',
+  'Elevated Fatigue',
+  'High Risk'
+];
