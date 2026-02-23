@@ -95,7 +95,16 @@
         <div class="panel-header">
           <h3 class="panel-title">2) Team Members</h3>
           <span class="chip">{{ teamMembers.length }} members</span>
-          <span class="chip">{{ canManageMembers ? 'Can Manage' : 'Read Only' }}</span>
+          <button
+            *ngIf="canManageMembers; else memberReadonlyChip"
+            type="button"
+            class="chip chip-button"
+            (click)="toggleTeamMemberManager()">
+            {{ showTeamMemberManager ? 'Close Manage' : 'Can Manage' }}
+          </button>
+          <ng-template #memberReadonlyChip>
+            <span class="chip">Read Only</span>
+          </ng-template>
         </div>
 
         <div class="table-shell">
@@ -120,6 +129,44 @@
               </tr>
             </tbody>
           </table>
+        </div>
+
+        <div *ngIf="canManageMembers && showTeamMemberManager" class="member-manager mt-4">
+          <div class="form-grid">
+            <label>
+              Member Email
+              <input
+                class="input"
+                type="email"
+                placeholder="member@company.com"
+                autocomplete="email"
+                [(ngModel)]="teamMemberForm.email" />
+            </label>
+
+            <label>
+              Role
+              <select class="input" [(ngModel)]="teamMemberForm.role">
+                <option
+                  *ngFor="let option of memberRoleOptions; trackBy: trackById"
+                  [ngValue]="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+
+          <div class="manager-note mt-3">
+            Business role is saved as admin access in backend.
+          </div>
+
+          <div class="mt-4 flex items-center gap-3">
+            <button
+              class="btn-primary px-4 py-2 rounded-full"
+              [disabled]="memberSubmitting"
+              (click)="submitTeamMember()">
+              {{ memberSubmitting ? 'Saving...' : 'Save Member' }}
+            </button>
+          </div>
         </div>
       </section>
 

@@ -42,6 +42,8 @@ export type BusinessProfileMember = {
 
 export type BusinessMemberRole = 'owner' | 'admin' | 'member' | 'viewer';
 
+export type ManageTeamMemberRole = 'owner' | 'business' | 'member';
+
 export type BusinessRolePermissions = {
   canInvite: boolean;
   canUpgrade: boolean;
@@ -250,6 +252,49 @@ export class BusinessCenterService {
       this.requestOptions(access.token)
     ).pipe(
       map((res) => (res.data ?? []).map((row) => this.normalizeMember(row)))
+    );
+  }
+
+  upsertTeamMember(
+    profileId: string | null,
+    userEmail: string,
+    role: ManageTeamMemberRole
+  ): Observable<ActionResult> {
+    const access = this.getAccessContext();
+    const normalizedProfileId = this.normalizeId(profileId);
+    const normalizedEmail = this.pickString(userEmail)?.toLowerCase() ?? null;
+
+    if (!normalizedProfileId) {
+      return of({ ok: false, message: 'Business profile is missing.' });
+    }
+    if (!normalizedEmail) {
+      return of({ ok: false, message: 'Member email is required.' });
+    }
+
+    const backendRole = this.mapManagedRole(role);
+
+    return this.findUserIdByEmail(normalizedEmail, access.token).pipe(
+      switchMap((userId) => {
+        if (!userId) {
+          return of({
+            ok: false,
+            message: 'No registered user found for this email.'
+          });
+        }
+
+        return this.upsertBusinessProfileMember(
+          normalizedProfileId,
+          userId,
+          backendRole,
+          access.token
+        );
+      }),
+      catchError((err) =>
+        of({
+          ok: false,
+          message: this.toFriendlyError(err, 'Failed to manage team member.')
+        })
+      )
     );
   }
 
@@ -1059,6 +1104,90 @@ export class BusinessCenterService {
     );
   }
 
+  private findUserIdByEmail(email: string, token: string | null): Observable<string | null> {
+    const params = new URLSearchParams({
+      limit: '1',
+      fields: 'id,email'
+    });
+    params.set('filter[email][_eq]', email);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/users?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => this.normalizeId((res.data ?? [])[0]?.id)),
+      catchError(() => of(null))
+    );
+  }
+
+  private upsertBusinessProfileMember(
+    profileId: string,
+    userId: string,
+    role: BusinessMemberRole,
+    token: string | null
+  ): Observable<ActionResult> {
+    const params = new URLSearchParams({
+      sort: '-id',
+      limit: '1',
+      fields: 'id,member_role,status,user,business_profile'
+    });
+    params.set('filter[business_profile][_eq]', profileId);
+    params.set('filter[user][_eq]', userId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/business_profile_members?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      switchMap((res) => {
+        const existing = Array.isArray(res?.data) ? res.data[0] : null;
+        const payload: Record<string, unknown> = {
+          member_role: role,
+          status: 'active'
+        };
+
+        if (existing?.id) {
+          return this.http.patch(
+            `${this.api}/items/business_profile_members/${existing.id}`,
+            payload,
+            this.requestOptions(token)
+          ).pipe(
+            map(() => ({ ok: true, message: 'Team member updated successfully.' })),
+            catchError((err) =>
+              of({
+                ok: false,
+                message: this.toFriendlyError(err, 'Failed to update team member.')
+              })
+            )
+          );
+        }
+
+        return this.http.post(
+          `${this.api}/items/business_profile_members`,
+          {
+            business_profile: profileId,
+            user: userId,
+            ...payload
+          },
+          this.requestOptions(token)
+        ).pipe(
+          map(() => ({ ok: true, message: 'Team member added successfully.' })),
+          catchError((err) =>
+            of({
+              ok: false,
+              message: this.toFriendlyError(err, 'Failed to add team member.')
+            })
+          )
+        );
+      }),
+      catchError((err) =>
+        of({
+          ok: false,
+          message: this.toFriendlyError(err, 'Failed to load team member state.')
+        })
+      )
+    );
+  }
+
   private getToken(): string | null {
     const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!token || this.isTokenExpired(token)) {
@@ -1268,6 +1397,13 @@ export class BusinessCenterService {
 
   private buildName(first: string, last: string): string {
     return [first.trim(), last.trim()].filter(Boolean).join(' ').trim();
+  }
+
+  private mapManagedRole(role: ManageTeamMemberRole): BusinessMemberRole {
+    const normalized = (role ?? 'member').toString().trim().toLowerCase();
+    if (normalized === 'owner') return 'owner';
+    if (normalized === 'business') return 'admin';
+    return 'member';
   }
 
   private toTimestamp(value: string | null | undefined): number | null {

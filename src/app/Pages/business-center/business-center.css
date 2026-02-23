@@ -124,6 +124,26 @@
   gap: 10px;
 }
 
+.chip-button {
+  cursor: pointer;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.chip-button:hover {
+  border-color: rgba(56, 189, 248, 0.7);
+}
+
+.member-manager {
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  padding-top: 14px;
+}
+
+.manager-note {
+  color: rgba(148, 163, 184, 0.95);
+  font-size: 0.82rem;
+}
+
 @media (max-width: 1200px) {
   .business-grid {
     grid-template-columns: 1fr;

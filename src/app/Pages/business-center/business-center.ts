@@ -9,6 +9,7 @@ import {
   BusinessCenterService,
   BusinessHubAccessState,
   BusinessProfileMember,
+  ManageTeamMemberRole,
   ReportExportRecord,
   RequestInviteRecord,
   RequestRecord
@@ -76,6 +77,22 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   upgradeSubmitting = false;
   exportSubmitting = false;
   inviteSubmitting = false;
+  memberSubmitting = false;
+  showTeamMemberManager = false;
+
+  readonly memberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [
+    { value: 'member', label: 'Member' },
+    { value: 'business', label: 'Business' },
+    { value: 'owner', label: 'Owner' }
+  ];
+
+  teamMemberForm: {
+    email: string;
+    role: ManageTeamMemberRole;
+  } = {
+    email: '',
+    role: 'member'
+  };
 
   exportForm = {
     format: 'csv' as 'csv' | 'pdf',
@@ -129,9 +146,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   accessBadgeLabel(): string {
-    if (!this.profile) return 'Plan: Free';
-    const plan = (this.profile?.plan_code ?? 'free').toString();
-    return `Plan: ${plan}`;
+    if (this.loadingAccess || this.hasBusinessAccess) {
+      return 'Plan: Business';
+    }
+
+    const plan = (this.profile?.plan_code ?? 'free').toString().trim().toLowerCase();
+    return plan === 'business' ? 'Plan: Business' : 'Plan: Free';
   }
 
   roleBadgeLabel(): string {
@@ -243,6 +263,53 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         this.inviteForm.phone = '';
         this.reloadInvites();
       }
+    });
+  }
+
+  toggleTeamMemberManager(): void {
+    if (!this.canManageMembers || this.isReadOnly) {
+      this.showFeedback('error', 'Your role cannot manage team members.');
+      return;
+    }
+    this.showTeamMemberManager = !this.showTeamMemberManager;
+  }
+
+  submitTeamMember(): void {
+    if (!this.canManageMembers || this.isReadOnly) {
+      this.showFeedback('error', 'Your role cannot manage team members.');
+      return;
+    }
+
+    const profileId = this.pickId(this.profile?.id);
+    if (!profileId) {
+      this.showFeedback('error', 'Business profile is missing.');
+      return;
+    }
+
+    const email = this.normalizeEmail(this.teamMemberForm.email);
+    if (!this.isValidEmail(email)) {
+      this.showFeedback('error', 'Enter a valid member email.');
+      return;
+    }
+
+    const role = this.teamMemberForm.role;
+    if (!this.memberRoleOptions.some((item) => item.value === role)) {
+      this.showFeedback('error', 'Select a valid role.');
+      return;
+    }
+
+    this.memberSubmitting = true;
+    this.showFeedback('info', 'Saving team member...');
+
+    this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
+      finalize(() => (this.memberSubmitting = false))
+    ).subscribe((res: any) => {
+      this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Member update finished.');
+      if (!res?.ok) return;
+
+      this.teamMemberForm.email = '';
+      this.teamMemberForm.role = 'member';
+      this.reloadTeamMembers();
     });
   }
 
@@ -376,6 +443,21 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     });
   }
 
+  private reloadTeamMembers(): void {
+    const profileId = this.pickId(this.profile?.id);
+    if (!profileId) {
+      this.teamMembers = [];
+      return;
+    }
+
+    this.businessCenter.listTeamMembers(profileId).subscribe({
+      next: (rows: any) => (this.teamMembers = rows ?? []),
+      error: (err: any) => {
+        this.showFeedback('error', this.describeHttpError(err, 'Failed to reload team members.'));
+      }
+    });
+  }
+
   private reloadExports(): void {
     this.businessCenter.listReportExports(this.accessState?.orgId ?? null).subscribe({
       next: (rows: any) => (this.reportExports = rows ?? []),
@@ -478,5 +560,19 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     const normalized = value.trim().toLowerCase();
     if (!normalized) return '';
     return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
+  }
+
+  private isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  private normalizeEmail(value: string): string {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  private pickId(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && !Number.isNaN(value)) return String(value);
+    return null;
   }
 }

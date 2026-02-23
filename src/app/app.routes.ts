@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, CanMatchFn, Router, Routes } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { catchError, map, of, timeout } from 'rxjs';
 
 import { PublicLayout } from './public.layout/public.layout';
 import { Authlanding } from './public.layout/authlanding/authlanding';
@@ -42,6 +42,7 @@ const paymentAccessGuard: CanActivateFn = () => {
   }
 
   return subscriptions.isBusinessOnboardingComplete().pipe(
+    timeout(8000),
     map((completed) =>
       completed ? router.createUrlTree(['/dashboard']) : true
     ),
@@ -74,6 +75,7 @@ const businessOnboardingGuard: CanActivateFn = (_, state) => {
   const router = inject(Router);
 
   return subscriptions.isBusinessOnboardingComplete().pipe(
+    timeout(8000),
     map((completed) =>
       completed
         ? true
@@ -81,13 +83,8 @@ const businessOnboardingGuard: CanActivateFn = (_, state) => {
           queryParams: { onboarding: 'required' }
         })
     ),
-    catchError(() =>
-      of(
-        router.createUrlTree(['/payment'], {
-          queryParams: { onboarding: 'required' }
-        })
-      )
-    )
+    // Fail-open on network/timeout so routes do not get stuck.
+    catchError(() => of(true))
   );
 };
 
@@ -124,6 +121,14 @@ export const routes: Routes = [
   canMatch: [mobileProfileMatch],
   canActivate: [businessOnboardingGuard],
   component: ProfileMobileComponent
+},
+{
+  path: 'business-center',
+  canMatch: [mobileBusinessCenterMatch],
+  canActivate: [businessOnboardingGuard],
+  loadComponent: () =>
+    import('./Pages/business-center/business-center')
+      .then(m => m.BusinessCenterComponent)
 },
 
 
@@ -257,5 +262,4 @@ export const routes: Routes = [
 
 
 ];
-
 
