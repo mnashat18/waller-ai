@@ -62,7 +62,6 @@ export type RequestRecord = {
   response_status: string;
   timestamp?: string | null;
   org_id?: string | null;
-  user_created?: string | null;
 };
 
 export type CreateScanRequestPayload = {
@@ -319,26 +318,25 @@ export class BusinessCenterService {
 
   listRequests(orgId: string | null, limit = 60): Observable<RequestRecord[]> {
     const access = this.getAccessContext();
-    if (!orgId && !access.userId) {
+    if (!access.token && !access.userId) {
       return of([]);
     }
 
-    const orgRequests$ = orgId
-      ? this.fetchRequestsByOrg(orgId, limit, access.token).pipe(catchError(() => of([])))
-      : of([]);
-    const creatorRequests$ = access.userId
-      ? this.fetchRequestsByCreator(access.userId, limit, access.token).pipe(catchError(() => of([])))
-      : of([]);
+    const source$ = orgId
+      ? this.fetchRequestsByOrg(orgId, limit, access.token).pipe(
+          catchError(() => this.fetchRequestsVisible(limit, access.token))
+        )
+      : this.fetchRequestsVisible(limit, access.token);
 
-    return forkJoin([orgRequests$, creatorRequests$]).pipe(
-      map(([orgRows, creatorRows]) => this.mergeRequestsById([...orgRows, ...creatorRows])),
+    return source$.pipe(
+      map((rows) => this.mergeRequestsById(rows)),
       switchMap((rows) => this.attachRecipientIndustries(rows, access.token))
     );
   }
 
   createScanRequest(
     payload: CreateScanRequestPayload,
-    orgId?: string | null
+    _orgId?: string | null
   ): Observable<CreateScanRequestResult> {
     const access = this.getAccessContext();
     if (!access.token && !access.userId) {
@@ -360,21 +358,9 @@ export class BusinessCenterService {
       required_state: requiredState
     };
 
-    const resolvedOrgId = this.normalizeId(orgId) ?? access.orgId;
-    const primary: Record<string, unknown> = {
-      ...body
-    };
-    if (resolvedOrgId) {
-      primary['org_id'] = resolvedOrgId;
-      primary['requested_by_org'] = resolvedOrgId;
-    }
-    if (access.userId) {
-      primary['requested_by_user'] = access.userId;
-    }
-
     return this.http.post<{ data?: { id?: unknown } }>(
       `${this.api}/items/requests`,
-      primary,
+      body,
       this.requestOptions(access.token)
     ).pipe(
       timeout(this.requestTimeoutMs),
@@ -391,16 +377,9 @@ export class BusinessCenterService {
           });
         }
 
-        const fallbackWithOrg: Record<string, unknown> = {
-          ...body
-        };
-        if (resolvedOrgId) {
-          fallbackWithOrg['org_id'] = resolvedOrgId;
-        }
-
         return this.http.post<{ data?: { id?: unknown } }>(
           `${this.api}/items/requests`,
-          fallbackWithOrg,
+          body,
           this.requestOptions(access.token)
         ).pipe(
           timeout(this.requestTimeoutMs),
@@ -451,30 +430,18 @@ export class BusinessCenterService {
     );
   }
 
-  private fetchRequestsByCreator(
-    userId: string,
+  private fetchRequestsVisible(
     limit: number,
     token: string | null
   ): Observable<RequestRecord[]> {
     const params = this.buildRequestsParams(limit);
-    params.set('filter[user_created][_eq]', userId);
 
     return this.http.get<{ data?: any[] }>(
       `${this.api}/items/requests?${params.toString()}`,
       this.requestOptions(token)
     ).pipe(
       map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
-      catchError(() => {
-        const fallbackParams = this.buildRequestsParams(limit);
-        fallbackParams.set('filter[requested_by_user][_eq]', userId);
-        return this.http.get<{ data?: any[] }>(
-          `${this.api}/items/requests?${fallbackParams.toString()}`,
-          this.requestOptions(token)
-        ).pipe(
-          map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
-          catchError(() => of([]))
-        );
-      })
+      catchError(() => of([]))
     );
   }
 
@@ -487,11 +454,8 @@ export class BusinessCenterService {
         'required_state',
         'response_status',
         'timestamp',
-        'org_id',
-        'requested_by_org',
         'requested_for_email',
-        'requested_for_phone',
-        'user_created'
+        'requested_for_phone'
       ].join(',')
     });
   }
@@ -1155,8 +1119,7 @@ export class BusinessCenterService {
       required_state: this.pickString(raw?.required_state) ?? 'Unknown',
       response_status: this.pickString(raw?.response_status) ?? 'Pending',
       timestamp: this.pickString(raw?.timestamp),
-      org_id: this.normalizeId(raw?.org_id) ?? this.normalizeId(raw?.requested_by_org),
-      user_created: this.normalizeId(raw?.user_created)
+      org_id: this.normalizeId(raw?.org_id) ?? this.normalizeId(raw?.requested_by_org)
     };
   }
 

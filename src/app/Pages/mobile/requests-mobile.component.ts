@@ -294,7 +294,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.fetchRequests(token, { orgId: this.currentOrgId ?? undefined }).subscribe({
+    this.fetchRequests(token, null).subscribe({
       next: (requests) => this.applyRequests(requests),
       error: (fetchErr) => {
         console.error('[requests-mobile] requests error:', fetchErr);
@@ -323,7 +323,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
   private fetchRequests(
     token: string | null,
-    filters: { requestedForUserId?: string; orgId?: string } | null
+    filters: { requestedForUserId?: string } | null
   ) {
     const headers = this.buildAuthHeaders(token);
     if (!headers) {
@@ -336,9 +336,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       'requested_for_phone',
       'required_state',
       'response_status',
-      'timestamp',
-      'org_id',
-      'requested_by_org'
+      'timestamp'
     ].join(',');
     const params = new URLSearchParams({
       sort: '-timestamp',
@@ -348,11 +346,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     if (filters?.requestedForUserId) {
       params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
-    }
-
-    if (filters?.orgId) {
-      params.set('filter[_or][0][org_id][_eq]', filters.orgId);
-      params.set('filter[_or][1][requested_by_org][_eq]', filters.orgId);
     }
 
     return this.http.get<{ data?: RequestRecord[] }>(
@@ -806,8 +799,6 @@ type RequestRecord = {
   required_state?: string;
   response_status?: string;
   timestamp?: string;
-  org_id?: string;
-  requested_by_org?: string;
 };
 
 type RequestRow = {

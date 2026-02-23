@@ -497,9 +497,7 @@ export class Requests implements OnInit, OnDestroy {
         'requested_for_phone',
         'required_state',
         'response_status',
-        'timestamp',
-        'org_id',
-        'requested_by_org'
+        'timestamp'
       ].join(',')
     });
 
@@ -514,9 +512,6 @@ export class Requests implements OnInit, OnDestroy {
         return;
       }
       params.set('filter[requested_for_user][_eq]', userId);
-    } else if (this.currentOrgId) {
-      params.set('filter[_or][0][org_id][_eq]', this.currentOrgId);
-      params.set('filter[_or][1][requested_by_org][_eq]', this.currentOrgId);
     }
 
     this.http.get<{ data?: RequestRecord[] }>(
@@ -771,14 +766,11 @@ type RequestRecord = {
   target?: unknown;
   Target?: unknown;
   requested_for_user?: unknown;
-  requested_by_user?: unknown;
   requested_for_email?: string;
   requested_for_phone?: string;
   required_state?: string;
   response_status?: string;
   timestamp?: string;
-  org_id?: string;
-  requested_by_org?: string;
 };
 
 type RequestRow = {

@@ -380,63 +380,37 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const popup = window.open('', '_blank', 'noopener,noreferrer,width=1080,height=820');
-    if (!popup) {
-      this.showFeedback('error', 'Popup blocked. Allow popups to export PDF.');
-      return;
-    }
-
     const scopeLabel = selection.scope === 'selected' ? 'Selected Members' : 'Entire Team';
     const generatedAt = this.formatDate(new Date().toISOString());
-    const tableRows = rows.map((event) => `
-      <tr>
-        <td>${this.escapeHtml(event.actor_label ?? '-')}</td>
-        <td>${this.escapeHtml(event.action ?? '-')}</td>
-        <td>${this.escapeHtml(`${event.entity_type ?? '-'} #${event.entity_id ?? '-'}`)}</td>
-        <td>${this.escapeHtml(event.target_user_label ?? '-')}</td>
-        <td>${this.escapeHtml(this.formatDate(event.date_created))}</td>
-      </tr>
-    `).join('');
 
-    popup.document.open();
-    popup.document.write(`
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Activity Report</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }
-            h1 { margin: 0 0 8px; font-size: 20px; }
-            p { margin: 0 0 12px; color: #475569; }
-            table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 12px; }
-            th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
-            th { background: #e2e8f0; font-weight: 700; }
-          </style>
-        </head>
-        <body>
-          <h1>Business Activity Report</h1>
-          <p>Scope: ${this.escapeHtml(scopeLabel)}</p>
-          <p>Generated at: ${this.escapeHtml(generatedAt)}</p>
-          <p>Events: ${rows.length}</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Entity</th>
-                <th>Target</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody>${tableRows}</tbody>
-          </table>
-        </body>
-      </html>
-    `);
-    popup.document.close();
-    popup.focus();
-    setTimeout(() => popup.print(), 250);
+    const lines: string[] = [
+      'Business Activity Report',
+      `Scope: ${scopeLabel}`,
+      `Generated at: ${generatedAt}`,
+      `Events: ${rows.length}`,
+      '',
+      'Actor | Action | Entity | Target | Date'
+    ];
+
+    for (const event of rows) {
+      const line = [
+        event.actor_label ?? '-',
+        event.action ?? '-',
+        `${event.entity_type ?? '-'} #${event.entity_id ?? '-'}`,
+        event.target_user_label ?? '-',
+        this.formatDate(event.date_created)
+      ].join(' | ');
+
+      const wrapped = this.wrapPdfLine(line, 108);
+      lines.push(...wrapped);
+    }
+
+    const pdfData = this.buildSimplePdfDocument(lines);
+    this.downloadBlobFile(
+      new Blob([pdfData], { type: 'application/pdf' }),
+      `activity-report-${this.todayDateKey()}-${this.exportForm.scope}.pdf`
+    );
+    this.showFeedback('success', `PDF exported (${rows.length} events).`);
   }
 
   addRecipientEmailField(): void {
@@ -801,8 +775,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       required_state: requiredState,
       response_status: 'Pending',
       timestamp: new Date().toISOString(),
-      org_id: this.accessState?.orgId ?? null,
-      user_created: this.currentUserId()
+      org_id: this.accessState?.orgId ?? null
     };
     this.optimisticRequests.set(optimisticId, row);
     return row;
@@ -1346,12 +1319,16 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   private downloadTextFile(content: string, filename: string, mimeType: string): void {
+    const blob = new Blob([content], { type: mimeType });
+    this.downloadBlobFile(blob, filename);
+  }
+
+  private downloadBlobFile(blob: Blob, filename: string): void {
     if (typeof document === 'undefined' || typeof URL === 'undefined') {
       this.showFeedback('error', 'Download is only available in browser sessions.');
       return;
     }
 
-    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -1360,6 +1337,151 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     anchor.click();
     document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
+  }
+
+  private wrapPdfLine(value: string, maxLen: number): string[] {
+    const text = (value ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) {
+      return [''];
+    }
+
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= maxLen) {
+        current = candidate;
+        continue;
+      }
+
+      if (current) {
+        lines.push(current);
+      }
+
+      if (word.length > maxLen) {
+        let start = 0;
+        while (start < word.length) {
+          lines.push(word.slice(start, start + maxLen));
+          start += maxLen;
+        }
+        current = '';
+      } else {
+        current = word;
+      }
+    }
+
+    if (current) {
+      lines.push(current);
+    }
+
+    return lines.length ? lines : [''];
+  }
+
+  private sanitizePdfText(value: string): string {
+    return (value ?? '').replace(/[^\x20-\x7E]/g, '?');
+  }
+
+  private escapePdfText(value: string): string {
+    return this.sanitizePdfText(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
+  }
+
+  private buildSimplePdfDocument(lines: string[]): string {
+    const pageWidth = 612;
+    const pageHeight = 792;
+    const marginX = 42;
+    const marginY = 42;
+    const fontSize = 10;
+    const lineHeight = 14;
+
+    const usableHeight = pageHeight - marginY * 2;
+    const linesPerPage = Math.max(1, Math.floor(usableHeight / lineHeight));
+
+    const normalizedLines = lines.map((line) => this.escapePdfText(line));
+    const pages: string[][] = [];
+    for (let i = 0; i < normalizedLines.length; i += linesPerPage) {
+      pages.push(normalizedLines.slice(i, i + linesPerPage));
+    }
+    if (!pages.length) {
+      pages.push(['No data']);
+    }
+
+    const fontObjectId = 3;
+    const pageObjectIds: number[] = [];
+    const contentObjectIds: number[] = [];
+    let nextObjectId = 4;
+
+    for (let i = 0; i < pages.length; i += 1) {
+      pageObjectIds.push(nextObjectId);
+      nextObjectId += 1;
+      contentObjectIds.push(nextObjectId);
+      nextObjectId += 1;
+    }
+
+    const maxObjectId = nextObjectId - 1;
+    const bodies = new Map<number, string>();
+
+    bodies.set(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    bodies.set(
+      2,
+      `<< /Type /Pages /Count ${pages.length} /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(' ')}] >>`
+    );
+    bodies.set(fontObjectId, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+    for (let i = 0; i < pages.length; i += 1) {
+      const pageId = pageObjectIds[i];
+      const contentId = contentObjectIds[i];
+      const pageLines = pages[i];
+
+      const streamLines = [
+        'BT',
+        `/F1 ${fontSize} Tf`,
+        `${lineHeight} TL`,
+        `${marginX} ${pageHeight - marginY} Td`
+      ];
+
+      for (const line of pageLines) {
+        streamLines.push(`(${line}) Tj`);
+        streamLines.push('T*');
+      }
+      streamLines.push('ET');
+
+      const streamContent = `${streamLines.join('\n')}\n`;
+      const streamBytes = this.utf8ByteLength(streamContent);
+
+      bodies.set(
+        pageId,
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentId} 0 R >>`
+      );
+      bodies.set(contentId, `<< /Length ${streamBytes} >>\nstream\n${streamContent}endstream`);
+    }
+
+    const offsets: number[] = new Array(maxObjectId + 1).fill(0);
+    let pdf = '%PDF-1.4\n';
+
+    for (let id = 1; id <= maxObjectId; id += 1) {
+      offsets[id] = this.utf8ByteLength(pdf);
+      const body = bodies.get(id) ?? '';
+      pdf += `${id} 0 obj\n${body}\nendobj\n`;
+    }
+
+    const xrefStart = this.utf8ByteLength(pdf);
+    pdf += `xref\n0 ${maxObjectId + 1}\n`;
+    pdf += '0000000000 65535 f \n';
+    for (let id = 1; id <= maxObjectId; id += 1) {
+      pdf += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+    }
+    pdf += `trailer\n<< /Size ${maxObjectId + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+
+    return pdf;
+  }
+
+  private utf8ByteLength(value: string): number {
+    return new TextEncoder().encode(value ?? '').length;
   }
 
   private generateOptimisticId(): string {
