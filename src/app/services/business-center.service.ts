@@ -193,6 +193,7 @@ export class BusinessCenterService {
         })
       ),
       switchMap((resolved) => {
+        console.log('resolved in getHubAccessState', resolved);
         if (!resolved.userId) {
           return of({
             userId: resolved.userId,
@@ -209,6 +210,7 @@ export class BusinessCenterService {
 
         return this.fetchOwnedProfile(resolved.userId as string, resolved.token).pipe(
           switchMap((ownedProfile) => {
+            console.log('ownedProfile result:', ownedProfile);
             this.debug('getHubAccessState:ownedProfileLookup', {
               userId: resolved.userId,
               found: Boolean(ownedProfile?.id),
