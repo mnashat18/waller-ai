@@ -11,13 +11,11 @@ RUN npm run build -- --configuration production
 # Production stage
 FROM nginx:alpine
 
-# امسح أي config قديم
 RUN rm -rf /usr/share/nginx/html/*
 
-# انسخ ملفات Angular
-COPY --from=build /app/dist/wellar-ui/ /usr/share/nginx/html/
+# 👇 أهم سطر
+COPY --from=build /app/dist/ /usr/share/nginx/html/
 
-# nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
