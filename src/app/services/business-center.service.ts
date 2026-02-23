@@ -682,7 +682,7 @@ export class BusinessCenterService {
         }
 
         const params = new URLSearchParams({
-          sort: '-date_created',
+          sort: '-sent_at',
           limit: String(limit),
           fields: [
             'id',
@@ -695,8 +695,7 @@ export class BusinessCenterService {
             'token',
             'sent_at',
             'claimed_at',
-            'expires_at',
-            'date_created'
+            'expires_at'
           ].join(',')
         });
         params.set('filter[business_profile][_eq]', scope.businessProfileId);
@@ -1465,7 +1464,7 @@ export class BusinessCenterService {
       expires_at: this.pickString(raw?.expires_at),
       business_profile: this.normalizeId(raw?.business_profile),
       requested_by_user: this.normalizeId(raw?.requested_by_user),
-      date_created: this.pickString(raw?.date_created)
+      date_created: this.pickString(raw?.date_created) ?? this.pickString(raw?.sent_at)
     };
   }
 
