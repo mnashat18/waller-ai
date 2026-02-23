@@ -19,7 +19,7 @@
       </button>
 
       <a
-        *ngIf="canCreateRequests"
+        *ngIf="canOpenBusinessCenter"
         routerLink="/business-center"
         class="chip">
         Business Center
@@ -27,9 +27,13 @@
     </div>
   </div>
 
+  <div class="panel" *ngIf="hasBusinessAccess && !canViewRequestCenter">
+    Requests dashboard is visible for owner, admin, and manager roles only.
+    Members can continue scans from the app while the owner tracks outcomes.
+  </div>
 
   <!-- KPI GRID -->
-  <div class="kpi-grid">
+  <div class="kpi-grid" *ngIf="!hasBusinessAccess || canViewRequestCenter">
     <div class="kpi-card">
       <p class="text-sm text-slate-400">Total Requests</p>
       <p class="kpi-value">{{ requestStats.total }}</p>
@@ -53,7 +57,7 @@
 
 
   <!-- REQUEST TABLE -->
-  <div class="panel">
+  <div class="panel" *ngIf="!hasBusinessAccess || canViewRequestCenter">
     <div class="panel-header">
       <h3 class="panel-title">Latest Requests</h3>
       <span class="chip">Updated</span>
@@ -150,6 +154,10 @@
     [submitting]="submittingRequest"
     [businessTrialNotice]="businessTrialNotice"
     [businessInviteTrialNotice]="businessInviteTrialNotice"
+    [maxRecipients]="maxRecipientEmails"
+    [allowRoleSelection]="canAssignMemberRole"
+    [memberRoleOptions]="assignableMemberRoleOptions"
+    [defaultMemberRole]="defaultInviteMemberRole"
     [requiredStateOptions]="requiredStateOptions"
     (submitRequest)="handleCreateRequest($event)"
     (close)="showCreateModal = false">

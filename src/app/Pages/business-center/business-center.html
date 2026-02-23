@@ -156,7 +156,7 @@
           </div>
 
           <div class="manager-note mt-3">
-            Business role is saved as admin access in backend.
+            Role is applied directly in backend as member_role.
           </div>
 
           <div class="mt-4 flex items-center gap-3">
@@ -370,7 +370,7 @@
             class="btn-primary px-4 py-2 rounded-full"
             [disabled]="exportSubmitting"
             (click)="submitExportRequest()">
-            {{ exportSubmitting ? 'Submitting...' : 'Create Export Job' }}
+            {{ exportSubmitting ? 'Preparing...' : 'Export Now' }}
           </button>
           <button
             type="button"

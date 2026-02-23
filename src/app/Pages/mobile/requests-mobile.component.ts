@@ -2,16 +2,23 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
-import { of, throwError } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
 import { catchError, map, timeout } from 'rxjs/operators';
 import {
   type CreateRequestForm,
   CreateRequestModalComponent,
   REQUIRED_STATE_OPTIONS,
   type RequiredState,
-  type SubmitFeedback
+  type SubmitFeedback,
+  type TeamMemberRoleOption
 } from '../../components/create-request-modal/create-request-modal';
-import { BusinessCenterService } from '../../services/business-center.service';
+import {
+  type ActionResult,
+  BusinessCenterService,
+  type BusinessMemberRole,
+  type CreateScanRequestResult,
+  type ManageTeamMemberRole
+} from '../../services/business-center.service';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import { environment } from 'src/environments/environment';
 
@@ -22,14 +29,28 @@ import { environment } from 'src/environments/environment';
   templateUrl: './requests-mobile.html'
 })
 export class RequestsMobileComponent implements OnInit, OnDestroy {
+  readonly maxRecipientEmails = 5;
+  readonly memberRoleOptions: TeamMemberRoleOption[] = [
+    { value: 'member', label: 'Member' },
+    { value: 'manager', label: 'Manager' },
+    { value: 'admin', label: 'Admin' }
+  ];
+  assignableMemberRoleOptions: TeamMemberRoleOption[] = [...this.memberRoleOptions];
+  defaultInviteMemberRole: ManageTeamMemberRole = 'member';
+
   showCreateModal = false;
   loadingPlanAccess = true;
   requests: RequestRow[] = [];
   submitFeedback: SubmitFeedback | null = null;
   submittingRequest = false;
   showPermissionNotice = false;
+
   hasBusinessAccess = false;
+  canViewRequestCenter = true;
   canCreateRequests = false;
+  canOpenBusinessCenter = false;
+  canAssignMemberRole = false;
+
   currentPlanName = 'Free';
   currentPlanCode = 'free';
   isBusinessTrial = false;
@@ -37,8 +58,13 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   businessTrialNotice = '';
   businessInviteTrialNotice = '';
   readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
+
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly accessTimeoutMs = 15000;
+  private currentMemberRole: BusinessMemberRole | null = null;
+  private currentBusinessProfileId: string | null = null;
+  private currentOrgId: string | null = null;
+
   requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
 
   constructor(
@@ -74,11 +100,27 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const requestedFor = this.normalizeEmail(form.requestedForEmail);
+    const { uniqueEmails, invalidEntries } = this.normalizeRecipientEmails(form.requestedForEmails);
+    const selectedMemberRole = this.resolveSelectedMemberRole(form.memberRole);
     const requiredState = this.normalizeRequiredState(form.requiredState);
 
-    if (!requestedFor) {
-      this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
+    if (invalidEntries.length > 0) {
+      this.submitFeedback = { type: 'error', message: `Invalid email: ${invalidEntries[0]}` };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (!uniqueEmails.length) {
+      this.submitFeedback = { type: 'error', message: 'Enter at least one recipient email.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (uniqueEmails.length > this.maxRecipientEmails) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `You can add up to ${this.maxRecipientEmails} recipient emails per submit.`
+      };
       this.cdr.detectChanges();
       return;
     }
@@ -97,17 +139,17 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (currentUserEmail && requestedFor === currentUserEmail) {
+    if (currentUserEmail && uniqueEmails.some((email) => email === currentUserEmail)) {
       this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
       this.cdr.detectChanges();
       return;
     }
 
     this.submittingRequest = true;
-    this.submitFeedback = { type: 'info', message: 'Sending request...' };
+    this.submitFeedback = { type: 'info', message: 'Sending requests...' };
     this.cdr.detectChanges();
 
-    this.submitRequestPayload(requestedFor, requiredState, userToken);
+    this.submitRequestBatch(uniqueEmails, requiredState, selectedMemberRole);
   }
 
   dismissPermissionNotice() {
@@ -168,13 +210,20 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     ).subscribe((state) => {
       if (!state) {
         this.hasBusinessAccess = false;
+        this.canViewRequestCenter = true;
         this.canCreateRequests = false;
+        this.canOpenBusinessCenter = false;
+        this.canAssignMemberRole = false;
         this.currentPlanName = 'Free';
         this.currentPlanCode = 'free';
         this.isBusinessTrial = false;
         this.trialDaysRemaining = null;
         this.businessTrialNotice = '';
         this.businessInviteTrialNotice = '';
+        this.currentMemberRole = null;
+        this.currentBusinessProfileId = null;
+        this.currentOrgId = null;
+        this.syncAssignableMemberRoleOptions();
         this.loadingPlanAccess = false;
         this.loadRequests();
         this.cdr.detectChanges();
@@ -185,6 +234,13 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       this.currentPlanName = this.hasBusinessAccess ? 'Business' : 'Free';
       this.currentPlanCode = (state.profile?.plan_code ?? (this.hasBusinessAccess ? 'business' : 'free')).toString().toLowerCase();
 
+      this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
+      this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
+      this.currentOrgId = this.normalizeId(state.orgId);
+
+      this.canViewRequestCenter =
+        !this.hasBusinessAccess || this.canRoleAccessRequests(this.currentMemberRole);
+
       const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
       this.isBusinessTrial = billingStatus === 'trial' && !state.trialExpired;
       this.trialDaysRemaining = this.isBusinessTrial
@@ -193,11 +249,23 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
       this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
       this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
-      this.canCreateRequests =
+
+      const hasWritableRequestAccess =
         this.hasBusinessAccess &&
+        this.canRoleAccessRequests(this.currentMemberRole) &&
         Boolean(state.permissions?.canUseSystem) &&
         !Boolean(state.permissions?.isReadOnly) &&
         !Boolean(state.trialExpired);
+
+      this.canCreateRequests = hasWritableRequestAccess;
+      this.canOpenBusinessCenter =
+        this.hasBusinessAccess && this.canRoleAccessRequests(this.currentMemberRole);
+      this.canAssignMemberRole =
+        hasWritableRequestAccess &&
+        Boolean(state.permissions?.canManageMembers) &&
+        Boolean(this.currentBusinessProfileId);
+
+      this.syncAssignableMemberRoleOptions();
 
       this.loadingPlanAccess = false;
       this.loadRequests();
@@ -206,6 +274,11 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   }
 
   private loadRequests() {
+    if (this.hasBusinessAccess && !this.canViewRequestCenter) {
+      this.applyRequests([]);
+      return;
+    }
+
     if (this.hasBusinessAccess) {
       this.loadBusinessRequests();
       return;
@@ -217,15 +290,16 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   private loadBusinessRequests() {
     const token = this.getUserToken();
     if (!token) {
-      this.requests = [];
-      this.requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
-      this.cdr.detectChanges();
+      this.applyRequests([]);
       return;
     }
 
-    this.fetchRequests(token, null).subscribe({
+    this.fetchRequests(token, { orgId: this.currentOrgId ?? undefined }).subscribe({
       next: (requests) => this.applyRequests(requests),
-      error: (fetchErr) => console.error('[requests-mobile] requests error:', fetchErr)
+      error: (fetchErr) => {
+        console.error('[requests-mobile] requests error:', fetchErr);
+        this.applyRequests([]);
+      }
     });
   }
 
@@ -234,9 +308,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     const userId = this.getUserIdFromToken(token);
 
     if (!token || !userId) {
-      this.requests = [];
-      this.requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
-      this.cdr.detectChanges();
+      this.applyRequests([]);
       return;
     }
 
@@ -251,7 +323,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
   private fetchRequests(
     token: string | null,
-    filters: { requestedForUserId?: string } | null
+    filters: { requestedForUserId?: string; orgId?: string } | null
   ) {
     const headers = this.buildAuthHeaders(token);
     if (!headers) {
@@ -264,7 +336,9 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       'requested_for_phone',
       'required_state',
       'response_status',
-      'timestamp'
+      'timestamp',
+      'org_id',
+      'requested_by_org'
     ].join(',');
     const params = new URLSearchParams({
       sort: '-timestamp',
@@ -274,6 +348,11 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     if (filters?.requestedForUserId) {
       params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
+    }
+
+    if (filters?.orgId) {
+      params.set('filter[_or][0][org_id][_eq]', filters.orgId);
+      params.set('filter[_or][1][requested_by_org][_eq]', filters.orgId);
     }
 
     return this.http.get<{ data?: RequestRecord[] }>(
@@ -324,39 +403,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     return `${datePart} ${timePart}`;
   }
 
-  private createRequest(payload: CreateRequestPayload, token: string | null) {
-    const headers = this.buildAuthHeaders(token);
-    if (!headers) {
-      return throwError(() => new Error('Authorization token is missing.'));
-    }
-    return this.http.post<{ data?: { id?: string } }>(
-      `${environment.API_URL}/items/requests`,
-      payload,
-      { headers, withCredentials: true }
-    );
-  }
-
-  private fetchCreatedRequestById(requestId: string, token: string | null) {
-    const headers = this.buildAuthHeaders(token);
-    if (!headers) {
-      return throwError(() => new Error('Authorization token is missing.'));
-    }
-    const params = new URLSearchParams({
-      fields: [
-        'id',
-        'requested_for_email',
-        'requested_for_phone',
-        'required_state',
-        'response_status',
-        'timestamp'
-      ].join(',')
-    });
-    return this.http.get<{ data?: RequestRecord }>(
-      `${environment.API_URL}/items/requests/${encodeURIComponent(requestId)}?${params.toString()}`,
-      { headers, withCredentials: true }
-    );
-  }
-
   private buildAuthHeaders(token: string | null): HttpHeaders | null {
     if (!token || this.isTokenExpired(token)) return null;
     return new HttpHeaders({ Authorization: `Bearer ${token}` });
@@ -377,7 +423,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     if (!token) return null;
     const payload = this.decodeJwtPayload(token);
     const id = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
-    return typeof id === 'string' ? id : null;
+    return this.normalizeId(id);
   }
 
   private getUserToken(): string | null {
@@ -399,64 +445,163 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     }
   }
 
-  private submitRequestPayload(
-    requestedForEmail: string,
+  private submitRequestBatch(
+    recipientEmails: string[],
     requiredState: RequiredState,
-    token: string | null
+    selectedMemberRole: ManageTeamMemberRole
   ) {
-    const email = this.normalizeEmail(requestedForEmail);
-    if (!email) {
-      this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
-      this.submittingRequest = false;
-      this.cdr.detectChanges();
-      return;
-    }
+    const createCalls = recipientEmails.map((email) =>
+      this.businessCenter.createScanRequest({
+        requested_for_email: email,
+        required_state: requiredState
+      }, this.currentOrgId).pipe(
+        catchError((err) =>
+          of({
+            ok: false,
+            message: this.describeHttpError(err, 'Failed to send request.')
+          } as CreateScanRequestResult)
+        )
+      )
+    );
 
-    const payload: CreateRequestPayload = {
-      requested_for_email: email,
-      required_state: requiredState
-    };
+    forkJoin(createCalls).subscribe({
+      next: (results) => {
+        const successEmails: string[] = [];
+        let successCount = 0;
+        let failedCount = 0;
+        let firstError = '';
 
-    this.createRequest(payload, token).subscribe({
-      next: (res) => {
-        const createdId = this.normalizeId(res?.data?.id);
-        if (!createdId) {
-          this.showSuccessToast('Request sent successfully.');
+        results.forEach((result, index) => {
+          if (result?.ok) {
+            successCount += 1;
+            successEmails.push(recipientEmails[index]);
+            return;
+          }
+          failedCount += 1;
+          if (!firstError) {
+            firstError = result?.message || 'Failed to send request.';
+          }
+        });
+
+        if (!successCount) {
           this.submittingRequest = false;
-          this.showCreateModal = false;
-          this.loadRequests();
+          this.submitFeedback = {
+            type: 'error',
+            message: firstError || 'Failed to send request.'
+          };
           this.cdr.detectChanges();
           return;
         }
 
-        this.fetchCreatedRequestById(createdId, token).subscribe({
-          next: () => {
-            this.showSuccessToast('Request sent successfully.');
-            this.submittingRequest = false;
-            this.showCreateModal = false;
-            this.loadRequests();
-            this.cdr.detectChanges();
-          },
-          error: (fetchErr) => {
-            this.submitFeedback = {
-              type: 'error',
-              message: this.describeHttpError(fetchErr, 'Request created, but refresh failed.')
-            };
-            this.submittingRequest = false;
-            this.loadRequests();
-            this.cdr.detectChanges();
-          }
-        });
+        if (this.canAssignMemberRole && this.currentBusinessProfileId) {
+          this.assignRoleToRecipients(successEmails, selectedMemberRole).subscribe((roleResult) => {
+            this.completeRequestSubmit(successCount, failedCount, firstError, roleResult);
+          });
+          return;
+        }
+
+        this.completeRequestSubmit(successCount, failedCount, firstError);
       },
       error: (err) => {
+        this.submittingRequest = false;
         this.submitFeedback = {
           type: 'error',
           message: this.describeHttpError(err, 'Failed to send request.')
         };
-        this.submittingRequest = false;
         this.cdr.detectChanges();
       }
     });
+  }
+
+  private completeRequestSubmit(
+    successCount: number,
+    failedCount: number,
+    firstError: string,
+    roleResult?: RoleAssignmentSummary
+  ): void {
+    const roleSummary = roleResult
+      ? this.buildRoleSummaryMessage(roleResult)
+      : '';
+
+    const baseMessage =
+      failedCount === 0
+        ? `Sent ${successCount} request(s) successfully.`
+        : `Sent ${successCount} request(s). ${failedCount} failed.`;
+
+    const errorHint = failedCount > 0 && firstError ? ` ${firstError}` : '';
+    const fullMessage = `${baseMessage}${roleSummary}${errorHint}`.trim();
+
+    this.submittingRequest = false;
+    this.showCreateModal = false;
+
+    const hasRoleFailure = Boolean(roleResult && roleResult.failedCount > 0);
+    if (failedCount === 0 && !hasRoleFailure) {
+      this.showSuccessToast(fullMessage);
+    } else {
+      this.submitFeedback = { type: 'info', message: fullMessage };
+    }
+
+    this.loadRequests();
+    this.cdr.detectChanges();
+  }
+
+  private buildRoleSummaryMessage(summary: RoleAssignmentSummary): string {
+    if (summary.successCount > 0 && summary.failedCount === 0) {
+      return ` Team role updated for ${summary.successCount} recipient(s).`;
+    }
+    if (summary.successCount > 0 && summary.failedCount > 0) {
+      return ` Role updated for ${summary.successCount} recipient(s), ${summary.failedCount} failed.`;
+    }
+    if (summary.failedCount > 0) {
+      return ` Failed to update member role. ${summary.errorMessage}`;
+    }
+    return '';
+  }
+
+  private assignRoleToRecipients(
+    recipientEmails: string[],
+    role: ManageTeamMemberRole
+  ) {
+    const profileId = this.currentBusinessProfileId;
+    if (!profileId || !recipientEmails.length) {
+      return of({ successCount: 0, failedCount: 0, errorMessage: '' } as RoleAssignmentSummary);
+    }
+
+    const memberCalls = recipientEmails.map((email) =>
+      this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
+        catchError((err) =>
+          of({
+            ok: false,
+            message: this.describeHttpError(err, 'Failed to update team member role.')
+          } as ActionResult)
+        )
+      )
+    );
+
+    return forkJoin(memberCalls).pipe(
+      map((results) => {
+        let successCount = 0;
+        let failedCount = 0;
+        let errorMessage = '';
+
+        for (const item of results) {
+          if (item?.ok) {
+            successCount += 1;
+            continue;
+          }
+          failedCount += 1;
+          if (!errorMessage) {
+            errorMessage = item?.message || 'Permission denied while updating member role.';
+          }
+        }
+
+        return {
+          successCount,
+          failedCount,
+          errorMessage
+        } as RoleAssignmentSummary;
+      })
+    );
   }
 
   private formatRequestTarget(request: RequestRecord): string {
@@ -509,6 +654,38 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     return this.isValidEmail(normalized) ? normalized : null;
   }
 
+  private normalizeRecipientEmails(values: unknown): {
+    uniqueEmails: string[];
+    invalidEntries: string[];
+  } {
+    const unique = new Set<string>();
+    const invalid: string[] = [];
+    const source = Array.isArray(values) ? values : [values];
+
+    for (const raw of source) {
+      if (typeof raw !== 'string') {
+        continue;
+      }
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      const normalized = trimmed.toLowerCase();
+      if (!this.isValidEmail(normalized)) {
+        invalid.push(trimmed);
+        continue;
+      }
+
+      unique.add(normalized);
+    }
+
+    return {
+      uniqueEmails: Array.from(unique),
+      invalidEntries: invalid
+    };
+  }
+
   private normalizeRequiredState(value: unknown): RequiredState | null {
     if (typeof value !== 'string') {
       return null;
@@ -531,6 +708,60 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       return this.normalizeId((value as Record<string, unknown>)['id']);
     }
     return null;
+  }
+
+  private normalizeBusinessRole(value: unknown): BusinessMemberRole | null {
+    const normalized = (value ?? '').toString().trim().toLowerCase();
+    if (
+      normalized === 'owner' ||
+      normalized === 'admin' ||
+      normalized === 'manager' ||
+      normalized === 'member' ||
+      normalized === 'viewer'
+    ) {
+      return normalized;
+    }
+    return null;
+  }
+
+  private canRoleAccessRequests(role: BusinessMemberRole | null): boolean {
+    return role === 'owner' || role === 'admin' || role === 'manager';
+  }
+
+  private syncAssignableMemberRoleOptions(): void {
+    if (!this.canAssignMemberRole) {
+      this.assignableMemberRoleOptions = [{ value: 'member', label: 'Member' }];
+      this.defaultInviteMemberRole = 'member';
+      return;
+    }
+
+    if (this.currentMemberRole === 'owner') {
+      this.assignableMemberRoleOptions = [...this.memberRoleOptions];
+    } else if (this.currentMemberRole === 'admin') {
+      this.assignableMemberRoleOptions = this.memberRoleOptions.filter(
+        (option) => option.value === 'manager' || option.value === 'member'
+      );
+    } else {
+      this.assignableMemberRoleOptions = [{ value: 'member', label: 'Member' }];
+    }
+
+    if (!this.assignableMemberRoleOptions.some((option) => option.value === this.defaultInviteMemberRole)) {
+      this.defaultInviteMemberRole = this.assignableMemberRoleOptions[0]?.value ?? 'member';
+    }
+  }
+
+  private resolveSelectedMemberRole(value: unknown): ManageTeamMemberRole {
+    const normalized = (value ?? '').toString().trim().toLowerCase();
+    const allowed = this.assignableMemberRoleOptions.map((option) => option.value);
+
+    if (
+      (normalized === 'admin' || normalized === 'manager' || normalized === 'member') &&
+      allowed.includes(normalized as ManageTeamMemberRole)
+    ) {
+      return normalized as ManageTeamMemberRole;
+    }
+
+    return this.defaultInviteMemberRole;
   }
 
   private getUserEmailFromToken(token: string | null): string | null {
@@ -575,6 +806,8 @@ type RequestRecord = {
   required_state?: string;
   response_status?: string;
   timestamp?: string;
+  org_id?: string;
+  requested_by_org?: string;
 };
 
 type RequestRow = {
@@ -584,7 +817,8 @@ type RequestRow = {
   timestamp: string;
 };
 
-type CreateRequestPayload = {
-  requested_for_email: string;
-  required_state: RequiredState;
+type RoleAssignmentSummary = {
+  successCount: number;
+  failedCount: number;
+  errorMessage: string;
 };

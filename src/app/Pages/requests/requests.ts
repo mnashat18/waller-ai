@@ -2,16 +2,23 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
-import { of } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
 import { catchError, map, timeout } from 'rxjs/operators';
 import {
   CreateRequestModalComponent,
   type CreateRequestForm,
   REQUIRED_STATE_OPTIONS,
   type RequiredState,
-  type SubmitFeedback
+  type SubmitFeedback,
+  type TeamMemberRoleOption
 } from '../../components/create-request-modal/create-request-modal';
-import { BusinessCenterService } from '../../services/business-center.service';
+import {
+  type ActionResult,
+  BusinessCenterService,
+  type BusinessMemberRole,
+  type CreateScanRequestResult,
+  type ManageTeamMemberRole
+} from '../../services/business-center.service';
 import { environment } from 'src/environments/environment';
 
 @Component({
@@ -22,6 +29,15 @@ import { environment } from 'src/environments/environment';
   styleUrl: './requests.css',
 })
 export class Requests implements OnInit, OnDestroy {
+  readonly maxRecipientEmails = 5;
+  readonly memberRoleOptions: TeamMemberRoleOption[] = [
+    { value: 'member', label: 'Member' },
+    { value: 'manager', label: 'Manager' },
+    { value: 'admin', label: 'Admin' }
+  ];
+  assignableMemberRoleOptions: TeamMemberRoleOption[] = [...this.memberRoleOptions];
+  defaultInviteMemberRole: ManageTeamMemberRole = 'member';
+
   showCreateModal = false;
   loadingPlanAccess = true;
 
@@ -31,7 +47,10 @@ export class Requests implements OnInit, OnDestroy {
   submittingRequest = false;
 
   hasBusinessAccess = false;
+  canViewRequestCenter = true;
   canCreateRequests = false;
+  canOpenBusinessCenter = false;
+  canAssignMemberRole = false;
 
   businessTrialNotice = '';
   businessInviteTrialNotice = '';
@@ -46,6 +65,9 @@ export class Requests implements OnInit, OnDestroy {
 
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly accessTimeoutMs = 15000;
+  private currentMemberRole: BusinessMemberRole | null = null;
+  private currentBusinessProfileId: string | null = null;
+  private currentOrgId: string | null = null;
 
   constructor(
     private http: HttpClient,
@@ -98,11 +120,27 @@ export class Requests implements OnInit, OnDestroy {
       return;
     }
 
-    const requestedForEmail = this.normalizeEmail(form.requestedForEmail);
+    const { uniqueEmails, invalidEntries } = this.normalizeRecipientEmails(form.requestedForEmails);
+    const selectedMemberRole = this.resolveSelectedMemberRole(form.memberRole);
     const requiredState = this.normalizeRequiredState(form.requiredState);
 
-    if (!requestedForEmail) {
-      this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
+    if (invalidEntries.length > 0) {
+      this.submitFeedback = { type: 'error', message: `Invalid email: ${invalidEntries[0]}` };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (!uniqueEmails.length) {
+      this.submitFeedback = { type: 'error', message: 'Enter at least one recipient email.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (uniqueEmails.length > this.maxRecipientEmails) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `You can add up to ${this.maxRecipientEmails} recipient emails per submit.`
+      };
       this.cdr.detectChanges();
       return;
     }
@@ -121,76 +159,63 @@ export class Requests implements OnInit, OnDestroy {
     }
 
     const currentUserEmail = this.getUserEmailFromToken(token);
-    if (currentUserEmail && requestedForEmail === currentUserEmail) {
+    if (currentUserEmail && uniqueEmails.some((email) => email === currentUserEmail)) {
       this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
       this.cdr.detectChanges();
       return;
     }
 
     this.submittingRequest = true;
-    this.submitFeedback = { type: 'info', message: 'Sending request...' };
+    this.submitFeedback = { type: 'info', message: 'Sending requests...' };
     this.cdr.detectChanges();
 
-    const payload: CreateRequestPayload = {
-      requested_for_email: requestedForEmail,
-      required_state: requiredState
-    };
+    const optimisticRows = uniqueEmails.map((email) =>
+      this.buildOptimisticRow(email, requiredState)
+    );
 
-    const headers = this.buildAuthHeaders(token);
-    if (!headers) {
-      this.submittingRequest = false;
-      this.submitFeedback = { type: 'error', message: 'Authorization token is missing.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    // ✅ Optimistic Row (مرة واحدة فقط)
-    const optimisticId =
-      (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
-        ? crypto.randomUUID()
-        : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-    const optimisticRow: RequestRow = {
-      id: optimisticId,
-      target: requestedForEmail,
-      required_state: requiredState,
-      response_status: 'Pending',
-      timestamp: new Date().toLocaleString()
-    };
-
-    // ضيفه فورًا للـ UI
-    this.requests.unshift(optimisticRow);
+    this.requests = [...optimisticRows, ...this.requests];
     this.updateStats();
     this.showCreateModal = false;
     this.cdr.detectChanges();
 
-    this.http.post<{ data?: { id?: unknown } }>(
-      `${environment.API_URL}/items/requests`,
-      payload,
-      { headers, withCredentials: true }
-    ).subscribe({
-      next: (res) => {
-        // لو رجع id حقيقي من السيرفر.. بدّل الـ temp id
-        const createdId = this.normalizeId(res?.data?.id);
-        if (createdId) {
-          const idx = this.requests.findIndex(r => r.id === optimisticId);
-          if (idx !== -1) this.requests[idx] = { ...this.requests[idx], id: createdId };
+    const createCalls = uniqueEmails.map((email) =>
+      this.businessCenter.createScanRequest({
+        requested_for_email: email,
+        required_state: requiredState
+      }, this.currentOrgId).pipe(
+        catchError((err) =>
+          of({
+            ok: false,
+            message: this.describeHttpError(err, 'Failed to send request.')
+          } as CreateScanRequestResult)
+        )
+      )
+    );
+
+    forkJoin(createCalls).subscribe({
+      next: (results) => {
+        const summary = this.processCreateResults(results, uniqueEmails, optimisticRows);
+        if (!summary.successEmails.length) {
+          this.submittingRequest = false;
+          this.submitFeedback = {
+            type: 'error',
+            message: summary.firstError || 'Failed to send request.'
+          };
+          this.cdr.detectChanges();
+          return;
         }
 
-        this.submittingRequest = false;
-        this.showSuccessToast('Request sent successfully.');
-        this.cdr.detectChanges();
+        if (this.canAssignMemberRole && this.currentBusinessProfileId) {
+          this.assignRoleToRecipients(summary.successEmails, selectedMemberRole).subscribe((roleResult) => {
+            this.completeRequestSubmit(summary.successCount, summary.failedCount, summary.firstError, roleResult);
+          });
+          return;
+        }
 
-        // ✅ Refresh هادي بعد شوية (من غير ما نكسر ال UI)
-        setTimeout(() => this.loadRequests(true), 1500);
+        this.completeRequestSubmit(summary.successCount, summary.failedCount, summary.firstError);
       },
       error: (err: unknown) => {
-        console.error('Create request error:', err);
-
-        // ✅ Rollback: شيل الـ optimistic row لو فشل
-        this.requests = this.requests.filter(r => r.id !== optimisticId);
-        this.updateStats();
-
+        this.rollbackOptimisticRows(optimisticRows);
         this.submittingRequest = false;
         this.submitFeedback = {
           type: 'error',
@@ -201,13 +226,170 @@ export class Requests implements OnInit, OnDestroy {
     });
   }
 
+  private completeRequestSubmit(
+    successCount: number,
+    failedCount: number,
+    firstError: string,
+    roleResult?: RoleAssignmentSummary
+  ): void {
+    const roleSummary = roleResult
+      ? this.buildRoleSummaryMessage(roleResult)
+      : '';
+
+    const baseMessage =
+      failedCount === 0
+        ? `Sent ${successCount} request(s) successfully.`
+        : `Sent ${successCount} request(s). ${failedCount} failed.`;
+
+    const errorHint = failedCount > 0 && firstError ? ` ${firstError}` : '';
+    const fullMessage = `${baseMessage}${roleSummary}${errorHint}`.trim();
+
+    this.submittingRequest = false;
+
+    const hasRoleFailure = Boolean(roleResult && roleResult.failedCount > 0);
+    if (failedCount === 0 && !hasRoleFailure) {
+      this.showSuccessToast(fullMessage);
+    } else {
+      this.submitFeedback = { type: 'info', message: fullMessage };
+    }
+
+    this.cdr.detectChanges();
+    setTimeout(() => this.loadRequests(true), 1200);
+  }
+
+  private buildRoleSummaryMessage(summary: RoleAssignmentSummary): string {
+    if (summary.successCount > 0 && summary.failedCount === 0) {
+      return ` Team role updated for ${summary.successCount} recipient(s).`;
+    }
+    if (summary.successCount > 0 && summary.failedCount > 0) {
+      return ` Role updated for ${summary.successCount} recipient(s), ${summary.failedCount} failed.`;
+    }
+    if (summary.failedCount > 0) {
+      return ` Failed to update member role. ${summary.errorMessage}`;
+    }
+    return '';
+  }
+
+  private assignRoleToRecipients(
+    recipientEmails: string[],
+    role: ManageTeamMemberRole
+  ) {
+    const profileId = this.currentBusinessProfileId;
+    if (!profileId || !recipientEmails.length) {
+      return of({ successCount: 0, failedCount: 0, errorMessage: '' } as RoleAssignmentSummary);
+    }
+
+    const memberCalls = recipientEmails.map((email) =>
+      this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
+        catchError((err) =>
+          of({
+            ok: false,
+            message: this.describeHttpError(err, 'Failed to update team member role.')
+          } as ActionResult)
+        )
+      )
+    );
+
+    return forkJoin(memberCalls).pipe(
+      map((results) => {
+        let successCount = 0;
+        let failedCount = 0;
+        let errorMessage = '';
+
+        for (const item of results) {
+          if (item?.ok) {
+            successCount += 1;
+            continue;
+          }
+          failedCount += 1;
+          if (!errorMessage) {
+            errorMessage = item?.message || 'Permission denied while updating member role.';
+          }
+        }
+
+        return {
+          successCount,
+          failedCount,
+          errorMessage
+        } as RoleAssignmentSummary;
+      })
+    );
+  }
+
+  private processCreateResults(
+    results: CreateScanRequestResult[],
+    recipientEmails: string[],
+    optimisticRows: RequestRow[]
+  ): CreateRequestSummary {
+    let successCount = 0;
+    let failedCount = 0;
+    let firstError = '';
+    const successEmails: string[] = [];
+
+    results.forEach((result, index) => {
+      const optimistic = optimisticRows[index];
+      if (!optimistic) {
+        return;
+      }
+
+      if (result?.ok) {
+        successCount += 1;
+        successEmails.push(recipientEmails[index]);
+
+        const createdId = this.normalizeId(result?.id);
+        if (createdId) {
+          const idx = this.requests.findIndex((row) => row.id === optimistic.id);
+          if (idx !== -1) {
+            this.requests[idx] = { ...this.requests[idx], id: createdId };
+          }
+        }
+        return;
+      }
+
+      failedCount += 1;
+      if (!firstError) {
+        firstError = result?.message || 'Failed to send request.';
+      }
+      this.requests = this.requests.filter((row) => row.id !== optimistic.id);
+    });
+
+    this.updateStats();
+
+    return {
+      successCount,
+      failedCount,
+      firstError,
+      successEmails
+    };
+  }
+
+  private rollbackOptimisticRows(rows: RequestRow[]): void {
+    const ids = new Set(rows.map((item) => item.id));
+    this.requests = this.requests.filter((row) => !ids.has(row.id));
+    this.updateStats();
+  }
+
+  private buildOptimisticRow(email: string, requiredState: RequiredState): RequestRow {
+    const optimisticId =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+    return {
+      id: optimisticId,
+      target: email,
+      required_state: requiredState,
+      response_status: 'Pending',
+      timestamp: new Date().toLocaleString()
+    };
+  }
+
   private showSuccessToast(message: string) {
     this.submitFeedback = { type: 'success', message };
 
     if (this.successToastTimer) clearTimeout(this.successToastTimer);
 
     this.successToastTimer = setTimeout(() => {
-      // امسح النجاح لو لسه ظاهر
       if (this.submitFeedback?.type === 'success') {
         this.submitFeedback = null;
         this.cdr.detectChanges();
@@ -228,20 +410,45 @@ export class Requests implements OnInit, OnDestroy {
     ).subscribe((state) => {
       if (!state) {
         this.hasBusinessAccess = false;
+        this.canViewRequestCenter = true;
         this.canCreateRequests = false;
+        this.canOpenBusinessCenter = false;
+        this.canAssignMemberRole = false;
+        this.currentMemberRole = null;
+        this.currentBusinessProfileId = null;
+        this.currentOrgId = null;
         this.businessTrialNotice = '';
         this.businessInviteTrialNotice = '';
+        this.syncAssignableMemberRoleOptions();
         this.loadingPlanAccess = false;
         this.loadRequests(true);
         return;
       }
 
       this.hasBusinessAccess = Boolean(state.hasPaidAccess);
-      this.canCreateRequests =
+      this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
+      this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
+      this.currentOrgId = this.normalizeId(state.orgId);
+
+      this.canViewRequestCenter =
+        !this.hasBusinessAccess || this.canRoleAccessRequests(this.currentMemberRole);
+
+      const hasWritableRequestAccess =
         this.hasBusinessAccess &&
+        this.canRoleAccessRequests(this.currentMemberRole) &&
         Boolean(state.permissions?.canUseSystem) &&
         !Boolean(state.permissions?.isReadOnly) &&
         !Boolean(state.trialExpired);
+
+      this.canCreateRequests = hasWritableRequestAccess;
+      this.canOpenBusinessCenter =
+        this.hasBusinessAccess && this.canRoleAccessRequests(this.currentMemberRole);
+      this.canAssignMemberRole =
+        hasWritableRequestAccess &&
+        Boolean(state.permissions?.canManageMembers) &&
+        Boolean(this.currentBusinessProfileId);
+
+      this.syncAssignableMemberRoleOptions();
 
       const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
       const trialDaysRemaining = this.daysUntil(state.trialExpiresAt);
@@ -263,10 +470,14 @@ export class Requests implements OnInit, OnDestroy {
     });
   }
 
-  /**
-   * @param bustCache لما يبقى true بنضيف param عشوائي عشان نتفادى 304/caching
-   */
   private loadRequests(bustCache = false) {
+    if (this.hasBusinessAccess && !this.canViewRequestCenter) {
+      this.requests = [];
+      this.updateStats();
+      this.cdr.detectChanges();
+      return;
+    }
+
     const token = this.getUserToken();
     const headers = this.buildAuthHeaders(token);
 
@@ -286,14 +497,14 @@ export class Requests implements OnInit, OnDestroy {
         'requested_for_phone',
         'required_state',
         'response_status',
-        'timestamp'
+        'timestamp',
+        'org_id',
+        'requested_by_org'
       ].join(',')
     });
 
-    // ✅ كسر كاش (حل مشكلة 304 + data: [])
     if (bustCache) params.set('_', Date.now().toString());
 
-    // لو مش Business: اعرض incoming فقط
     if (!this.hasBusinessAccess) {
       const userId = this.getUserIdFromToken(token);
       if (!userId) {
@@ -303,6 +514,9 @@ export class Requests implements OnInit, OnDestroy {
         return;
       }
       params.set('filter[requested_for_user][_eq]', userId);
+    } else if (this.currentOrgId) {
+      params.set('filter[_or][0][org_id][_eq]', this.currentOrgId);
+      params.set('filter[_or][1][requested_by_org][_eq]', this.currentOrgId);
     }
 
     this.http.get<{ data?: RequestRecord[] }>(
@@ -419,12 +633,98 @@ export class Requests implements OnInit, OnDestroy {
     return this.isValidEmail(email) ? email : null;
   }
 
+  private normalizeRecipientEmails(values: unknown): {
+    uniqueEmails: string[];
+    invalidEntries: string[];
+  } {
+    const unique = new Set<string>();
+    const invalid: string[] = [];
+    const source = Array.isArray(values) ? values : [values];
+
+    for (const raw of source) {
+      if (typeof raw !== 'string') {
+        continue;
+      }
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      const normalized = trimmed.toLowerCase();
+      if (!this.isValidEmail(normalized)) {
+        invalid.push(trimmed);
+        continue;
+      }
+
+      unique.add(normalized);
+    }
+
+    return {
+      uniqueEmails: Array.from(unique),
+      invalidEntries: invalid
+    };
+  }
+
   private normalizeRequiredState(value: unknown): RequiredState | null {
     if (typeof value !== 'string') return null;
     const normalized = value.trim();
     return (REQUIRED_STATE_OPTIONS as readonly string[]).includes(normalized)
       ? (normalized as RequiredState)
       : null;
+  }
+
+  private normalizeBusinessRole(value: unknown): BusinessMemberRole | null {
+    const normalized = (value ?? '').toString().trim().toLowerCase();
+    if (
+      normalized === 'owner' ||
+      normalized === 'admin' ||
+      normalized === 'manager' ||
+      normalized === 'member' ||
+      normalized === 'viewer'
+    ) {
+      return normalized;
+    }
+    return null;
+  }
+
+  private canRoleAccessRequests(role: BusinessMemberRole | null): boolean {
+    return role === 'owner' || role === 'admin' || role === 'manager';
+  }
+
+  private syncAssignableMemberRoleOptions(): void {
+    if (!this.canAssignMemberRole) {
+      this.assignableMemberRoleOptions = [{ value: 'member', label: 'Member' }];
+      this.defaultInviteMemberRole = 'member';
+      return;
+    }
+
+    if (this.currentMemberRole === 'owner') {
+      this.assignableMemberRoleOptions = [...this.memberRoleOptions];
+    } else if (this.currentMemberRole === 'admin') {
+      this.assignableMemberRoleOptions = this.memberRoleOptions.filter(
+        (option) => option.value === 'manager' || option.value === 'member'
+      );
+    } else {
+      this.assignableMemberRoleOptions = [{ value: 'member', label: 'Member' }];
+    }
+
+    if (!this.assignableMemberRoleOptions.some((option) => option.value === this.defaultInviteMemberRole)) {
+      this.defaultInviteMemberRole = this.assignableMemberRoleOptions[0]?.value ?? 'member';
+    }
+  }
+
+  private resolveSelectedMemberRole(value: unknown): ManageTeamMemberRole {
+    const normalized = (value ?? '').toString().trim().toLowerCase();
+    const allowed = this.assignableMemberRoleOptions.map((option) => option.value);
+
+    if (
+      (normalized === 'admin' || normalized === 'manager' || normalized === 'member') &&
+      allowed.includes(normalized as ManageTeamMemberRole)
+    ) {
+      return normalized as ManageTeamMemberRole;
+    }
+
+    return this.defaultInviteMemberRole;
   }
 
   private normalizeId(value: unknown): string | null {
@@ -477,6 +777,8 @@ type RequestRecord = {
   required_state?: string;
   response_status?: string;
   timestamp?: string;
+  org_id?: string;
+  requested_by_org?: string;
 };
 
 type RequestRow = {
@@ -487,7 +789,15 @@ type RequestRow = {
   timestamp: string;
 };
 
-type CreateRequestPayload = {
-  requested_for_email: string;
-  required_state: RequiredState;
+type CreateRequestSummary = {
+  successCount: number;
+  failedCount: number;
+  firstError: string;
+  successEmails: string[];
+};
+
+type RoleAssignmentSummary = {
+  successCount: number;
+  failedCount: number;
+  errorMessage: string;
 };

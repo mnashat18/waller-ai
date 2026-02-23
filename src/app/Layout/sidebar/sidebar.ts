@@ -18,6 +18,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
   hasBusinessAccess = false;
   hasBusinessProfile = false;
   canUseBusinessFeatures = false;
+  canOpenAuditLogs = true;
+  canOpenRequestsCenter = true;
   canOpenBusinessCenter = false;
   isBusinessTrial = false;
   trialExpired = false;
@@ -107,7 +109,6 @@ export class SidebarComponent implements OnInit, OnDestroy {
       this.canUseBusinessFeatures =
         this.hasBusinessAccess &&
         Boolean(state.permissions?.canUseSystem);
-      this.canOpenBusinessCenter = this.hasBusinessProfile || this.hasBusinessAccess;
       this.trialExpired = Boolean(state.trialExpired);
 
       const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
@@ -123,6 +124,12 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
       const role = (state.memberRole ?? '').toString().trim().toLowerCase();
       this.memberRoleLabel = role ? this.toTitleCase(role) : (this.hasBusinessProfile ? 'Business' : 'User');
+      const canOpenOwnerViews = this.canOpenOwnerViews(role);
+      this.canOpenAuditLogs = !this.hasBusinessAccess || canOpenOwnerViews;
+      this.canOpenRequestsCenter = !this.hasBusinessAccess || canOpenOwnerViews;
+      this.canOpenBusinessCenter =
+        (this.hasBusinessProfile || this.hasBusinessAccess) &&
+        canOpenOwnerViews;
       this.persistSidebarState();
     });
   }
@@ -138,6 +145,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.hasBusinessProfile = cached.hasBusinessProfile;
         this.hasBusinessAccess = cached.hasBusinessAccess;
         this.canUseBusinessFeatures = cached.canUseBusinessFeatures;
+        this.canOpenAuditLogs = cached.canOpenAuditLogs;
+        this.canOpenRequestsCenter = cached.canOpenRequestsCenter;
         this.canOpenBusinessCenter = cached.canOpenBusinessCenter;
         this.isBusinessTrial = cached.isBusinessTrial;
         this.trialExpired = cached.trialExpired;
@@ -151,6 +160,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.hasBusinessProfile = false;
     this.hasBusinessAccess = false;
     this.canUseBusinessFeatures = false;
+    this.canOpenAuditLogs = true;
+    this.canOpenRequestsCenter = true;
     this.canOpenBusinessCenter = false;
     this.isBusinessTrial = false;
     this.trialExpired = false;
@@ -179,6 +190,10 @@ export class SidebarComponent implements OnInit, OnDestroy {
     return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
   }
 
+  private canOpenOwnerViews(role: string): boolean {
+    return role === 'owner' || role === 'admin' || role === 'manager';
+  }
+
   private persistSidebarState(): void {
     if (typeof localStorage === 'undefined') {
       return;
@@ -192,6 +207,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
         hasBusinessProfile: this.hasBusinessProfile,
         hasBusinessAccess: this.hasBusinessAccess,
         canUseBusinessFeatures: this.canUseBusinessFeatures,
+        canOpenAuditLogs: this.canOpenAuditLogs,
+        canOpenRequestsCenter: this.canOpenRequestsCenter,
         canOpenBusinessCenter: this.canOpenBusinessCenter,
         isBusinessTrial: this.isBusinessTrial,
         trialExpired: this.trialExpired,
@@ -209,6 +226,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
     hasBusinessProfile: boolean;
     hasBusinessAccess: boolean;
     canUseBusinessFeatures: boolean;
+    canOpenAuditLogs: boolean;
+    canOpenRequestsCenter: boolean;
     canOpenBusinessCenter: boolean;
     isBusinessTrial: boolean;
     trialExpired: boolean;
@@ -231,6 +250,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
         hasBusinessProfile: parsed['hasBusinessProfile'] === true,
         hasBusinessAccess: parsed['hasBusinessAccess'] === true,
         canUseBusinessFeatures: parsed['canUseBusinessFeatures'] === true,
+        canOpenAuditLogs: parsed['canOpenAuditLogs'] !== false,
+        canOpenRequestsCenter: parsed['canOpenRequestsCenter'] !== false,
         canOpenBusinessCenter: parsed['canOpenBusinessCenter'] === true,
         isBusinessTrial: parsed['isBusinessTrial'] === true,
         trialExpired: parsed['trialExpired'] === true,

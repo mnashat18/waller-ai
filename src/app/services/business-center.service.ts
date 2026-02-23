@@ -40,9 +40,9 @@ export type BusinessProfileMember = {
   status?: string | null;
 };
 
-export type BusinessMemberRole = 'owner' | 'admin' | 'member' | 'viewer';
+export type BusinessMemberRole = 'owner' | 'admin' | 'manager' | 'member' | 'viewer';
 
-export type ManageTeamMemberRole = 'owner' | 'business' | 'member' | 'viewer';
+export type ManageTeamMemberRole = 'owner' | 'admin' | 'manager' | 'member';
 
 export type BusinessRolePermissions = {
   canInvite: boolean;
@@ -1631,11 +1631,24 @@ export class BusinessCenterService {
   }
 
   private getToken(): string | null {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
-    if (!token || this.isTokenExpired(token)) {
+    if (typeof localStorage === 'undefined') {
       return null;
     }
-    return token;
+
+    try {
+      const token =
+        localStorage.getItem('token') ??
+        localStorage.getItem('access_token') ??
+        localStorage.getItem('directus_token');
+
+      if (!token || this.isTokenExpired(token)) {
+        return null;
+      }
+
+      return token;
+    } catch {
+      return null;
+    }
   }
 
   private buildAuthHeaders(token: string | null): HttpHeaders | null {
@@ -1807,7 +1820,7 @@ export class BusinessCenterService {
     }
 
     const raw = this.readString(membership?.member_role).toLowerCase();
-    if (raw === 'owner' || raw === 'admin' || raw === 'member' || raw === 'viewer') {
+    if (raw === 'owner' || raw === 'admin' || raw === 'manager' || raw === 'member' || raw === 'viewer') {
       return raw;
     }
 
@@ -1830,9 +1843,18 @@ export class BusinessCenterService {
     }
     if (role === 'admin') {
       return {
-        canInvite: false,
+        canInvite: true,
         canUpgrade: false,
         canManageMembers: true,
+        canUseSystem: true,
+        isReadOnly: false
+      };
+    }
+    if (role === 'manager') {
+      return {
+        canInvite: true,
+        canUpgrade: false,
+        canManageMembers: false,
         canUseSystem: true,
         isReadOnly: false
       };
@@ -1937,8 +1959,10 @@ export class BusinessCenterService {
   private mapManagedRole(role: ManageTeamMemberRole): BusinessMemberRole {
     const normalized = (role ?? 'member').toString().trim().toLowerCase();
     if (normalized === 'owner') return 'owner';
+    if (normalized === 'admin') return 'admin';
+    if (normalized === 'manager') return 'manager';
     if (normalized === 'business') return 'admin';
-    if (normalized === 'viewer') return 'viewer';
+    if (normalized === 'viewer') return 'member';
     return 'member';
   }
 

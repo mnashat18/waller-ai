@@ -1,0 +1,172 @@
+<div class="min-h-screen bg-[#0b1020] text-white relative overflow-hidden">
+  <div class="absolute inset-0 opacity-30"
+       style="background: radial-gradient(circle at top, rgba(37, 99, 235, 0.55), transparent 60%);"></div>
+  <div class="absolute inset-0 opacity-20"
+       style="background: radial-gradient(circle at 20% 10%, rgba(96, 165, 250, 0.65), transparent 50%);"></div>
+  <div class="absolute inset-0 opacity-10"
+       style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 40px 40px;"></div>
+  <span class="mobile-orb" style="top: 88px; right: -12px;"></span>
+  <span class="mobile-orb gold" style="bottom: 130px; left: -12px;"></span>
+  <span class="mobile-sparkle" style="top: 156px; left: 36px;"></span>
+
+  <div class="relative z-10 px-5 pt-6 pb-28">
+    <div class="flex items-start justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.2em] text-slate-400">Business Center</p>
+        <h1 class="text-2xl font-semibold mt-2">Business Ops Hub</h1>
+        <p class="text-xs text-slate-400 mt-1">Plan: {{ planLabel }}</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <app-notifications></app-notifications>
+        <a
+          routerLink="/profile"
+          class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap gap-2">
+      <span class="inline-flex rounded-full border border-sky-300/40 bg-sky-400/15 px-3 py-1 text-xs">{{ planLabel }}</span>
+      <span class="inline-flex rounded-full border border-slate-400/40 bg-slate-500/10 px-3 py-1 text-xs">Role: {{ roleLabel }}</span>
+      <span *ngIf="trialLabel" class="inline-flex rounded-full border border-amber-300/40 bg-amber-300/10 px-3 py-1 text-xs text-amber-200">{{ trialLabel }}</span>
+    </div>
+
+    <div *ngIf="loading" class="mt-5 rounded-2xl bg-white/5 border border-white/10 p-4 text-sm text-slate-300">
+      Checking your Business profile and paid access...
+    </div>
+
+    <div *ngIf="!loading && errorMessage" class="mt-5 rounded-2xl bg-red-500/10 border border-red-300/30 p-4">
+      <p class="text-sm text-red-200">{{ errorMessage }}</p>
+      <button
+        type="button"
+        class="mt-3 rounded-full bg-white/10 px-4 py-2 text-xs border border-white/20"
+        (click)="retry()">
+        Retry
+      </button>
+    </div>
+
+    <div *ngIf="!loading && !errorMessage && !hasBusinessAccess" class="mt-5 rounded-2xl bg-white/5 border border-white/10 p-4">
+      <p class="text-sm text-slate-300">
+        {{ accessReason || 'Business paid access is required to open this page.' }}
+      </p>
+      <div class="mt-4 flex gap-3">
+        <a
+          routerLink="/payment"
+          class="flex-1 text-center rounded-2xl bg-amber-400/90 hover:bg-amber-300 text-slate-900 py-3 font-semibold">
+          Open Billing
+        </a>
+        <a
+          routerLink="/dashboard"
+          class="flex-1 text-center rounded-2xl bg-white/10 hover:bg-white/20 py-3">
+          Back Home
+        </a>
+      </div>
+    </div>
+
+    <ng-container *ngIf="!loading && !errorMessage && hasBusinessAccess">
+      <div class="grid grid-cols-2 gap-3 mt-5">
+        <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+          <p class="text-xs text-slate-400">Team Members</p>
+          <p class="text-2xl font-semibold mt-2">{{ stats.teamMembers }}</p>
+        </div>
+        <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+          <p class="text-xs text-slate-400">Requests</p>
+          <p class="text-2xl font-semibold mt-2">{{ stats.requests }}</p>
+        </div>
+        <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+          <p class="text-xs text-slate-400">Pending</p>
+          <p class="text-2xl font-semibold mt-2 text-amber-300">{{ stats.pending }}</p>
+        </div>
+        <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+          <p class="text-xs text-slate-400">Activity Events</p>
+          <p class="text-2xl font-semibold mt-2">{{ stats.events }}</p>
+        </div>
+      </div>
+
+      <p *ngIf="loadingSummary" class="mt-4 text-xs text-slate-400">Loading Business metrics...</p>
+      <p *ngIf="isReadOnly" class="mt-4 text-xs text-slate-400">
+        Read-only mode is active for this Business profile.
+      </p>
+
+      <div class="mt-5 grid gap-3">
+        <a
+          routerLink="/requests"
+          class="w-full inline-flex items-center justify-center rounded-2xl bg-[#f5c451] text-slate-900 py-3 font-semibold shadow-lg">
+          Open Requests
+        </a>
+        <a
+          routerLink="/audit-logs"
+          class="w-full inline-flex items-center justify-center rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 py-3">
+          Open Audit Logs
+        </a>
+        <a
+          routerLink="/payment"
+          class="w-full inline-flex items-center justify-center rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 py-3">
+          Manage Billing
+        </a>
+      </div>
+
+      <p class="mt-4 text-xs text-slate-400">
+        {{ canManageMembers ? 'You can manage team members from your Business account.' : 'Team member management is limited by your current role.' }}
+      </p>
+    </ng-container>
+  </div>
+
+  <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
+    <div class="grid grid-cols-6 text-[10px] text-slate-400">
+      <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 12h6"></path>
+          <path d="M9 16h6"></path>
+          <path d="M5 8h14v12H5z"></path>
+        </svg>
+        <span>Audit logs</span>
+      </a>
+      <a routerLink="/requests" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 5v14"></path>
+          <path d="M5 12h14"></path>
+        </svg>
+        <span>Create</span>
+      </a>
+      <a routerLink="/dashboard" routerLinkActive="text-white" [routerLinkActiveOptions]="{ exact: true }" class="flex flex-col items-center gap-1">
+        <div class="w-11 h-11 rounded-full bg-[#f5c451] text-slate-900 flex items-center justify-center -mt-6 shadow-lg">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 11.5L12 4l9 7.5"></path>
+            <path d="M5 10.5V20h14v-9.5"></path>
+          </svg>
+        </div>
+        <span class="mt-2 text-white">Home</span>
+      </a>
+      <a routerLink="/requests" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 7h16"></path>
+          <path d="M4 12h16"></path>
+          <path d="M4 17h16"></path>
+        </svg>
+        <span>Requests</span>
+      </a>
+      <a routerLink="/business-center" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 20V8l8-4 8 4v12"></path>
+          <path d="M8 20v-5h8v5"></path>
+          <path d="M9 10h.01"></path>
+          <path d="M15 10h.01"></path>
+        </svg>
+        <span>Business</span>
+      </a>
+      <a routerLink="/history" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12a9 9 0 1 0 9-9"></path>
+          <path d="M3 4v6h6"></path>
+          <path d="M12 7v5l3 3"></path>
+        </svg>
+        <span>History</span>
+      </a>
+    </div>
+  </nav>
+</div>

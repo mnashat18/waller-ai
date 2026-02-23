@@ -8,12 +8,13 @@ import { DownloadAppLanding } from './public.layout/download-app/download-app';
 
 
 import { LayoutComponent } from './Layout/Layout';
-import { AuditLogs } from './Pages/audit-logs/audit-logs';
 import { DashboardMobileComponent } from './Pages/mobile/dashboard-mobile.component';
 import { RequestsMobileComponent } from './Pages/mobile/requests-mobile.component';
 import { HistoryMobileComponent } from './Pages/mobile/history-mobile.component';
 import { ProfileMobileComponent } from './Pages/mobile/profile-mobile.component';
 import { AuditLogsMobileComponent } from './Pages/mobile/audit-logs-mobile.component';
+import { BusinessCenterMobileComponent } from './Pages/mobile/business-center-mobile.component';
+import { BusinessCenterService } from './services/business-center.service';
 import { SubscriptionService } from './services/subscription.service';
 
 const isMobileViewport = () =>
@@ -88,6 +89,41 @@ const businessOnboardingGuard: CanActivateFn = (_, state) => {
   );
 };
 
+const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
+  if (typeof localStorage === 'undefined') {
+    return true;
+  }
+
+  const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
+  if (!token) {
+    return true;
+  }
+
+  const businessCenter = inject(BusinessCenterService);
+  const router = inject(Router);
+  const targetPath = state.url.split('?')[0];
+
+  return businessCenter.getHubAccessState().pipe(
+    timeout(8000),
+    map((accessState) => {
+      if (!accessState?.hasPaidAccess) {
+        return true;
+      }
+
+      const role = (accessState.memberRole ?? '').toString().trim().toLowerCase();
+      if (role === 'owner' || role === 'admin' || role === 'manager') {
+        return true;
+      }
+
+      if (targetPath === '/business-center') {
+        return router.createUrlTree(['/dashboard'], { queryParams: { restricted: 'business-center' } });
+      }
+      return router.createUrlTree(['/dashboard'], { queryParams: { restricted: 'team' } });
+    }),
+    catchError(() => of(true))
+  );
+};
+
 
 export const routes: Routes = [
 
@@ -101,13 +137,13 @@ export const routes: Routes = [
 {
   path: 'audit-logs',
   canMatch: [mobileAuditLogsMatch],
-  canActivate: [businessOnboardingGuard],
+  canActivate: [businessOnboardingGuard, ownerWorkspaceGuard],
   component: AuditLogsMobileComponent
 },
 {
   path: 'requests',
   canMatch: [mobileRequestsMatch],
-  canActivate: [businessOnboardingGuard],
+  canActivate: [businessOnboardingGuard, ownerWorkspaceGuard],
   component: RequestsMobileComponent
 },
 {
@@ -126,9 +162,7 @@ export const routes: Routes = [
   path: 'business-center',
   canMatch: [mobileBusinessCenterMatch],
   canActivate: [businessOnboardingGuard],
-  loadComponent: () =>
-    import('./Pages/business-center/business-center')
-      .then(m => m.BusinessCenterComponent)
+  component: BusinessCenterMobileComponent
 },
 
 
@@ -221,12 +255,14 @@ export const routes: Routes = [
       },
       {
         path: 'audit-logs',
+        canActivate: [ownerWorkspaceGuard],
         loadComponent: () =>
           import('./Pages/audit-logs/audit-logs')
             .then(m => m.AuditLogs)
       },
       {
         path: 'requests',
+        canActivate: [ownerWorkspaceGuard],
         loadComponent: () =>
           import('./Pages/requests/requests')
             .then(m => m.Requests)
@@ -262,4 +298,3 @@ export const routes: Routes = [
 
 
 ];
-

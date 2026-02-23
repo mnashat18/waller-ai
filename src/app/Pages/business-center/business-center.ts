@@ -11,7 +11,6 @@ import {
   BusinessHubAccessState,
   BusinessMemberRole,
   BusinessProfileMember,
-  CreateReportExportInput,
   CreateScanRequestResult,
   ManageTeamMemberRole,
   ReportExportRecord,
@@ -77,7 +76,6 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   feedback: Feedback | null = null;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
-  private exportRefreshTimers: ReturnType<typeof setTimeout>[] = [];
 
   accessState: BusinessHubAccessState | null = null;
 
@@ -90,6 +88,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   reportExports: any[] = [];
   activityEvents: ActivityEventRecord[] = [];
   filteredActivityEvents: ActivityEventRecord[] = [];
+  private optimisticRequests = new Map<string, RequestRecord>();
 
   inviteMetrics: InviteMetrics = {
     pending: 0,
@@ -109,9 +108,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private currentMemberRole: BusinessMemberRole | null = null;
 
   readonly memberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [
+    { value: 'admin', label: 'Admin' },
+    { value: 'manager', label: 'Manager' },
     { value: 'member', label: 'Member' },
-    { value: 'business', label: 'Business' },
-    { value: 'viewer', label: 'Viewer' },
     { value: 'owner', label: 'Owner' }
   ];
   assignableMemberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [];
@@ -149,7 +148,6 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.clearFeedbackTimer();
     this.clearMemberSubmitFailSafeTimer();
-    this.clearExportRefreshTimers();
   }
 
   // ===============================
@@ -315,26 +313,18 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const payload: CreateReportExportInput = {
-      format: this.exportForm.format,
-      filters: this.buildExportFilters(selection),
-      scope: selection.scope,
-      memberUserIds: selection.userIds,
-      memberLabels: selection.labels
-    };
-
     this.exportSubmitting = true;
-    this.showFeedback('info', 'Submitting export request...');
+    this.showFeedback('info', `Preparing ${this.exportForm.format.toUpperCase()} export locally...`);
 
-    this.businessCenter.createReportExport(payload, this.accessState?.orgId ?? null).pipe(
-      finalize(() => (this.exportSubmitting = false))
-    ).subscribe((res: any) => {
-      this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Export request finished.');
-      if (res?.ok) {
-        this.reloadExports();
-        this.scheduleExportRefresh();
+    try {
+      if (this.exportForm.format === 'pdf') {
+        this.downloadActivityPdfNow();
+      } else {
+        this.downloadActivityCsvNow();
       }
-    });
+    } finally {
+      this.exportSubmitting = false;
+    }
   }
 
   downloadActivityCsvNow(): void {
@@ -517,6 +507,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.requestSubmitting = true;
     this.showFeedback('info', 'Sending requests...');
 
+    const optimisticRows = uniqueEmails.map((email) =>
+      this.createOptimisticRequestRow(email, requiredState)
+    );
+    this.requests = this.mergeRequestRows(this.requests, optimisticRows);
+    this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
+
     const requestCalls = uniqueEmails.map((email) =>
       this.businessCenter.createScanRequest({
         requested_for_email: email,
@@ -529,12 +525,31 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     ).subscribe((results: CreateScanRequestResult[]) => {
       const succeeded = results.filter((item) => item?.ok);
       const failed = results.filter((item) => !item?.ok);
+      const fallbackError = failed[0]?.message || 'Failed to send requests.';
+
+      results.forEach((result, index) => {
+        const optimistic = optimisticRows[index];
+        if (!optimistic) return;
+
+        const optimisticId = this.pickId(optimistic.id);
+        if (!optimisticId) return;
+
+        if (!result?.ok) {
+          this.dropOptimisticRequest(optimisticId);
+          return;
+        }
+
+        const createdId = this.pickId(result?.id);
+        if (createdId) {
+          this.promoteOptimisticRequestId(optimisticId, createdId);
+        }
+      });
+
+      this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
+      this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
 
       if (!succeeded.length) {
-        this.showFeedback(
-          'error',
-          failed[0]?.message || 'Failed to send requests.'
-        );
+        this.showFeedback('error', fallbackError);
         return;
       }
 
@@ -553,7 +568,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         );
       }
 
-      this.reloadRequestsAndInvites();
+      setTimeout(() => this.reloadRequestsAndInvites(), 1200);
     });
   }
 
@@ -631,7 +646,31 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.loadingAccess = true;
     this.missingBusinessProfile = false;
 
-    this.businessCenter.getHubAccessState().pipe(
+    let accessState$: Observable<BusinessHubAccessState>;
+    try {
+      accessState$ = this.businessCenter.getHubAccessState();
+    } catch (err) {
+      accessState$ = of({
+        userId: null,
+        orgId: null,
+        profile: null,
+        membership: null,
+        hasPaidAccess: false,
+        memberRole: null,
+        permissions: {
+          canInvite: false,
+          canUpgrade: false,
+          canManageMembers: false,
+          canUseSystem: false,
+          isReadOnly: true
+        },
+        trialExpired: false,
+        trialExpiresAt: null,
+        reason: this.describeHttpError(err, 'Failed to load Business profile and access state.')
+      } as BusinessHubAccessState);
+    }
+
+    accessState$.pipe(
       timeout(this.accessStateTimeoutMs),
       catchError((err) =>
         of({
@@ -739,7 +778,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       finalize(() => (this.loadingData = false))
     ).subscribe(({ team, requests, invites, exports, events }) => {
       this.teamMembers = (team as any[]) ?? [];
-      this.requests = (requests as any[]) ?? [];
+      const requestRows = (requests as RequestRecord[]) ?? [];
+      this.reconcileOptimisticRequests(requestRows);
+      this.requests = this.mergeRequestRows(requestRows, Array.from(this.optimisticRequests.values()));
       this.requestInvites = (invites as any[]) ?? [];
       this.reportExports = (exports as any[]) ?? [];
       this.activityEvents = (events as ActivityEventRecord[]) ?? [];
@@ -747,6 +788,127 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.syncExportSelectionWithTeam();
       this.refreshFilteredActivityEvents();
     });
+  }
+
+  private createOptimisticRequestRow(email: string, requiredState: RequiredState): RequestRecord {
+    const optimisticId = this.generateOptimisticId();
+    const row: RequestRecord = {
+      id: optimisticId,
+      target: 'scan',
+      recipient: email,
+      requested_for_email: email,
+      recipient_industry: null,
+      required_state: requiredState,
+      response_status: 'Pending',
+      timestamp: new Date().toISOString(),
+      org_id: this.accessState?.orgId ?? null,
+      user_created: this.currentUserId()
+    };
+    this.optimisticRequests.set(optimisticId, row);
+    return row;
+  }
+
+  private promoteOptimisticRequestId(fromId: string, toId: string): void {
+    const sourceId = this.pickId(fromId);
+    const targetId = this.pickId(toId);
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
+
+    const source = this.optimisticRequests.get(sourceId);
+    if (source) {
+      this.optimisticRequests.delete(sourceId);
+      this.optimisticRequests.set(targetId, { ...source, id: targetId });
+    }
+
+    const idx = this.requests.findIndex((row) => this.pickId(row?.id) === sourceId);
+    if (idx !== -1) {
+      this.requests[idx] = {
+        ...(this.requests[idx] ?? {}),
+        id: targetId
+      };
+    }
+  }
+
+  private dropOptimisticRequest(optimisticId: string): void {
+    const rowId = this.pickId(optimisticId);
+    if (!rowId) {
+      return;
+    }
+
+    this.optimisticRequests.delete(rowId);
+    this.requests = this.requests.filter((row) => this.pickId(row?.id) !== rowId);
+  }
+
+  private reconcileOptimisticRequests(remoteRows: RequestRecord[]): void {
+    const remoteIds = new Set(
+      (remoteRows ?? [])
+        .map((row) => this.pickId(row?.id))
+        .filter((value): value is string => Boolean(value))
+    );
+
+    for (const [key, optimistic] of Array.from(this.optimisticRequests.entries())) {
+      if (remoteIds.has(key)) {
+        this.optimisticRequests.delete(key);
+        continue;
+      }
+
+      if (!this.isTempRequestId(key)) {
+        continue;
+      }
+
+      const optimisticEmail = this.normalizeEmail(optimistic.requested_for_email ?? optimistic.recipient ?? '');
+      const optimisticState = this.pickString(optimistic.required_state)?.toLowerCase() ?? '';
+      const optimisticTs = this.timestampMs(optimistic.timestamp);
+
+      const matched = (remoteRows ?? []).some((row) => {
+        const remoteEmail = this.normalizeEmail(row?.requested_for_email ?? row?.recipient ?? '');
+        const remoteState = this.pickString(row?.required_state)?.toLowerCase() ?? '';
+        if (!optimisticEmail || optimisticEmail !== remoteEmail || optimisticState !== remoteState) {
+          return false;
+        }
+        const remoteTs = this.timestampMs(row?.timestamp);
+        return Math.abs(remoteTs - optimisticTs) <= 2 * 60 * 1000;
+      });
+
+      if (matched) {
+        this.optimisticRequests.delete(key);
+      }
+    }
+  }
+
+  private mergeRequestRows(baseRows: RequestRecord[], extraRows: RequestRecord[]): RequestRecord[] {
+    const byId = new Map<string, RequestRecord>();
+    const push = (row: RequestRecord | null | undefined) => {
+      const id = this.pickId(row?.id);
+      if (!id) return;
+
+      const normalized: RequestRecord = {
+        ...row,
+        id,
+        recipient:
+          row?.recipient ??
+          row?.requested_for_email ??
+          '-'
+      } as RequestRecord;
+
+      const existing = byId.get(id);
+      if (!existing) {
+        byId.set(id, normalized);
+        return;
+      }
+
+      const existingTs = this.timestampMs(existing.timestamp);
+      const nextTs = this.timestampMs(normalized.timestamp);
+      if (nextTs >= existingTs) {
+        byId.set(id, { ...existing, ...normalized, id });
+      }
+    };
+
+    for (const row of baseRows ?? []) push(row);
+    for (const row of extraRows ?? []) push(row);
+
+    return Array.from(byId.values()).sort((a, b) => this.timestampMs(b.timestamp) - this.timestampMs(a.timestamp));
   }
 
   private reloadRequestsAndInvites(): void {
@@ -766,7 +928,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         })
       )
     }).subscribe(({ requests, invites }) => {
-      this.requests = (requests as any[]) ?? [];
+      const requestRows = (requests as RequestRecord[]) ?? [];
+      this.reconcileOptimisticRequests(requestRows);
+      this.requests = this.mergeRequestRows(requestRows, Array.from(this.optimisticRequests.values()));
       this.requestInvites = (invites as any[]) ?? [];
       this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
     });
@@ -843,6 +1007,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private clearBusinessData(): void {
     this.teamMembers = [];
     this.requests = [];
+    this.optimisticRequests.clear();
     this.requestInvites = [];
     this.reportExports = [];
     this.activityEvents = [];
@@ -907,22 +1072,6 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.memberSubmitFailSafeTimer = null;
   }
 
-  private scheduleExportRefresh(): void {
-    this.clearExportRefreshTimers();
-    const delays = [2500, 7000, 15000];
-    this.exportRefreshTimers = delays.map((delay) =>
-      setTimeout(() => this.reloadExports(), delay)
-    );
-  }
-
-  private clearExportRefreshTimers(): void {
-    if (!this.exportRefreshTimers.length) return;
-    for (const timer of this.exportRefreshTimers) {
-      clearTimeout(timer);
-    }
-    this.exportRefreshTimers = [];
-  }
-
   private daysUntil(value: string): number | null {
     const ts = new Date(value).getTime();
     if (Number.isNaN(ts)) return null;
@@ -958,6 +1107,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     if (
       normalized === 'owner' ||
       normalized === 'admin' ||
+      normalized === 'manager' ||
       normalized === 'member' ||
       normalized === 'viewer'
     ) {
@@ -1210,6 +1360,24 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     anchor.click();
     document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
+  }
+
+  private generateOptimisticId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `tmp_${crypto.randomUUID()}`;
+    }
+    return `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+
+  private timestampMs(value: unknown): number {
+    const raw = this.pickString(value);
+    if (!raw) return 0;
+    const parsed = new Date(raw).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  private isTempRequestId(value: string): boolean {
+    return value.startsWith('tmp_');
   }
 
   private pickString(value: unknown): string | null {

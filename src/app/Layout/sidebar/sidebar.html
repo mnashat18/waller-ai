@@ -31,6 +31,7 @@
 
     <a routerLink="/audit-logs"
        routerLinkActive="active"
+       *ngIf="canOpenAuditLogs"
        class="sidebar-item">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M5 8h14v12H5z"></path>
@@ -43,6 +44,7 @@
     <a routerLink="/requests"
        routerLinkActive="active"
        [routerLinkActiveOptions]="{ exact: true }"
+       *ngIf="canOpenRequestsCenter"
        class="sidebar-item">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M4 7h16"></path>
