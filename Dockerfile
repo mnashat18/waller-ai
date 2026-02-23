@@ -13,8 +13,8 @@ FROM nginx:alpine
 
 RUN rm -rf /usr/share/nginx/html/*
 
-# 👇 أهم سطر
-COPY --from=build /app/dist/ /usr/share/nginx/html/
+# 👇 ده المسار الصح 100%
+COPY --from=build /app/dist/wellar-ui/ /usr/share/nginx/html/
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
