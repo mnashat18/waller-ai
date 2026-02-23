@@ -3,7 +3,7 @@ import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { catchError, map, timeout } from 'rxjs/operators';
 import {
   type CreateRequestForm,
   CreateRequestModalComponent,
@@ -11,7 +11,7 @@ import {
   type RequiredState,
   type SubmitFeedback
 } from '../../components/create-request-modal/create-request-modal';
-import { SubscriptionService } from '../../services/subscription.service';
+import { BusinessCenterService } from '../../services/business-center.service';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import { environment } from 'src/environments/environment';
 
@@ -38,11 +38,12 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   businessInviteTrialNotice = '';
   readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly accessTimeoutMs = 15000;
   requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
 
   constructor(
     private http: HttpClient,
-    private subscriptionService: SubscriptionService,
+    private businessCenter: BusinessCenterService,
     private cdr: ChangeDetectorRef
   ) {}
 
@@ -155,32 +156,52 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
   private loadPlanAccess() {
     this.loadingPlanAccess = true;
-    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
-      next: (snapshot) => {
-        this.hasBusinessAccess = snapshot.hasBusinessAccess;
-        this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
-        this.currentPlanCode = snapshot.planCode || 'free';
-        this.isBusinessTrial = snapshot.isBusinessTrial;
-        this.trialDaysRemaining =
-          typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
-        this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
-        this.canCreateRequests = snapshot.hasBusinessAccess;
-        this.loadingPlanAccess = false;
-        this.loadRequests();
-        this.cdr.detectChanges();
-      },
-      error: (err) => {
-        this.hasBusinessAccess = false;
-        this.canCreateRequests = false;
+    this.businessCenter.getHubAccessState().pipe(
+      timeout(this.accessTimeoutMs),
+      catchError((err) => {
         this.submitFeedback = {
           type: 'error',
           message: this.describeHttpError(err, 'Failed to load plan access.')
         };
+        return of(null);
+      })
+    ).subscribe((state) => {
+      if (!state) {
+        this.hasBusinessAccess = false;
+        this.canCreateRequests = false;
+        this.currentPlanName = 'Free';
+        this.currentPlanCode = 'free';
+        this.isBusinessTrial = false;
+        this.trialDaysRemaining = null;
+        this.businessTrialNotice = '';
+        this.businessInviteTrialNotice = '';
         this.loadingPlanAccess = false;
         this.loadRequests();
         this.cdr.detectChanges();
+        return;
       }
+
+      this.hasBusinessAccess = Boolean(state.hasPaidAccess);
+      this.currentPlanName = this.hasBusinessAccess ? 'Business' : 'Free';
+      this.currentPlanCode = (state.profile?.plan_code ?? (this.hasBusinessAccess ? 'business' : 'free')).toString().toLowerCase();
+
+      const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
+      this.isBusinessTrial = billingStatus === 'trial' && !state.trialExpired;
+      this.trialDaysRemaining = this.isBusinessTrial
+        ? this.daysUntil(state.trialExpiresAt)
+        : null;
+
+      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
+      this.canCreateRequests =
+        this.hasBusinessAccess &&
+        Boolean(state.permissions?.canUseSystem) &&
+        !Boolean(state.permissions?.isReadOnly) &&
+        !Boolean(state.trialExpired);
+
+      this.loadingPlanAccess = false;
+      this.loadRequests();
+      this.cdr.detectChanges();
     });
   }
 
@@ -519,6 +540,15 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       ? localStorage.getItem('user_email')
       : null;
     return this.normalizeEmail(payloadEmail) ?? this.normalizeEmail(storedEmail);
+  }
+
+  private daysUntil(value: string | null): number | null {
+    if (!value) return null;
+    const ts = new Date(value).getTime();
+    if (Number.isNaN(ts)) return null;
+    const remaining = ts - Date.now();
+    if (remaining <= 0) return 0;
+    return Math.ceil(remaining / (24 * 60 * 60 * 1000));
   }
 
   private showSuccessToast(message: string): void {

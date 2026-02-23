@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { Observable, forkJoin, of } from 'rxjs';
 import { catchError, map, switchMap, timeout } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
 
@@ -42,7 +42,7 @@ export type BusinessProfileMember = {
 
 export type BusinessMemberRole = 'owner' | 'admin' | 'member' | 'viewer';
 
-export type ManageTeamMemberRole = 'owner' | 'business' | 'member';
+export type ManageTeamMemberRole = 'owner' | 'business' | 'member' | 'viewer';
 
 export type BusinessRolePermissions = {
   canInvite: boolean;
@@ -62,6 +62,7 @@ export type RequestRecord = {
   response_status: string;
   timestamp?: string | null;
   org_id?: string | null;
+  user_created?: string | null;
 };
 
 export type CreateScanRequestPayload = {
@@ -291,12 +292,11 @@ export class BusinessCenterService {
     const backendRole = this.mapManagedRole(role);
 
     return this.findUserIdByEmail(normalizedEmail, access.token).pipe(
-      timeout(this.requestTimeoutMs),
       switchMap((userId) => {
         if (!userId) {
           return of({
             ok: false,
-            message: 'No registered user found for this email.'
+            message: 'No registered account found for this email. Ask the member to sign up first.'
           });
         }
 
@@ -307,10 +307,11 @@ export class BusinessCenterService {
           access.token
         );
       }),
+      timeout(this.requestTimeoutMs),
       catchError((err) =>
         of({
           ok: false,
-          message: this.toFriendlyError(err, 'Failed to manage team member.')
+          message: this.describeMemberLookupError(err)
         })
       )
     );
@@ -318,37 +319,27 @@ export class BusinessCenterService {
 
   listRequests(orgId: string | null, limit = 60): Observable<RequestRecord[]> {
     const access = this.getAccessContext();
-    if (!orgId) {
+    if (!orgId && !access.userId) {
       return of([]);
     }
 
-    const params = new URLSearchParams({
-      sort: '-timestamp',
-      limit: String(limit),
-      fields: [
-        'id',
-        'required_state',
-        'response_status',
-        'timestamp',
-        'org_id',
-        'requested_by_org',
-        'requested_for_email',
-        'requested_for_phone'
-      ].join(',')
-    });
-    params.set('filter[_or][0][org_id][_eq]', orgId);
-    params.set('filter[_or][1][requested_by_org][_eq]', orgId);
+    const orgRequests$ = orgId
+      ? this.fetchRequestsByOrg(orgId, limit, access.token).pipe(catchError(() => of([])))
+      : of([]);
+    const creatorRequests$ = access.userId
+      ? this.fetchRequestsByCreator(access.userId, limit, access.token).pipe(catchError(() => of([])))
+      : of([]);
 
-    return this.http.get<{ data?: any[] }>(
-      `${this.api}/items/requests?${params.toString()}`,
-      this.requestOptions(access.token)
-    ).pipe(
-      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+    return forkJoin([orgRequests$, creatorRequests$]).pipe(
+      map(([orgRows, creatorRows]) => this.mergeRequestsById([...orgRows, ...creatorRows])),
       switchMap((rows) => this.attachRecipientIndustries(rows, access.token))
     );
   }
 
-  createScanRequest(payload: CreateScanRequestPayload): Observable<CreateScanRequestResult> {
+  createScanRequest(
+    payload: CreateScanRequestPayload,
+    orgId?: string | null
+  ): Observable<CreateScanRequestResult> {
     const access = this.getAccessContext();
     if (!access.token && !access.userId) {
       return of({ ok: false, message: 'Please sign in first.' });
@@ -369,9 +360,21 @@ export class BusinessCenterService {
       required_state: requiredState
     };
 
+    const resolvedOrgId = this.normalizeId(orgId) ?? access.orgId;
+    const primary: Record<string, unknown> = {
+      ...body
+    };
+    if (resolvedOrgId) {
+      primary['org_id'] = resolvedOrgId;
+      primary['requested_by_org'] = resolvedOrgId;
+    }
+    if (access.userId) {
+      primary['requested_by_user'] = access.userId;
+    }
+
     return this.http.post<{ data?: { id?: unknown } }>(
       `${this.api}/items/requests`,
-      body,
+      primary,
       this.requestOptions(access.token)
     ).pipe(
       timeout(this.requestTimeoutMs),
@@ -380,13 +383,145 @@ export class BusinessCenterService {
         message: 'Request sent successfully.',
         id: this.normalizeId(res?.data?.id)
       })),
-      catchError((err) =>
-        of({
-          ok: false,
-          message: this.toFriendlyError(err, 'Failed to send request.')
-        })
-      )
+      catchError((err) => {
+        if (!this.shouldRetryWithMinimalPayload(err)) {
+          return of({
+            ok: false,
+            message: this.toFriendlyError(err, 'Failed to send request.')
+          });
+        }
+
+        const fallbackWithOrg: Record<string, unknown> = {
+          ...body
+        };
+        if (resolvedOrgId) {
+          fallbackWithOrg['org_id'] = resolvedOrgId;
+        }
+
+        return this.http.post<{ data?: { id?: unknown } }>(
+          `${this.api}/items/requests`,
+          fallbackWithOrg,
+          this.requestOptions(access.token)
+        ).pipe(
+          timeout(this.requestTimeoutMs),
+          map((res) => ({
+            ok: true,
+            message: 'Request sent successfully.',
+            id: this.normalizeId(res?.data?.id)
+          })),
+          catchError(() =>
+            this.http.post<{ data?: { id?: unknown } }>(
+              `${this.api}/items/requests`,
+              body,
+              this.requestOptions(access.token)
+            ).pipe(
+              timeout(this.requestTimeoutMs),
+              map((res) => ({
+                ok: true,
+                message: 'Request sent successfully.',
+                id: this.normalizeId(res?.data?.id)
+              })),
+              catchError((retryErr) =>
+                of({
+                  ok: false,
+                  message: this.toFriendlyError(retryErr, 'Failed to send request.')
+                })
+              )
+            )
+          )
+        );
+      })
     );
+  }
+
+  private fetchRequestsByOrg(
+    orgId: string,
+    limit: number,
+    token: string | null
+  ): Observable<RequestRecord[]> {
+    const params = this.buildRequestsParams(limit);
+    params.set('filter[_or][0][org_id][_eq]', orgId);
+    params.set('filter[_or][1][requested_by_org][_eq]', orgId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row)))
+    );
+  }
+
+  private fetchRequestsByCreator(
+    userId: string,
+    limit: number,
+    token: string | null
+  ): Observable<RequestRecord[]> {
+    const params = this.buildRequestsParams(limit);
+    params.set('filter[user_created][_eq]', userId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+      catchError(() => {
+        const fallbackParams = this.buildRequestsParams(limit);
+        fallbackParams.set('filter[requested_by_user][_eq]', userId);
+        return this.http.get<{ data?: any[] }>(
+          `${this.api}/items/requests?${fallbackParams.toString()}`,
+          this.requestOptions(token)
+        ).pipe(
+          map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+          catchError(() => of([]))
+        );
+      })
+    );
+  }
+
+  private buildRequestsParams(limit: number): URLSearchParams {
+    return new URLSearchParams({
+      sort: '-timestamp',
+      limit: String(limit),
+      fields: [
+        'id',
+        'required_state',
+        'response_status',
+        'timestamp',
+        'org_id',
+        'requested_by_org',
+        'requested_for_email',
+        'requested_for_phone',
+        'user_created'
+      ].join(',')
+    });
+  }
+
+  private mergeRequestsById(rows: RequestRecord[]): RequestRecord[] {
+    const byId = new Map<string, RequestRecord>();
+    for (const row of rows ?? []) {
+      const id = this.pickString(row?.id);
+      if (!id) {
+        continue;
+      }
+
+      const existing = byId.get(id);
+      if (!existing) {
+        byId.set(id, row);
+        continue;
+      }
+
+      const existingTs = this.toTimestamp(existing.timestamp);
+      const nextTs = this.toTimestamp(row.timestamp);
+      if ((nextTs ?? 0) >= (existingTs ?? 0)) {
+        byId.set(id, row);
+      }
+    }
+
+    return Array.from(byId.values()).sort((a, b) => {
+      const aTs = this.toTimestamp(a.timestamp) ?? 0;
+      const bTs = this.toTimestamp(b.timestamp) ?? 0;
+      return bTs - aTs;
+    });
   }
 
   listRequestInvites(orgId: string | null, limit = 80): Observable<RequestInviteRecord[]> {
@@ -519,7 +654,8 @@ export class BusinessCenterService {
     const preparedFilters = this.buildReportExportFilters(input);
 
     const primary: Record<string, unknown> = {
-      format: normalizedFormat
+      format: normalizedFormat,
+      status: 'pending'
     };
     if (preparedFilters !== null) {
       primary['filters'] = preparedFilters;
@@ -547,6 +683,7 @@ export class BusinessCenterService {
         }
 
         const fallbackWithSerializedFilters: Record<string, unknown> = { format: normalizedFormat };
+        fallbackWithSerializedFilters['status'] = 'pending';
         if (orgId) {
           fallbackWithSerializedFilters['org_id'] = orgId;
         }
@@ -1018,7 +1155,8 @@ export class BusinessCenterService {
       required_state: this.pickString(raw?.required_state) ?? 'Unknown',
       response_status: this.pickString(raw?.response_status) ?? 'Pending',
       timestamp: this.pickString(raw?.timestamp),
-      org_id: this.normalizeId(raw?.org_id) ?? this.normalizeId(raw?.requested_by_org)
+      org_id: this.normalizeId(raw?.org_id) ?? this.normalizeId(raw?.requested_by_org),
+      user_created: this.normalizeId(raw?.user_created)
     };
   }
 
@@ -1104,7 +1242,7 @@ export class BusinessCenterService {
     return {
       id: this.normalizeId(raw?.id) ?? '',
       format: (this.pickString(raw?.format) ?? 'csv').toLowerCase(),
-      status: this.pickString(raw?.status),
+      status: this.pickString(raw?.status) ?? (file ? 'ready' : 'pending'),
       file,
       filters,
       completed_at: this.pickString(raw?.completed_at),
@@ -1294,15 +1432,10 @@ export class BusinessCenterService {
       payload?.['organization_id'] ??
       payload?.['org'] ??
       payload?.['organization'];
-    const storedUserId =
-      typeof localStorage !== 'undefined' ? localStorage.getItem('current_user_id') : null;
-    const storedOrgId =
-      typeof localStorage !== 'undefined' ? localStorage.getItem('current_user_org_id') : null;
-
     return {
       token,
-      userId: this.normalizeId(userIdValue) ?? this.normalizeId(storedUserId),
-      orgId: this.normalizeId(orgIdValue) ?? this.normalizeId(storedOrgId)
+      userId: this.normalizeId(userIdValue),
+      orgId: this.normalizeId(orgIdValue)
     };
   }
 
@@ -1410,9 +1543,23 @@ export class BusinessCenterService {
       `${this.api}/users?${params.toString()}`,
       this.requestOptions(token)
     ).pipe(
-      map((res) => this.normalizeId((res.data ?? [])[0]?.id)),
-      catchError(() => of(null))
+      map((res) => this.normalizeId((res.data ?? [])[0]?.id))
     );
+  }
+
+  private describeMemberLookupError(err: any): string {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const detail = this.readError(err, '');
+
+    if (status === 401 || status === 403) {
+      return 'Permission denied while finding user by email. Allow reading users for this role or use an admin token.';
+    }
+
+    if (status === 404) {
+      return 'User lookup endpoint is not available on this backend.';
+    }
+
+    return this.toFriendlyError(err, 'Failed to manage team member.');
   }
 
   private upsertBusinessProfileMember(
@@ -1791,6 +1938,7 @@ export class BusinessCenterService {
     const normalized = (role ?? 'member').toString().trim().toLowerCase();
     if (normalized === 'owner') return 'owner';
     if (normalized === 'business') return 'admin';
+    if (normalized === 'viewer') return 'viewer';
     return 'member';
   }
 

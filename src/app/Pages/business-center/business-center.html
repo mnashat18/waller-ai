@@ -147,7 +147,7 @@
               Role
               <select class="input" [(ngModel)]="teamMemberForm.role">
                 <option
-                  *ngFor="let option of memberRoleOptions; trackBy: trackById"
+                  *ngFor="let option of assignableMemberRoleOptions; trackBy: trackById"
                   [ngValue]="option.value">
                   {{ option.label }}
                 </option>

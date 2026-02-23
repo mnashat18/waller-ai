@@ -2,7 +2,8 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
-import { map } from 'rxjs/operators';
+import { of } from 'rxjs';
+import { catchError, map, timeout } from 'rxjs/operators';
 import {
   CreateRequestModalComponent,
   type CreateRequestForm,
@@ -10,7 +11,7 @@ import {
   type RequiredState,
   type SubmitFeedback
 } from '../../components/create-request-modal/create-request-modal';
-import { SubscriptionService } from '../../services/subscription.service';
+import { BusinessCenterService } from '../../services/business-center.service';
 import { environment } from 'src/environments/environment';
 
 @Component({
@@ -44,10 +45,11 @@ export class Requests implements OnInit, OnDestroy {
   };
 
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly accessTimeoutMs = 15000;
 
   constructor(
     private http: HttpClient,
-    private subscriptionService: SubscriptionService,
+    private businessCenter: BusinessCenterService,
     private cdr: ChangeDetectorRef
   ) {}
 
@@ -220,23 +222,44 @@ export class Requests implements OnInit, OnDestroy {
   private loadPlanAccess() {
     this.loadingPlanAccess = true;
 
-    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
-      next: snapshot => {
-        this.hasBusinessAccess = snapshot.hasBusinessAccess;
-        this.canCreateRequests = snapshot.hasBusinessAccess;
+    this.businessCenter.getHubAccessState().pipe(
+      timeout(this.accessTimeoutMs),
+      catchError(() => of(null))
+    ).subscribe((state) => {
+      if (!state) {
+        this.hasBusinessAccess = false;
+        this.canCreateRequests = false;
         this.businessTrialNotice = '';
         this.businessInviteTrialNotice = '';
         this.loadingPlanAccess = false;
-
         this.loadRequests(true);
-      },
-      error: () => {
-        this.hasBusinessAccess = false;
-        this.canCreateRequests = false;
-        this.loadingPlanAccess = false;
-
-        this.loadRequests(true);
+        return;
       }
+
+      this.hasBusinessAccess = Boolean(state.hasPaidAccess);
+      this.canCreateRequests =
+        this.hasBusinessAccess &&
+        Boolean(state.permissions?.canUseSystem) &&
+        !Boolean(state.permissions?.isReadOnly) &&
+        !Boolean(state.trialExpired);
+
+      const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
+      const trialDaysRemaining = this.daysUntil(state.trialExpiresAt);
+      const trialActive = billingStatus === 'trial' && !state.trialExpired;
+
+      if (trialActive && trialDaysRemaining !== null && trialDaysRemaining > 0) {
+        this.businessTrialNotice = `Create requests is a paid Business feature, free for ${trialDaysRemaining} day(s) left.`;
+        this.businessInviteTrialNotice = `Email invites are a paid Business feature, free for ${trialDaysRemaining} day(s) left.`;
+      } else if (trialActive) {
+        this.businessTrialNotice = 'Create requests is a paid Business feature, currently unlocked in your trial.';
+        this.businessInviteTrialNotice = 'Email invites are a paid Business feature, currently unlocked in your trial.';
+      } else {
+        this.businessTrialNotice = '';
+        this.businessInviteTrialNotice = '';
+      }
+
+      this.loadingPlanAccess = false;
+      this.loadRequests(true);
     });
   }
 
@@ -431,6 +454,15 @@ export class Requests implements OnInit, OnDestroy {
     if (status >= 500) return `Server error (${status}): ${detail || fallback}`;
     if (status >= 400) return `Request error (${status}): ${detail || fallback}`;
     return detail || fallback;
+  }
+
+  private daysUntil(value: string | null): number | null {
+    if (!value) return null;
+    const ts = new Date(value).getTime();
+    if (Number.isNaN(ts)) return null;
+    const remaining = ts - Date.now();
+    if (remaining <= 0) return 0;
+    return Math.ceil(remaining / (24 * 60 * 60 * 1000));
   }
 }
 

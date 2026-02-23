@@ -9,6 +9,7 @@ import {
   ActivityEventRecord,
   BusinessCenterService,
   BusinessHubAccessState,
+  BusinessMemberRole,
   BusinessProfileMember,
   CreateReportExportInput,
   CreateScanRequestResult,
@@ -75,6 +76,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   feedback: Feedback | null = null;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
+  private exportRefreshTimers: ReturnType<typeof setTimeout>[] = [];
 
   accessState: BusinessHubAccessState | null = null;
 
@@ -103,12 +106,15 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   readonly dailyRequestLimit = 5;
   readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
   todayRequestCount = 0;
+  private currentMemberRole: BusinessMemberRole | null = null;
 
   readonly memberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [
     { value: 'member', label: 'Member' },
     { value: 'business', label: 'Business' },
+    { value: 'viewer', label: 'Viewer' },
     { value: 'owner', label: 'Owner' }
   ];
+  assignableMemberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [];
 
   teamMemberForm: {
     email: string;
@@ -136,11 +142,14 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   constructor(private businessCenter: BusinessCenterService) {}
 
   ngOnInit(): void {
+    this.assignableMemberRoleOptions = [...this.memberRoleOptions];
     this.loadAccessState();
   }
 
   ngOnDestroy(): void {
     this.clearFeedbackTimer();
+    this.clearMemberSubmitFailSafeTimer();
+    this.clearExportRefreshTimers();
   }
 
   // ===============================
@@ -321,7 +330,10 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       finalize(() => (this.exportSubmitting = false))
     ).subscribe((res: any) => {
       this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Export request finished.');
-      if (res?.ok) this.reloadExports();
+      if (res?.ok) {
+        this.reloadExports();
+        this.scheduleExportRefresh();
+      }
     });
   }
 
@@ -509,7 +521,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.businessCenter.createScanRequest({
         requested_for_email: email,
         required_state: requiredState
-      })
+      }, this.accessState?.orgId ?? null)
     );
 
     forkJoin(requestCalls).pipe(
@@ -572,13 +584,22 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }
 
     const role = this.teamMemberForm.role;
-    if (!this.memberRoleOptions.some((item) => item.value === role)) {
+    if (!this.assignableMemberRoleOptions.some((item) => item.value === role)) {
       this.showFeedback('error', 'Select a valid role.');
       return;
     }
 
     this.memberSubmitting = true;
     this.showFeedback('info', 'Saving team member...');
+    this.clearMemberSubmitFailSafeTimer();
+    this.memberSubmitFailSafeTimer = setTimeout(() => {
+      if (!this.memberSubmitting) return;
+      this.memberSubmitting = false;
+      this.showFeedback(
+        'error',
+        'Saving team member took too long. Check network and Business permissions, then try again.'
+      );
+    }, this.actionTimeoutMs + 1500);
 
     this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
       timeout(this.actionTimeoutMs),
@@ -588,7 +609,10 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
           message: this.describeHttpError(err, 'Saving team member timed out. Please try again.')
         })
       ),
-      finalize(() => (this.memberSubmitting = false))
+      finalize(() => {
+        this.memberSubmitting = false;
+        this.clearMemberSubmitFailSafeTimer();
+      })
     ).subscribe((res: any) => {
       this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Member update finished.');
       if (!res?.ok) return;
@@ -645,6 +669,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
       const role = ((state as any)?.memberRole ?? '').toString();
       this.memberRoleLabel = this.toTitleCase(role) || 'User';
+      this.currentMemberRole = this.normalizeBusinessRole((state as any)?.memberRole);
+      this.syncAssignableMemberRoleOptions();
 
       const perms = (state as any)?.permissions ?? {};
       this.canInvite = Boolean(perms.canInvite);
@@ -875,6 +901,28 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.feedbackTimer = null;
   }
 
+  private clearMemberSubmitFailSafeTimer(): void {
+    if (!this.memberSubmitFailSafeTimer) return;
+    clearTimeout(this.memberSubmitFailSafeTimer);
+    this.memberSubmitFailSafeTimer = null;
+  }
+
+  private scheduleExportRefresh(): void {
+    this.clearExportRefreshTimers();
+    const delays = [2500, 7000, 15000];
+    this.exportRefreshTimers = delays.map((delay) =>
+      setTimeout(() => this.reloadExports(), delay)
+    );
+  }
+
+  private clearExportRefreshTimers(): void {
+    if (!this.exportRefreshTimers.length) return;
+    for (const timer of this.exportRefreshTimers) {
+      clearTimeout(timer);
+    }
+    this.exportRefreshTimers = [];
+  }
+
   private daysUntil(value: string): number | null {
     const ts = new Date(value).getTime();
     if (Number.isNaN(ts)) return null;
@@ -903,6 +951,39 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return normalized as RequiredState;
     }
     return null;
+  }
+
+  private normalizeBusinessRole(value: unknown): BusinessMemberRole | null {
+    const normalized = (value ?? '').toString().trim().toLowerCase();
+    if (
+      normalized === 'owner' ||
+      normalized === 'admin' ||
+      normalized === 'member' ||
+      normalized === 'viewer'
+    ) {
+      return normalized;
+    }
+    return null;
+  }
+
+  private syncAssignableMemberRoleOptions(): void {
+    const actorRole = this.currentMemberRole;
+
+    if (actorRole === 'owner') {
+      this.assignableMemberRoleOptions = [...this.memberRoleOptions];
+    } else if (actorRole === 'admin') {
+      this.assignableMemberRoleOptions = this.memberRoleOptions.filter(
+        (option) => option.value !== 'owner'
+      );
+    } else {
+      this.assignableMemberRoleOptions = this.memberRoleOptions.filter(
+        (option) => option.value === 'member'
+      );
+    }
+
+    if (!this.assignableMemberRoleOptions.some((option) => option.value === this.teamMemberForm.role)) {
+      this.teamMemberForm.role = this.assignableMemberRoleOptions[0]?.value ?? 'member';
+    }
   }
 
   private activityQueryOptions(teamRows: any[], state: BusinessHubAccessState | null): ActivityQueryOptions {
