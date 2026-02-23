@@ -184,42 +184,11 @@
           <span class="chip">Expired: {{ inviteMetrics.expired }}</span>
         </div>
 
-        <div class="table-shell mt-4">
-          <table>
-            <thead>
-              <tr>
-                <th class="th">Request ID</th>
-                <th class="th">Target</th>
-                <th class="th">Recipient</th>
-                <th class="th">Industry</th>
-                <th class="th">Required State</th>
-                <th class="th">Status</th>
-                <th class="th">Timestamp</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              <tr class="row" *ngFor="let req of requests; trackBy: trackById">
-                <td>{{ req?.id || '-' }}</td>
-                <td>{{ requestTarget(req) }}</td>
-                <td>{{ requestRecipient(req) }}</td>
-                <td>{{ req?.recipient_industry || '-' }}</td>
-                <td>{{ req?.required_state || '-' }}</td>
-                <td>{{ requestStatusLabel(req?.response_status) }}</td>
-                <td>{{ formatDate(req?.timestamp) }}</td>
-              </tr>
-
-              <tr *ngIf="!requests.length">
-                <td colspan="7" class="empty-cell">No requests found.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
         <ng-container *ngIf="canCreateRequestsFromCenter(); else inviteReadonlyState">
           <div class="request-limit-hint mt-5">
             Business plan: you can send up to {{ dailyRequestLimit }} requests per day.
-            <strong>Remaining today: {{ dailyRequestsRemaining() }}</strong>
+            <strong>Used today: {{ todayRequestCount }}</strong>
+            <strong class="ml-2">Remaining today: {{ dailyRequestsRemaining() }}</strong>
           </div>
 
           <div class="form-grid mt-4">
@@ -308,6 +277,38 @@
 
               <tr *ngIf="!requestInvites.length">
                 <td colspan="6" class="empty-cell">No invites found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-shell mt-5">
+          <table>
+            <thead>
+              <tr>
+                <th class="th">Request ID</th>
+                <th class="th">Target</th>
+                <th class="th">Recipient</th>
+                <th class="th">Industry</th>
+                <th class="th">Required State</th>
+                <th class="th">Status</th>
+                <th class="th">Timestamp</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr class="row" *ngFor="let req of requests; trackBy: trackById">
+                <td>{{ req?.id || '-' }}</td>
+                <td>{{ requestTarget(req) }}</td>
+                <td>{{ requestRecipient(req) }}</td>
+                <td>{{ req?.recipient_industry || '-' }}</td>
+                <td>{{ req?.required_state || '-' }}</td>
+                <td>{{ requestStatusLabel(req?.response_status) }}</td>
+                <td>{{ formatDate(req?.timestamp) }}</td>
+              </tr>
+
+              <tr *ngIf="!requests.length">
+                <td colspan="7" class="empty-cell">No requests found.</td>
               </tr>
             </tbody>
           </table>

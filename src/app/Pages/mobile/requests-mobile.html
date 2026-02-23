@@ -51,6 +51,10 @@
       </a>
     </div>
 
+    <p *ngIf="canCreateRequests" class="mt-2 text-xs text-slate-300">
+      Daily usage: {{ todayRequestCount }}/{{ dailyRequestLimit }} (remaining {{ dailyRequestsRemaining() }}).
+    </p>
+
     <div
       *ngIf="hasBusinessAccess && !canViewRequestCenter"
       class="mt-4 rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
@@ -120,7 +124,7 @@
     [submitting]="submittingRequest"
     [businessTrialNotice]="businessTrialNotice"
     [businessInviteTrialNotice]="businessInviteTrialNotice"
-    [maxRecipients]="maxRecipientEmails"
+    [maxRecipients]="maxRecipientsForCurrentDay()"
     [allowRoleSelection]="canAssignMemberRole"
     [memberRoleOptions]="assignableMemberRoleOptions"
     [defaultMemberRole]="defaultInviteMemberRole"

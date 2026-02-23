@@ -70,17 +70,21 @@
       </div>
 
       <p *ngIf="isBusinessTrial" class="section-note">{{ businessTrialNotice }}</p>
+      <p class="section-note">
+        Daily usage: {{ todayRequestCount }}/{{ dailyRequestLimit }} (remaining {{ dailyRequestsRemaining() }}).
+      </p>
 
       <form class="form-grid" (ngSubmit)="submitRequest()">
-        <label for="target">Target</label>
+        <label for="required-state">Required State</label>
         <select
-          id="target"
-          name="target"
-          [(ngModel)]="form.target"
+          id="required-state"
+          name="required_state"
+          [(ngModel)]="form.requiredState"
           class="input"
           required>
-          <option *ngFor="let targetOption of targetOptions" [value]="targetOption">
-            {{ targetOption }}
+          <option value="">Select required state</option>
+          <option *ngFor="let state of requiredStateOptions" [ngValue]="state">
+            {{ state }}
           </option>
         </select>
 
@@ -110,8 +114,8 @@
           <p class="field-help">{{ recipientEntryHint() }}</p>
           <p *ngIf="recipientError" class="field-error">{{ recipientError }}</p>
           <p *ngIf="recipientInput.trim()" class="field-help invite-hint">
-            Hint: this email will receive a scan request for {{ form.target || 'scan' }} with a
-            "Scan now" message.
+            Hint: this email will receive a scan request with required state
+            "{{ form.requiredState || 'Select state first' }}".
           </p>
           <p *ngIf="isBusinessTrial" class="section-note small">{{ businessInviteTrialNotice }}</p>
 
@@ -154,7 +158,7 @@
 
       <ul class="guide-list">
         <li>
-          <strong>Step 1:</strong> choose target (scan).
+          <strong>Step 1:</strong> choose required state.
         </li>
         <li>
           <strong>Step 2:</strong> add one or more recipients using + (email only).

@@ -10,6 +10,10 @@
     </div>
 
     <div class="hero-actions">
+      <span *ngIf="canCreateRequests" class="chip">
+        Daily: {{ todayRequestCount }}/{{ dailyRequestLimit }} (remaining {{ dailyRequestsRemaining() }})
+      </span>
+
       <button
         *ngIf="canCreateRequests"
         type="button"
@@ -154,7 +158,7 @@
     [submitting]="submittingRequest"
     [businessTrialNotice]="businessTrialNotice"
     [businessInviteTrialNotice]="businessInviteTrialNotice"
-    [maxRecipients]="maxRecipientEmails"
+    [maxRecipients]="maxRecipientsForCurrentDay()"
     [allowRoleSelection]="canAssignMemberRole"
     [memberRoleOptions]="assignableMemberRoleOptions"
     [defaultMemberRole]="defaultInviteMemberRole"

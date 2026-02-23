@@ -30,6 +30,7 @@ import { environment } from 'src/environments/environment';
 })
 export class RequestsMobileComponent implements OnInit, OnDestroy {
   readonly maxRecipientEmails = 5;
+  readonly dailyRequestLimit: number;
   readonly memberRoleOptions: TeamMemberRoleOption[] = [
     { value: 'member', label: 'Member' },
     { value: 'manager', label: 'Manager' },
@@ -66,12 +67,15 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   private currentOrgId: string | null = null;
 
   requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
+  todayRequestCount = 0;
 
   constructor(
     private http: HttpClient,
     private businessCenter: BusinessCenterService,
     private cdr: ChangeDetectorRef
-  ) {}
+  ) {
+    this.dailyRequestLimit = this.businessCenter.dailyRequestLimit;
+  }
 
   ngOnInit() {
     this.loadPlanAccess();
@@ -91,6 +95,18 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     if (normalized.includes('fatigue')) return 'badge-fatigue';
     if (normalized.includes('risk')) return 'badge-risk';
     return '';
+  }
+
+  dailyRequestsRemaining(): number {
+    return Math.max(0, this.dailyRequestLimit - this.todayRequestCount);
+  }
+
+  maxRecipientsForCurrentDay(): number {
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      return 1;
+    }
+    return Math.min(this.maxRecipientEmails, remaining);
   }
 
   handleCreateRequest(form: CreateRequestForm) {
@@ -127,6 +143,24 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     if (!requiredState) {
       this.submitFeedback = { type: 'error', message: 'Select a required state.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`
+      };
+      this.cdr.detectChanges();
+      return;
+    }
+    if (uniqueEmails.length > remaining) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `You can send ${remaining} more request(s) today. Reduce recipients and try again.`
+      };
       this.cdr.detectChanges();
       return;
     }
@@ -186,6 +220,15 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   openCreateModal() {
     if (!this.canCreateRequests) {
       this.showPermissionNotice = true;
+      this.cdr.detectChanges();
+      return;
+    }
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`
+      };
       this.cdr.detectChanges();
       return;
     }
@@ -368,15 +411,20 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       },
       { total: 0, pending: 0, approved: 0, denied: 0 }
     );
+    this.todayRequestCount = this.businessCenter.countTodayRequests(
+      this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+    );
     this.cdr.detectChanges();
   }
 
   private mapToRequestRow(request: RequestRecord): RequestRow {
+    const timestampRaw = request.timestamp ?? '';
     return {
       target: this.formatRequestTarget(request),
       required_state: request.required_state ?? 'Unknown',
       status: this.normalizeStatus(request.response_status),
-      timestamp: this.formatTimestamp(request.timestamp ?? '')
+      timestamp: this.formatTimestamp(timestampRaw),
+      timestampRaw
     };
   }
 
@@ -806,6 +854,7 @@ type RequestRow = {
   required_state: string;
   status: 'Approved' | 'Pending' | 'Denied';
   timestamp: string;
+  timestampRaw: string;
 };
 
 type RoleAssignmentSummary = {

@@ -30,6 +30,7 @@ import { environment } from 'src/environments/environment';
 })
 export class Requests implements OnInit, OnDestroy {
   readonly maxRecipientEmails = 5;
+  readonly dailyRequestLimit: number;
   readonly memberRoleOptions: TeamMemberRoleOption[] = [
     { value: 'member', label: 'Member' },
     { value: 'manager', label: 'Manager' },
@@ -62,6 +63,7 @@ export class Requests implements OnInit, OnDestroy {
     approved: 0,
     denied: 0
   };
+  todayRequestCount = 0;
 
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly accessTimeoutMs = 15000;
@@ -73,7 +75,9 @@ export class Requests implements OnInit, OnDestroy {
     private http: HttpClient,
     private businessCenter: BusinessCenterService,
     private cdr: ChangeDetectorRef
-  ) {}
+  ) {
+    this.dailyRequestLimit = this.businessCenter.dailyRequestLimit;
+  }
 
   ngOnInit() {
     this.loadPlanAccess();
@@ -99,8 +103,29 @@ export class Requests implements OnInit, OnDestroy {
     return '';
   }
 
+  dailyRequestsRemaining(): number {
+    return Math.max(0, this.dailyRequestLimit - this.todayRequestCount);
+  }
+
+  maxRecipientsForCurrentDay(): number {
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      return 1;
+    }
+    return Math.min(this.maxRecipientEmails, remaining);
+  }
+
   openCreateModal() {
     if (!this.canCreateRequests) return;
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`
+      };
+      this.cdr.detectChanges();
+      return;
+    }
     this.submitFeedback = null;
     this.showCreateModal = true;
     this.cdr.detectChanges();
@@ -147,6 +172,24 @@ export class Requests implements OnInit, OnDestroy {
 
     if (!requiredState) {
       this.submitFeedback = { type: 'error', message: 'Select a required state.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`
+      };
+      this.cdr.detectChanges();
+      return;
+    }
+    if (uniqueEmails.length > remaining) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `You can send ${remaining} more request(s) today. Reduce recipients and try again.`
+      };
       this.cdr.detectChanges();
       return;
     }
@@ -374,13 +417,15 @@ export class Requests implements OnInit, OnDestroy {
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const timestampRaw = new Date().toISOString();
 
     return {
       id: optimisticId,
       target: email,
       required_state: requiredState,
       response_status: 'Pending',
-      timestamp: new Date().toLocaleString()
+      timestamp: this.formatTimestamp(timestampRaw),
+      timestampRaw
     };
   }
 
@@ -539,12 +584,14 @@ export class Requests implements OnInit, OnDestroy {
   // ===============================
 
   private mapToRow(r: RequestRecord): RequestRow {
+    const timestampRaw = r.timestamp ?? '';
     return {
       id: this.normalizeId(r.id) ?? '',
       target: this.formatTarget(r),
       required_state: r.required_state ?? 'Unknown',
       response_status: r.response_status ?? 'Pending',
-      timestamp: this.formatTimestamp(r.timestamp)
+      timestamp: this.formatTimestamp(timestampRaw),
+      timestampRaw
     };
   }
 
@@ -572,6 +619,10 @@ export class Requests implements OnInit, OnDestroy {
       approved: this.requests.filter(r => normalize(r.response_status).includes('approved')).length,
       denied: this.requests.filter(r => normalize(r.response_status).includes('denied')).length
     };
+
+    this.todayRequestCount = this.businessCenter.countTodayRequests(
+      this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+    );
   }
 
   // ===============================
@@ -779,6 +830,7 @@ type RequestRow = {
   required_state: string;
   response_status: string;
   timestamp: string;
+  timestampRaw: string;
 };
 
 type CreateRequestSummary = {

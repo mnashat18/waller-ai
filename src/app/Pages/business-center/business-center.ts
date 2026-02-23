@@ -102,7 +102,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   requestSubmitting = false;
   memberSubmitting = false;
   showTeamMemberManager = false;
-  readonly dailyRequestLimit = 5;
+  readonly dailyRequestLimit: number;
   readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
   todayRequestCount = 0;
   private currentMemberRole: BusinessMemberRole | null = null;
@@ -138,7 +138,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     requiredState: ''
   };
 
-  constructor(private businessCenter: BusinessCenterService) {}
+  constructor(private businessCenter: BusinessCenterService) {
+    this.dailyRequestLimit = this.businessCenter.dailyRequestLimit;
+  }
 
   ngOnInit(): void {
     this.assignableMemberRoleOptions = [...this.memberRoleOptions];
@@ -485,6 +487,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.createOptimisticRequestRow(email, requiredState)
     );
     this.requests = this.mergeRequestRows(this.requests, optimisticRows);
+    this.syncDailyRequestCountFromRequests(this.requests);
     this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
 
     const requestCalls = uniqueEmails.map((email) =>
@@ -520,6 +523,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       });
 
       this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
+      this.syncDailyRequestCountFromRequests(this.requests);
       this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
 
       if (!succeeded.length) {
@@ -527,7 +531,6 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         return;
       }
 
-      this.incrementDailyRequestCount(succeeded.length);
       this.requestForm = {
         recipientEmails: [''],
         requiredState: ''
@@ -755,6 +758,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       const requestRows = (requests as RequestRecord[]) ?? [];
       this.reconcileOptimisticRequests(requestRows);
       this.requests = this.mergeRequestRows(requestRows, Array.from(this.optimisticRequests.values()));
+      this.syncDailyRequestCountFromRequests(this.requests);
       this.requestInvites = (invites as any[]) ?? [];
       this.reportExports = (exports as any[]) ?? [];
       this.activityEvents = (events as ActivityEventRecord[]) ?? [];
@@ -904,6 +908,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       const requestRows = (requests as RequestRecord[]) ?? [];
       this.reconcileOptimisticRequests(requestRows);
       this.requests = this.mergeRequestRows(requestRows, Array.from(this.optimisticRequests.values()));
+      this.syncDailyRequestCountFromRequests(this.requests);
       this.requestInvites = (invites as any[]) ?? [];
       this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
     });
@@ -980,6 +985,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private clearBusinessData(): void {
     this.teamMembers = [];
     this.requests = [];
+    this.todayRequestCount = 0;
     this.optimisticRequests.clear();
     this.requestInvites = [];
     this.reportExports = [];
@@ -1514,41 +1520,23 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   private hydrateDailyRequestCount(): void {
-    this.todayRequestCount = this.readDailyRequestCount();
+    this.todayRequestCount = 0;
   }
 
-  private incrementDailyRequestCount(incrementBy: number): void {
-    if (incrementBy <= 0) return;
-    this.todayRequestCount = this.readDailyRequestCount() + incrementBy;
-    this.writeDailyRequestCount(this.todayRequestCount);
-  }
-
-  private readDailyRequestCount(): number {
-    const key = this.dailyRequestStorageKey();
-    if (!key || typeof localStorage === 'undefined') return 0;
-
-    const raw = localStorage.getItem(key);
-    if (!raw) return 0;
-
-    const parsed = Number(raw);
-    if (Number.isNaN(parsed) || parsed < 0) return 0;
-    return Math.floor(parsed);
-  }
-
-  private writeDailyRequestCount(value: number): void {
-    const key = this.dailyRequestStorageKey();
-    if (!key || typeof localStorage === 'undefined') return;
-    localStorage.setItem(key, String(Math.max(0, Math.floor(value))));
-  }
-
-  private dailyRequestStorageKey(): string | null {
-    const userId = this.currentUserId();
-    if (!userId) return null;
-    return `wellar_business_request_daily_v1:${userId}:${this.todayDateKey()}`;
+  private syncDailyRequestCountFromRequests(rows: RequestRecord[]): void {
+    this.todayRequestCount = this.businessCenter.countTodayRequests(rows ?? []);
   }
 
   private todayDateKey(): string {
-    return new Date().toISOString().slice(0, 10);
+    return this.dateKeyFromMs(Date.now());
+  }
+
+  private dateKeyFromMs(value: number): string {
+    const date = new Date(value);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   private currentUserId(): string | null {

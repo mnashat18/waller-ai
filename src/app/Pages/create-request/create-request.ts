@@ -7,6 +7,10 @@ import { Observable, from, of } from 'rxjs';
 import { catchError, concatMap, finalize, map, timeout, toArray } from 'rxjs/operators';
 import { Organization, OrganizationService } from '../../services/organization.service';
 import { BusinessCenterService, BusinessHubAccessState } from '../../services/business-center.service';
+import {
+  REQUIRED_STATE_OPTIONS,
+  type RequiredState
+} from '../../components/create-request-modal/create-request-modal';
 import { environment } from 'src/environments/environment';
 
 type Feedback = {
@@ -15,7 +19,6 @@ type Feedback = {
 };
 
 type RecipientKind = 'email';
-type RequestTarget = 'scan';
 
 type RequestRecipient = {
   id: string;
@@ -32,6 +35,8 @@ type RequestRecipient = {
   styleUrl: './create-request.css'
 })
 export class CreateRequestComponent implements OnInit, OnDestroy {
+  readonly dailyRequestLimit: number;
+  todayRequestCount = 0;
   isAdminUser = false;
   loadingBusinessProfile = true;
   businessProfileMissing = false;
@@ -48,16 +53,15 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   org: Organization | null = null;
   submittingRequest = false;
   submitFeedback: Feedback | null = null;
-  private redirectAfterSubmitTimer: ReturnType<typeof setTimeout> | null = null;
   recipientInput = '';
   recipientError = '';
   recipients: RequestRecipient[] = [];
   private lastSubmitError = '';
   private readonly submitTimeoutMs = 30000;
   private readonly businessProfileTimeoutMs = 15000;
-  readonly targetOptions: RequestTarget[] = ['scan'];
+  readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
   form = {
-    target: 'scan'
+    requiredState: '' as RequiredState | ''
   };
 
   constructor(
@@ -65,7 +69,9 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     private router: Router,
     private organizationService: OrganizationService,
     private businessCenterService: BusinessCenterService
-  ) {}
+  ) {
+    this.dailyRequestLimit = this.businessCenterService.dailyRequestLimit;
+  }
 
   ngOnInit() {
     this.isAdminUser = this.checkAdminAccess();
@@ -73,12 +79,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     this.loadOrganization();
   }
 
-  ngOnDestroy(): void {
-    if (this.redirectAfterSubmitTimer) {
-      clearTimeout(this.redirectAfterSubmitTimer);
-      this.redirectAfterSubmitTimer = null;
-    }
-  }
+  ngOnDestroy(): void {}
 
   trialDaysLabel(): string {
     if (!this.isBusinessTrial) {
@@ -108,6 +109,10 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
 
   recipientInputPlaceholder(): string {
     return 'user@example.com';
+  }
+
+  dailyRequestsRemaining(): number {
+    return Math.max(0, this.dailyRequestLimit - this.todayRequestCount);
   }
 
   recipientEntryHint(): string {
@@ -169,9 +174,9 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const target = this.normalizeTarget(this.form.target);
-    if (!target) {
-      this.submitFeedback = { type: 'error', message: 'Select a valid target first.' };
+    const requiredState = this.normalizeRequiredState(this.form.requiredState);
+    if (!requiredState) {
+      this.submitFeedback = { type: 'error', message: 'Select a required state first.' };
       return;
     }
     if (!this.consumePendingRecipientInput()) {
@@ -180,6 +185,22 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     }
     if (!this.recipients.length) {
       this.submitFeedback = { type: 'error', message: 'Add at least one recipient email.' };
+      return;
+    }
+
+    const remaining = this.dailyRequestsRemaining();
+    if (remaining <= 0) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`
+      };
+      return;
+    }
+    if (this.recipients.length > remaining) {
+      this.submitFeedback = {
+        type: 'error',
+        message: `You can send ${remaining} more request(s) today. Remove some recipients and try again.`
+      };
       return;
     }
 
@@ -208,7 +229,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     from(recipientsSnapshot).pipe(
       concatMap((recipient) =>
         this.submitRecipientWorkflow(
-          target,
+          requiredState,
           recipient,
           token,
           authenticatedUser
@@ -250,16 +271,11 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
             message: `Request(s) sent successfully to ${successCount} recipient(s).`
           };
         }
+        this.todayRequestCount = Math.min(this.dailyRequestLimit, this.todayRequestCount + successCount);
 
         this.recipients = [];
         this.recipientInput = '';
-        this.form.target = 'scan';
-        if (this.redirectAfterSubmitTimer) {
-          clearTimeout(this.redirectAfterSubmitTimer);
-        }
-        this.redirectAfterSubmitTimer = setTimeout(() => {
-          this.router.navigate(['/requests']);
-        }, 900);
+        this.form.requiredState = '';
       },
       error: (err) => {
         this.submitFeedback = {
@@ -271,13 +287,13 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private submitRecipientWorkflow(
-    target: RequestTarget,
+    requiredState: RequiredState,
     recipient: RequestRecipient,
     token: string,
     currentUser: { id: string; email: string | null }
   ): Observable<boolean> {
     return this.submitRequestPayload(
-      target,
+      requiredState,
       recipient.value,
       token,
       currentUser
@@ -321,9 +337,6 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       })
     ).subscribe((org) => {
       this.org = org;
-      if (!this.form.target.trim()) {
-        this.form.target = 'scan';
-      }
     });
   }
 
@@ -348,6 +361,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       })
     ).subscribe((state) => {
       if (!state) {
+        this.todayRequestCount = 0;
         return;
       }
 
@@ -365,6 +379,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
         this.businessTrialNotice = '';
         this.businessInviteTrialNotice = '';
         this.canCreateRequests = false;
+        this.todayRequestCount = 0;
         return;
       }
 
@@ -387,6 +402,8 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
         Boolean(state.hasPaidAccess) &&
         Boolean(state.permissions?.canUseSystem) &&
         !state.trialExpired;
+
+      this.loadTodayRequestCount();
 
       if (!this.canCreateRequests && !this.businessAccessReason) {
         if (state.trialExpired) {
@@ -415,7 +432,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private submitRequestPayload(
-    target: RequestTarget,
+    requiredState: RequiredState,
     requestedForEmail: string,
     token: string | null,
     currentUserContext?: { id: string; email: string | null }
@@ -439,7 +456,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
 
     const payload: CreateRequestPayload = {
       requested_for_email: email,
-      target
+      required_state: requiredState
     };
 
     return this.createRequest(payload, token).pipe(
@@ -651,19 +668,31 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     return this.isValidEmail(email) ? email : null;
   }
 
-  private normalizeTarget(value: unknown): RequestTarget | null {
+  private normalizeRequiredState(value: unknown): RequiredState | null {
     if (typeof value !== 'string') {
       return null;
     }
-    const target = value.trim();
-    return this.targetOptions.find((item) => item === target) ?? null;
+    const normalized = value.trim();
+    return (this.requiredStateOptions as readonly string[]).includes(normalized)
+      ? (normalized as RequiredState)
+      : null;
+  }
+
+  private loadTodayRequestCount(): void {
+    const orgId = this.accessState?.orgId ?? null;
+    this.businessCenterService.listRequests(orgId, 120).pipe(
+      map((rows) => this.businessCenterService.countTodayRequests(rows ?? [])),
+      catchError(() => of(0))
+    ).subscribe((count) => {
+      this.todayRequestCount = Math.max(0, count);
+    });
   }
 
 }
 
 type CreateRequestPayload = {
   requested_for_email?: string;
-  target: RequestTarget;
+  required_state: RequiredState;
 };
 
 

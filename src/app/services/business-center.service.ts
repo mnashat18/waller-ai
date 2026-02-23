@@ -151,6 +151,7 @@ export type ActivityQueryOptions = {
 export class BusinessCenterService {
   private api = environment.API_URL;
   private readonly requestTimeoutMs = 15000;
+  readonly dailyRequestLimit = 5;
 
   constructor(private http: HttpClient) {}
 
@@ -332,6 +333,30 @@ export class BusinessCenterService {
       map((rows) => this.mergeRequestsById(rows)),
       switchMap((rows) => this.attachRecipientIndustries(rows, access.token))
     );
+  }
+
+  countTodayRequests(rows: Array<{ timestamp?: string | null | undefined }>): number {
+    const today = this.localDateKey(Date.now());
+    if (!today) {
+      return 0;
+    }
+
+    let count = 0;
+    for (const row of rows ?? []) {
+      const key = this.localDateKey(row?.timestamp ?? null);
+      if (key === today) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  remainingTodayRequests(
+    rows: Array<{ timestamp?: string | null | undefined }>,
+    limit = this.dailyRequestLimit
+  ): number {
+    const safeLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : this.dailyRequestLimit;
+    return Math.max(0, safeLimit - this.countTodayRequests(rows));
   }
 
   createScanRequest(
@@ -1423,8 +1448,8 @@ export class BusinessCenterService {
 
   private resolveCurrentUserFromSession(token: string | null): Observable<{ userId: string | null; orgId: string | null }> {
     return this.http.get<any>(
-      `${this.api}/users/me?fields=id,org_id,organization_id,organization.id`,
-      this.requestOptions(token)
+    `${this.api}/users/me?fields=id,org_id,organization_id,organization.id&_=${Date.now()}`,
+    this.requestOptions(token)
     ).pipe(
       map((res) => {
         const user = res?.data ?? res ?? {};
@@ -1936,6 +1961,32 @@ export class BusinessCenterService {
     }
     const ts = new Date(raw).getTime();
     return Number.isNaN(ts) ? null : ts;
+  }
+
+  private localDateKey(value: unknown): string | null {
+    let date: Date | null = null;
+
+    if (value instanceof Date) {
+      date = value;
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+      date = new Date(value);
+    } else {
+      const raw = this.pickString(value);
+      if (!raw) {
+        return null;
+      }
+      date = new Date(raw);
+    }
+
+    const ts = date.getTime();
+    if (Number.isNaN(ts)) {
+      return null;
+    }
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   private readString(value: unknown): string {
