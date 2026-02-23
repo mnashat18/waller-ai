@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, map, of, switchMap, take, timeout } from 'rxjs';
@@ -17,7 +17,6 @@ import { AuthService } from '../services/auth';
   `
 })
 export class AuthCallbackComponent implements OnInit {
-
   status: 'loading' | 'error' = 'loading';
   message = '';
 
@@ -31,27 +30,33 @@ export class AuthCallbackComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    // بيقرأ أي error من الـ URL لو موجود
+    // يمسك أي بيانات/أخطاء جاية في الـ URL (لو عندك mode=json أو auth_error)
     this.auth.captureAuthFromUrl();
 
-    // 1) جرّب Session بالكوكيز (ده الصح في mode=cookie)
-    this.getMeWithCookie()
+    // 1) لو عندك access_token مخزن (mode=json أو قديم) جرّبه الأول
+    const storedToken = this.auth.getStoredAccessToken?.() ?? null;
+
+    const start$ = storedToken
+      ? of(storedToken)
+      : this.refreshAccessTokenFromCookie(); // 2) وإلا هات access_token من refresh cookie
+
+    start$
       .pipe(
         timeout(15000),
+        switchMap((token) => {
+          if (!token) return of(null);
 
-        // 2) لو فشل، جرّب fallback بتاع التوكن (لو عندك mode=json أو تخزين سابق)
-        switchMap((user) => {
-          if (user) return of(user);
-          return this.tryTokenFallback();
+          // خزّنه عندك لو AuthService فيها setter
+          if (this.auth.storeAccessToken) this.auth.storeAccessToken(token);
+
+          return this.getMeWithBearer(token);
         }),
-
         timeout(15000),
         take(1)
       )
       .subscribe({
         next: (user) => {
           if (user) {
-            // نجاح
             this.router.navigate(['/dashboard']);
             return;
           }
@@ -66,31 +71,33 @@ export class AuthCallbackComponent implements OnInit {
   }
 
   /**
-   * Verify login using Directus cookie session (mode=cookie)
+   * يطلع access_token باستخدام directus_refresh_token cookie
+   * (ده اللي عندك موجود في الطلب فعلاً)
    */
-  private getMeWithCookie() {
-    return this.http.get<any>(`${this.DIRECTUS_URL}/users/me`, {
-      withCredentials: true
-    }).pipe(
-      map((res) => res?.data ?? res ?? null),
-      catchError(() => of(null))
-    );
+  private refreshAccessTokenFromCookie() {
+    return this.http
+      .post<any>(`${this.DIRECTUS_URL}/auth/refresh`, {}, { withCredentials: true })
+      .pipe(
+        map((res) => res?.data?.access_token ?? res?.access_token ?? null),
+        catchError(() => of(null))
+      );
   }
 
   /**
-   * Fallback لو عندك access token في localStorage أو refreshFromCookie بيرجّع access token
+   * /users/me لازم Bearer token (مش refresh cookie)
    */
-  private tryTokenFallback() {
-    return this.auth.refreshFromCookie().pipe(
-      catchError(() => of(null)),
-      switchMap((accessToken) => {
-        const token = accessToken ?? this.auth.getStoredAccessToken();
-        if (!token) return of(null);
-        return this.auth.getCurrentUser(token).pipe(
-          catchError(() => of(null))
-        );
+  private getMeWithBearer(token: string) {
+    const headers = new HttpHeaders({ Authorization: `Bearer ${token}` });
+
+    return this.http
+      .get<any>(`${this.DIRECTUS_URL}/users/me`, {
+        headers,
+        withCredentials: true
       })
-    );
+      .pipe(
+        map((res) => res?.data ?? res ?? null),
+        catchError(() => of(null))
+      );
   }
 
   private fail(msg: string) {
