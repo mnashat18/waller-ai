@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
 import { map } from 'rxjs/operators';
@@ -20,12 +20,15 @@ import { environment } from 'src/environments/environment';
   templateUrl: './requests.html',
   styleUrl: './requests.css',
 })
-export class Requests implements OnInit {
+export class Requests implements OnInit, OnDestroy {
   showCreateModal = false;
   loadingPlanAccess = true;
+
   requests: RequestRow[] = [];
+
   submitFeedback: SubmitFeedback | null = null;
   submittingRequest = false;
+
   hasBusinessAccess = false;
   canCreateRequests = false;
 
@@ -40,6 +43,8 @@ export class Requests implements OnInit {
     denied: 0
   };
 
+  private successToastTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(
     private http: HttpClient,
     private subscriptionService: SubscriptionService,
@@ -49,6 +54,17 @@ export class Requests implements OnInit {
   ngOnInit() {
     this.loadPlanAccess();
   }
+
+  ngOnDestroy() {
+    if (this.successToastTimer) {
+      clearTimeout(this.successToastTimer);
+      this.successToastTimer = null;
+    }
+  }
+
+  // ===============================
+  // UI Helpers
+  // ===============================
 
   badgeClass(state: string): string {
     const s = (state ?? '').toLowerCase();
@@ -60,122 +76,150 @@ export class Requests implements OnInit {
   }
 
   openCreateModal() {
-    if (!this.canCreateRequests) {
-      return;
-    }
+    if (!this.canCreateRequests) return;
     this.submitFeedback = null;
     this.showCreateModal = true;
     this.cdr.detectChanges();
   }
 
-handleCreateRequest(form: CreateRequestForm) {
+  // ===============================
+  // Create Request (Optimistic)
+  // ===============================
 
-  if (!this.canCreateRequests) {
-    this.submitFeedback = {
-      type: 'error',
-      message: 'You do not have permission to create requests.'
-    };
-    this.cdr.detectChanges();
-    return;
-  }
-
-  const requestedForEmail = this.normalizeEmail(form.requestedForEmail);
-  const requiredState = this.normalizeRequiredState(form.requiredState);
-
-  if (!requestedForEmail) {
-    this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
-    this.cdr.detectChanges();
-    return;
-  }
-
-  if (!requiredState) {
-    this.submitFeedback = { type: 'error', message: 'Select a required state.' };
-    this.cdr.detectChanges();
-    return;
-  }
-
-  const token = this.getUserToken();
-  if (!token) {
-    this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
-    this.cdr.detectChanges();
-    return;
-  }
-
-  const currentUserEmail = this.getUserEmailFromToken(token);
-  if (currentUserEmail && requestedForEmail === currentUserEmail) {
-    this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
-    this.cdr.detectChanges();
-    return;
-  }
-
-  this.submittingRequest = true;
-  this.cdr.detectChanges();
-
-  const payload = {
-    requested_for_email: requestedForEmail,
-    required_state: requiredState
-  };
-
-  const headers = new HttpHeaders({
-    Authorization: `Bearer ${token}`
-  });
-
-  this.http.post<{ data?: { id?: string } }>(
-    `${environment.API_URL}/items/requests`,
-    payload,
-    { headers, withCredentials: true }
-  ).subscribe({
-
-    next: (res) => {
-
-      // 🚀 Optimistic Update
-      const optimisticRow: RequestRow = {
-        id: res?.data?.id ?? crypto.randomUUID(),
-        target: requestedForEmail,
-        required_state: requiredState,
-        response_status: 'Pending',
-        timestamp: new Date().toLocaleString(),
-      };
-
-      this.requests.unshift(optimisticRow);
-
-      this.requestStats.total += 1;
-      this.requestStats.pending += 1;
-
-      this.showCreateModal = false;
-      this.submittingRequest = false;
-
-      this.submitFeedback = {
-        type: 'success',
-        message: 'Request sent successfully.'
-      };
-
-      this.cdr.detectChanges();
-
-      // sync مع السيرفر بعد ثانية
-      setTimeout(() => {
-        this.loadRequests();
-      }, 1000);
-    },
-
-    error: (err: unknown) => {
-
-      console.error('Create request error:', err);
-
+  handleCreateRequest(form: CreateRequestForm) {
+    if (!this.canCreateRequests) {
       this.submitFeedback = {
         type: 'error',
-        message: 'Failed to send request.'
+        message: 'You do not have permission to create requests.'
       };
-
-      this.submittingRequest = false;
       this.cdr.detectChanges();
+      return;
     }
 
-  });
-}
+    const requestedForEmail = this.normalizeEmail(form.requestedForEmail);
+    const requiredState = this.normalizeRequiredState(form.requiredState);
+
+    if (!requestedForEmail) {
+      this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (!requiredState) {
+      this.submitFeedback = { type: 'error', message: 'Select a required state.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    const token = this.getUserToken();
+    if (!token) {
+      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    const currentUserEmail = this.getUserEmailFromToken(token);
+    if (currentUserEmail && requestedForEmail === currentUserEmail) {
+      this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.submittingRequest = true;
+    this.submitFeedback = { type: 'info', message: 'Sending request...' };
+    this.cdr.detectChanges();
+
+    const payload: CreateRequestPayload = {
+      requested_for_email: requestedForEmail,
+      required_state: requiredState
+    };
+
+    const headers = this.buildAuthHeaders(token);
+    if (!headers) {
+      this.submittingRequest = false;
+      this.submitFeedback = { type: 'error', message: 'Authorization token is missing.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    // ✅ Optimistic Row (مرة واحدة فقط)
+    const optimisticId =
+      (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+        ? crypto.randomUUID()
+        : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+    const optimisticRow: RequestRow = {
+      id: optimisticId,
+      target: requestedForEmail,
+      required_state: requiredState,
+      response_status: 'Pending',
+      timestamp: new Date().toLocaleString()
+    };
+
+    // ضيفه فورًا للـ UI
+    this.requests.unshift(optimisticRow);
+    this.updateStats();
+    this.showCreateModal = false;
+    this.cdr.detectChanges();
+
+    this.http.post<{ data?: { id?: unknown } }>(
+      `${environment.API_URL}/items/requests`,
+      payload,
+      { headers, withCredentials: true }
+    ).subscribe({
+      next: (res) => {
+        // لو رجع id حقيقي من السيرفر.. بدّل الـ temp id
+        const createdId = this.normalizeId(res?.data?.id);
+        if (createdId) {
+          const idx = this.requests.findIndex(r => r.id === optimisticId);
+          if (idx !== -1) this.requests[idx] = { ...this.requests[idx], id: createdId };
+        }
+
+        this.submittingRequest = false;
+        this.showSuccessToast('Request sent successfully.');
+        this.cdr.detectChanges();
+
+        // ✅ Refresh هادي بعد شوية (من غير ما نكسر ال UI)
+        setTimeout(() => this.loadRequests(true), 1500);
+      },
+      error: (err: unknown) => {
+        console.error('Create request error:', err);
+
+        // ✅ Rollback: شيل الـ optimistic row لو فشل
+        this.requests = this.requests.filter(r => r.id !== optimisticId);
+        this.updateStats();
+
+        this.submittingRequest = false;
+        this.submitFeedback = {
+          type: 'error',
+          message: this.describeHttpError(err, 'Failed to send request.')
+        };
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
+  private showSuccessToast(message: string) {
+    this.submitFeedback = { type: 'success', message };
+
+    if (this.successToastTimer) clearTimeout(this.successToastTimer);
+
+    this.successToastTimer = setTimeout(() => {
+      // امسح النجاح لو لسه ظاهر
+      if (this.submitFeedback?.type === 'success') {
+        this.submitFeedback = null;
+        this.cdr.detectChanges();
+      }
+    }, 2500);
+  }
+
+  // ===============================
+  // Loading
+  // ===============================
 
   private loadPlanAccess() {
     this.loadingPlanAccess = true;
+
     this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
       next: snapshot => {
         this.hasBusinessAccess = snapshot.hasBusinessAccess;
@@ -183,18 +227,23 @@ handleCreateRequest(form: CreateRequestForm) {
         this.businessTrialNotice = '';
         this.businessInviteTrialNotice = '';
         this.loadingPlanAccess = false;
-        this.loadRequests();
+
+        this.loadRequests(true);
       },
       error: () => {
         this.hasBusinessAccess = false;
         this.canCreateRequests = false;
         this.loadingPlanAccess = false;
-        this.loadRequests();
+
+        this.loadRequests(true);
       }
     });
   }
 
-  private loadRequests() {
+  /**
+   * @param bustCache لما يبقى true بنضيف param عشوائي عشان نتفادى 304/caching
+   */
+  private loadRequests(bustCache = false) {
     const token = this.getUserToken();
     const headers = this.buildAuthHeaders(token);
 
@@ -215,6 +264,10 @@ handleCreateRequest(form: CreateRequestForm) {
         'requested_for_user.first_name',
         'requested_for_user.last_name',
         'requested_for_user.email',
+        'requested_by_user.id',
+        'requested_by_user.email',
+        'requested_by_user.first_name',
+        'requested_by_user.last_name',
         'requested_for_email',
         'requested_for_phone',
         'required_state',
@@ -223,6 +276,10 @@ handleCreateRequest(form: CreateRequestForm) {
       ].join(',')
     });
 
+    // ✅ كسر كاش (حل مشكلة 304 + data: [])
+    if (bustCache) params.set('_', Date.now().toString());
+
+    // لو مش Business: اعرض incoming فقط
     if (!this.hasBusinessAccess) {
       const userId = this.getUserIdFromToken(token);
       if (!userId) {
@@ -254,86 +311,9 @@ handleCreateRequest(form: CreateRequestForm) {
     });
   }
 
-  private submitRequestPayload(
-    requestedForEmail: string,
-    requiredState: RequiredState,
-    token: string
-  ) {
-    const headers = this.buildAuthHeaders(token);
-    if (!headers) {
-      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    this.submittingRequest = true;
-    this.submitFeedback = { type: 'info', message: 'Sending request...' };
-    this.cdr.detectChanges();
-
-    const payload: CreateRequestPayload = {
-      requested_for_email: requestedForEmail,
-      required_state: requiredState
-    };
-
-    this.http.post<{ data?: { id?: unknown } }>(
-      `${environment.API_URL}/items/requests`,
-      payload,
-      { headers, withCredentials: true }
-    ).subscribe({
-      next: (res) => {
-        const createdId = this.normalizeId(res?.data?.id);
-        if (!createdId) {
-          this.submittingRequest = false;
-          this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
-          this.showCreateModal = false;
-          this.loadRequests();
-          this.cdr.detectChanges();
-          return;
-        }
-
-        const params = new URLSearchParams({
-          fields: [
-            'id',
-            'Target',
-            'requested_for_email',
-            'required_state',
-            'response_status',
-            'timestamp'
-          ].join(',')
-        });
-
-        this.http.get<{ data?: RequestRecord }>(
-          `${environment.API_URL}/items/requests/${encodeURIComponent(createdId)}?${params.toString()}`,
-          { headers, withCredentials: true }
-        ).subscribe({
-          next: () => {
-            this.submittingRequest = false;
-            this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
-            this.showCreateModal = false;
-            this.loadRequests();
-            this.cdr.detectChanges();
-          },
-          error: (err) => {
-            this.submittingRequest = false;
-            this.submitFeedback = {
-              type: 'error',
-              message: this.describeHttpError(err, 'Request created, but refresh failed.')
-            };
-            this.loadRequests();
-            this.cdr.detectChanges();
-          }
-        });
-      },
-      error: (err) => {
-        this.submittingRequest = false;
-        this.submitFeedback = {
-          type: 'error',
-          message: this.describeHttpError(err, 'Failed to send request.')
-        };
-        this.cdr.detectChanges();
-      }
-    });
-  }
+  // ===============================
+  // Mapping + Stats
+  // ===============================
 
   private mapToRow(r: RequestRecord): RequestRow {
     return {
@@ -380,6 +360,10 @@ handleCreateRequest(form: CreateRequestForm) {
     };
   }
 
+  // ===============================
+  // Auth + Helpers
+  // ===============================
+
   private buildAuthHeaders(token: string | null): HttpHeaders | null {
     if (!token) return null;
     return new HttpHeaders({ Authorization: `Bearer ${token}` });
@@ -415,9 +399,8 @@ handleCreateRequest(form: CreateRequestForm) {
   private getUserEmailFromToken(token: string | null): string | null {
     const payload = token ? this.decodeJwtPayload(token) : null;
     const payloadEmail = payload?.['email'];
-    const storedEmail = typeof localStorage !== 'undefined'
-      ? localStorage.getItem('user_email')
-      : null;
+    const storedEmail =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('user_email') : null;
     return this.normalizeEmail(payloadEmail) ?? this.normalizeEmail(storedEmail);
   }
 
@@ -435,7 +418,7 @@ handleCreateRequest(form: CreateRequestForm) {
     if (typeof value !== 'string') return null;
     const normalized = value.trim();
     return (REQUIRED_STATE_OPTIONS as readonly string[]).includes(normalized)
-      ? normalized as RequiredState
+      ? (normalized as RequiredState)
       : null;
   }
 
@@ -474,6 +457,7 @@ type RequestRecord = {
   target?: unknown;
   Target?: unknown;
   requested_for_user?: unknown;
+  requested_by_user?: unknown;
   requested_for_email?: string;
   requested_for_phone?: string;
   required_state?: string;
