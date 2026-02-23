@@ -8,7 +8,6 @@ import {
   ActivityEventRecord,
   BusinessCenterService,
   BusinessHubAccessState,
-  BusinessProfile,
   BusinessProfileMember,
   ReportExportRecord,
   RequestInviteRecord,
@@ -37,15 +36,19 @@ type InviteMetrics = {
 export class BusinessCenterComponent implements OnInit, OnDestroy {
   loadingAccess = true;
   loadingData = false;
+
   hasBusinessAccess = false;
   missingBusinessProfile = false;
+
   accessReason = '';
   memberRoleLabel = 'User';
+
   canInvite = false;
   canUpgrade = false;
   canManageMembers = false;
   canUseSystem = false;
   isReadOnly = true;
+
   trialDaysRemaining: number | null = null;
   private readonly accessStateTimeoutMs = 15000;
 
@@ -53,13 +56,15 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
   accessState: BusinessHubAccessState | null = null;
-  profile: BusinessProfile | null = null;
 
-  teamMembers: BusinessProfileMember[] = [];
-  requests: RequestRecord[] = [];
-  requestInvites: RequestInviteRecord[] = [];
-  reportExports: ReportExportRecord[] = [];
-  activityEvents: ActivityEventRecord[] = [];
+  // ✅ نخلي profile any عشان الـ template ما يقفش لو الـ interface ناقصة fields
+  profile: any = null;
+
+  teamMembers: any[] = [];
+  requests: any[] = [];
+  requestInvites: any[] = [];
+  reportExports: any[] = [];
+  activityEvents: any[] = [];
 
   inviteMetrics: InviteMetrics = {
     pending: 0,
@@ -93,24 +98,40 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.clearFeedbackTimer();
   }
 
+  // ===============================
+  // Template safe helpers
+  // ===============================
+
+  safeProfile(key: string): any {
+    return this.profile ? this.profile[key] : null;
+  }
+
+  requestRecipient(req: any): string {
+    return req?.requested_for_email || req?.requested_for_phone || '-';
+  }
+
+  requestTarget(req: any): string {
+    // في Directus عندك Target (capital) و target (small)
+    return req?.Target || req?.target || 'Scan';
+  }
+
+  // ===============================
+  // UI Labels
+  // ===============================
+
   formatDate(value?: string | null): string {
-    if (!value) {
-      return '-';
-    }
+    if (!value) return '-';
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return value;
-    }
+    if (Number.isNaN(date.getTime())) return value;
+
     const datePart = date.toLocaleDateString('en-CA');
     const timePart = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     return `${datePart} ${timePart}`;
   }
 
   accessBadgeLabel(): string {
-    if (!this.profile) {
-      return 'Plan: Free';
-    }
-    const plan = (this.profile.plan_code ?? 'free').toString();
+    if (!this.profile) return 'Plan: Free';
+    const plan = (this.profile?.plan_code ?? 'free').toString();
     return `Plan: ${plan}`;
   }
 
@@ -119,48 +140,38 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   trialBadgeLabel(): string {
-    if (typeof this.trialDaysRemaining !== 'number') {
-      return '';
-    }
-    if (this.trialDaysRemaining <= 1) {
-      return 'Trial ends today';
-    }
+    if (typeof this.trialDaysRemaining !== 'number') return '';
+    if (this.trialDaysRemaining <= 1) return 'Trial ends today';
     return `${this.trialDaysRemaining}d trial left`;
   }
 
   requestStatusLabel(status?: string | null): string {
     const normalized = (status ?? '').trim().toLowerCase();
-    if (normalized.includes('approved') || normalized.includes('accepted')) {
-      return 'Approved';
-    }
-    if (normalized.includes('denied') || normalized.includes('rejected')) {
-      return 'Denied';
-    }
+    if (normalized.includes('approved') || normalized.includes('accepted')) return 'Approved';
+    if (normalized.includes('denied') || normalized.includes('rejected')) return 'Denied';
     return 'Pending';
   }
 
-  inviteStatusLabel(invite: RequestInviteRecord): 'Pending' | 'Sent' | 'Claimed' | 'Expired' {
-    if (invite.claimed_at) {
-      return 'Claimed';
-    }
+  inviteStatusLabel(invite: any): 'Pending' | 'Sent' | 'Claimed' | 'Expired' {
+    if (invite?.claimed_at) return 'Claimed';
 
-    const expiresAt = invite.expires_at ? new Date(invite.expires_at).getTime() : NaN;
-    if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
-      return 'Expired';
-    }
+    const expiresAt = invite?.expires_at ? new Date(invite.expires_at).getTime() : NaN;
+    if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) return 'Expired';
 
-    const normalized = (invite.status ?? '').trim().toLowerCase();
-    if (normalized.includes('claim')) {
-      return 'Claimed';
-    }
-    if (normalized.includes('expire')) {
-      return 'Expired';
-    }
-    if (normalized.includes('send')) {
-      return 'Sent';
-    }
+    const normalized = (invite?.status ?? '').trim().toLowerCase();
+    if (normalized.includes('claim')) return 'Claimed';
+    if (normalized.includes('expire')) return 'Expired';
+    if (normalized.includes('send')) return 'Sent';
     return 'Pending';
   }
+
+  trackById(index: number, row: any): string {
+    return row?.id ?? String(index);
+  }
+
+  // ===============================
+  // Actions
+  // ===============================
 
   submitUpgradeRequest(): void {
     if (!this.canUpgrade) {
@@ -173,11 +184,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.showFeedback('info', 'Submitting upgrade request...');
 
     this.businessCenter.submitUpgradeRequest(orgId).pipe(
-      finalize(() => {
-        this.upgradeSubmitting = false;
-      })
-    ).subscribe((res) => {
-      this.showFeedback(res.ok ? 'success' : 'error', res.message);
+      finalize(() => (this.upgradeSubmitting = false))
+    ).subscribe((res: any) => {
+      this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Upgrade request finished.');
     });
   }
 
@@ -191,20 +200,13 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.showFeedback('info', 'Submitting export request...');
 
     this.businessCenter.createReportExport(
-      {
-        format: this.exportForm.format,
-        filters: this.exportForm.filters
-      },
+      { format: this.exportForm.format, filters: this.exportForm.filters },
       this.accessState?.orgId ?? null
     ).pipe(
-      finalize(() => {
-        this.exportSubmitting = false;
-      })
-    ).subscribe((res) => {
-      this.showFeedback(res.ok ? 'success' : 'error', res.message);
-      if (res.ok) {
-        this.reloadExports();
-      }
+      finalize(() => (this.exportSubmitting = false))
+    ).subscribe((res: any) => {
+      this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Export request finished.');
+      if (res?.ok) this.reloadExports();
     });
   }
 
@@ -217,6 +219,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     const requestId = this.inviteForm.requestId.trim();
     const email = this.inviteForm.email.trim();
     const phone = this.inviteForm.phone.trim();
+
     if (!requestId) {
       this.showFeedback('error', 'Request ID is required.');
       return;
@@ -228,16 +231,15 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
     this.inviteSubmitting = true;
     this.showFeedback('info', 'Sending invite...');
+
     this.businessCenter.createRequestInvite(
       { requestId, email, phone },
       this.accessState?.orgId ?? null
     ).pipe(
-      finalize(() => {
-        this.inviteSubmitting = false;
-      })
-    ).subscribe((res) => {
-      this.showFeedback(res.ok ? 'success' : 'error', res.message);
-      if (res.ok) {
+      finalize(() => (this.inviteSubmitting = false))
+    ).subscribe((res: any) => {
+      this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Invite finished.');
+      if (res?.ok) {
         this.inviteForm.email = '';
         this.inviteForm.phone = '';
         this.reloadInvites();
@@ -245,13 +247,14 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     });
   }
 
-  trackById(_index: number, row: { id?: string | null }): string {
-    return row.id ?? String(_index);
-  }
+  // ===============================
+  // Loading
+  // ===============================
 
   private loadAccessState(): void {
     this.loadingAccess = true;
     this.missingBusinessProfile = false;
+
     this.businessCenter.getHubAccessState().pipe(
       timeout(this.accessStateTimeoutMs),
       catchError((err) =>
@@ -275,29 +278,38 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         } as BusinessHubAccessState)
       ),
       finalize(() => {
+        // ✅ مهما حصل: اقفل loadingAccess
         this.loadingAccess = false;
       })
     ).subscribe((state) => {
       this.accessState = state;
-      this.profile = state.profile;
-      this.hasBusinessAccess = state.hasPaidAccess;
-      this.accessReason = state.reason;
-      this.memberRoleLabel = this.toTitleCase((state.memberRole ?? '').toString()) || 'User';
-      this.canInvite = Boolean(state.permissions?.canInvite);
-      this.canUpgrade = Boolean(state.permissions?.canUpgrade);
-      this.canManageMembers = Boolean(state.permissions?.canManageMembers);
-      this.canUseSystem = Boolean(state.permissions?.canUseSystem);
-      this.isReadOnly = Boolean(state.permissions?.isReadOnly);
-      this.trialDaysRemaining = state.trialExpiresAt ? this.daysUntil(state.trialExpiresAt) : null;
-      this.missingBusinessProfile =
-        !state.profile &&
-        state.reason.toLowerCase().includes('no business profile');
 
-      if (!state.hasPaidAccess) {
+      // profile any عشان template
+      this.profile = (state as any)?.profile ?? null;
+
+      this.hasBusinessAccess = Boolean((state as any)?.hasPaidAccess);
+      this.accessReason = (state as any)?.reason || '';
+
+      const role = ((state as any)?.memberRole ?? '').toString();
+      this.memberRoleLabel = this.toTitleCase(role) || 'User';
+
+      const perms = (state as any)?.permissions ?? {};
+      this.canInvite = Boolean(perms.canInvite);
+      this.canUpgrade = Boolean(perms.canUpgrade);
+      this.canManageMembers = Boolean(perms.canManageMembers);
+      this.canUseSystem = Boolean(perms.canUseSystem);
+      this.isReadOnly = Boolean(perms.isReadOnly);
+
+      this.trialDaysRemaining = (state as any)?.trialExpiresAt
+        ? this.daysUntil((state as any).trialExpiresAt)
+        : null;
+
+      const reasonLower = (this.accessReason || '').toLowerCase();
+      this.missingBusinessProfile = !this.profile && reasonLower.includes('no business profile');
+
+      if (!this.hasBusinessAccess) {
         this.clearBusinessData();
-        if (state.reason) {
-          this.showFeedback('info', state.reason, true);
-        }
+        if (this.accessReason) this.showFeedback('info', this.accessReason, true);
         return;
       }
 
@@ -306,7 +318,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   private loadBusinessData(state: BusinessHubAccessState): void {
-    if (!state.profile) {
+    if (!this.profile) {
       this.clearBusinessData();
       this.showFeedback('error', 'Business profile is missing.');
       return;
@@ -315,19 +327,23 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.loadingData = true;
     this.clearBusinessData();
 
-    const team$ = this.businessCenter.listTeamMembers(state.profile.id).pipe(
+    const team$ = this.businessCenter.listTeamMembers((this.profile as any)?.id).pipe(
       catchError((err) => this.sectionFallback(err, 'team members'))
     );
-    const requests$ = this.businessCenter.listRequests(state.orgId).pipe(
+
+    const requests$ = this.businessCenter.listRequests((state as any)?.orgId ?? null).pipe(
       catchError((err) => this.sectionFallback(err, 'requests'))
     );
-    const invites$ = this.businessCenter.listRequestInvites(state.orgId).pipe(
+
+    const invites$ = this.businessCenter.listRequestInvites((state as any)?.orgId ?? null).pipe(
       catchError((err) => this.sectionFallback(err, 'request invites'))
     );
-    const exports$ = this.businessCenter.listReportExports(state.orgId).pipe(
+
+    const exports$ = this.businessCenter.listReportExports((state as any)?.orgId ?? null).pipe(
       catchError((err) => this.sectionFallback(err, 'export jobs'))
     );
-    const activity$ = this.businessCenter.listActivityEvents(state.orgId).pipe(
+
+    const activity$ = this.businessCenter.listActivityEvents((state as any)?.orgId ?? null).pipe(
       catchError((err) => this.sectionFallback(err, 'activity log'))
     );
 
@@ -338,26 +354,24 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       exports: exports$ as Observable<ReportExportRecord[]>,
       events: activity$ as Observable<ActivityEventRecord[]>
     }).pipe(
-      finalize(() => {
-        this.loadingData = false;
-      })
+      finalize(() => (this.loadingData = false))
     ).subscribe(({ team, requests, invites, exports, events }) => {
-      this.teamMembers = team;
-      this.requests = requests;
-      this.requestInvites = invites;
-      this.reportExports = exports;
-      this.activityEvents = events;
-      this.inviteMetrics = this.calculateInviteMetrics(requests, invites);
+      this.teamMembers = (team as any[]) ?? [];
+      this.requests = (requests as any[]) ?? [];
+      this.requestInvites = (invites as any[]) ?? [];
+      this.reportExports = (exports as any[]) ?? [];
+      this.activityEvents = (events as any[]) ?? [];
+      this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
     });
   }
 
   private reloadInvites(): void {
     this.businessCenter.listRequestInvites(this.accessState?.orgId ?? null).subscribe({
-      next: (rows) => {
-        this.requestInvites = rows;
-        this.inviteMetrics = this.calculateInviteMetrics(this.requests, rows);
+      next: (rows: any) => {
+        this.requestInvites = rows ?? [];
+        this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
       },
-      error: (err) => {
+      error: (err: any) => {
         this.showFeedback('error', this.describeHttpError(err, 'Failed to reload invites.'));
       }
     });
@@ -365,21 +379,16 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private reloadExports(): void {
     this.businessCenter.listReportExports(this.accessState?.orgId ?? null).subscribe({
-      next: (rows) => {
-        this.reportExports = rows;
-      },
-      error: (err) => {
+      next: (rows: any) => (this.reportExports = rows ?? []),
+      error: (err: any) => {
         this.showFeedback('error', this.describeHttpError(err, 'Failed to reload export jobs.'));
       }
     });
   }
 
-  private calculateInviteMetrics(
-    requests: RequestRecord[],
-    invites: RequestInviteRecord[]
-  ): InviteMetrics {
-    const pendingRequests = requests.reduce((count, row) => {
-      return count + (this.requestStatusLabel(row.response_status) === 'Pending' ? 1 : 0);
+  private calculateInviteMetrics(requests: any[], invites: any[]): InviteMetrics {
+    const pendingRequests = (requests ?? []).reduce((count, row) => {
+      return count + (this.requestStatusLabel(row?.response_status) === 'Pending' ? 1 : 0);
     }, 0);
 
     const metrics: InviteMetrics = {
@@ -389,15 +398,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       expired: 0
     };
 
-    for (const invite of invites) {
+    for (const invite of invites ?? []) {
       const status = this.inviteStatusLabel(invite);
-      if (status === 'Sent') {
-        metrics.sent += 1;
-      } else if (status === 'Claimed') {
-        metrics.claimed += 1;
-      } else if (status === 'Expired') {
-        metrics.expired += 1;
-      }
+      if (status === 'Sent') metrics.sent += 1;
+      else if (status === 'Claimed') metrics.claimed += 1;
+      else if (status === 'Expired') metrics.expired += 1;
     }
 
     return metrics;
@@ -409,12 +414,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.requestInvites = [];
     this.reportExports = [];
     this.activityEvents = [];
-    this.inviteMetrics = {
-      pending: 0,
-      sent: 0,
-      claimed: 0,
-      expired: 0
-    };
+    this.inviteMetrics = { pending: 0, sent: 0, claimed: 0, expired: 0 };
   }
 
   private sectionFallback(err: any, section: string): Observable<never[]> {
@@ -431,6 +431,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       err?.error?.message ||
       err?.message ||
       '';
+
     const normalized = String(detail).toLowerCase();
 
     if (
@@ -443,17 +444,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return `Network error: ${detail || fallback}`;
     }
 
-    if (status === 401 || status === 403) {
-      return `Access denied (${status}): ${detail || fallback}`;
-    }
-
-    if (status >= 500) {
-      return `Server error (${status}): ${detail || fallback}`;
-    }
-
-    if (status >= 400) {
-      return `Request error (${status}): ${detail || fallback}`;
-    }
+    if (status === 401 || status === 403) return `Access denied (${status}): ${detail || fallback}`;
+    if (status >= 500) return `Server error (${status}): ${detail || fallback}`;
+    if (status >= 400) return `Request error (${status}): ${detail || fallback}`;
 
     return detail || fallback;
   }
@@ -461,42 +454,30 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private showFeedback(type: Feedback['type'], message: string, sticky = false): void {
     this.feedback = { type, message };
     this.clearFeedbackTimer();
-    if (sticky) {
-      return;
-    }
+    if (sticky) return;
 
     this.feedbackTimer = setTimeout(() => {
-      if (this.feedback?.message === message) {
-        this.feedback = null;
-      }
+      if (this.feedback?.message === message) this.feedback = null;
     }, 7000);
   }
 
   private clearFeedbackTimer(): void {
-    if (!this.feedbackTimer) {
-      return;
-    }
+    if (!this.feedbackTimer) return;
     clearTimeout(this.feedbackTimer);
     this.feedbackTimer = null;
   }
 
   private daysUntil(value: string): number | null {
     const ts = new Date(value).getTime();
-    if (Number.isNaN(ts)) {
-      return null;
-    }
+    if (Number.isNaN(ts)) return null;
     const remaining = ts - Date.now();
-    if (remaining <= 0) {
-      return 0;
-    }
+    if (remaining <= 0) return 0;
     return Math.ceil(remaining / (24 * 60 * 60 * 1000));
   }
 
   private toTitleCase(value: string): string {
     const normalized = value.trim().toLowerCase();
-    if (!normalized) {
-      return '';
-    }
+    if (!normalized) return '';
     return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
   }
 }

@@ -16,10 +16,12 @@
     </div>
   </div>
 
+  <!-- Loading Access -->
   <div *ngIf="loadingAccess" class="panel">
     Checking your Business profile and paid access...
   </div>
 
+  <!-- Missing Profile -->
   <div *ngIf="!loadingAccess && missingBusinessProfile" class="panel">
     <div class="panel-header">
       <h3 class="panel-title">No Business Profile Found</h3>
@@ -34,6 +36,7 @@
     </div>
   </div>
 
+  <!-- No Paid Access -->
   <div *ngIf="!loadingAccess && !missingBusinessProfile && !hasBusinessAccess" class="panel">
     <div class="panel-header">
       <h3 class="panel-title">Business Paid Access Required</h3>
@@ -43,7 +46,11 @@
       {{ accessReason || 'Your account is not on active paid Business yet.' }}
     </p>
     <div class="mt-4 flex flex-wrap gap-3">
-      <button *ngIf="canUpgrade" class="btn-primary px-5 py-2 rounded-full" [disabled]="upgradeSubmitting" (click)="submitUpgradeRequest()">
+      <button
+        *ngIf="canUpgrade"
+        class="btn-primary px-5 py-2 rounded-full"
+        [disabled]="upgradeSubmitting"
+        (click)="submitUpgradeRequest()">
         {{ upgradeSubmitting ? 'Submitting...' : 'Request Business Upgrade' }}
       </button>
       <a routerLink="/payment" class="chip">Open Billing</a>
@@ -51,6 +58,7 @@
     </div>
   </div>
 
+  <!-- Main -->
   <ng-container *ngIf="!loadingAccess && hasBusinessAccess">
     <div *ngIf="feedback as info" class="panel feedback-card" [ngClass]="info.type">
       {{ info.message }}
@@ -65,27 +73,31 @@
     </div>
 
     <div *ngIf="!loadingData" class="business-grid">
+      <!-- 1) Profile Summary -->
       <section class="panel">
         <div class="panel-header">
           <h3 class="panel-title">1) Business Profile Summary</h3>
-          <span class="chip">{{ profile?.billing_status || '-' }}</span>
+          <span class="chip">{{ safeProfile('billing_status') || '-' }}</span>
         </div>
+
         <div class="summary-grid">
-          <div><strong>Company</strong><br />{{ profile?.company_name || '-' }}</div>
-          <div><strong>Business Name</strong><br />{{ profile?.business_name || '-' }}</div>
-          <div><strong>Plan Code</strong><br />{{ profile?.plan_code || '-' }}</div>
-          <div><strong>Is Active</strong><br />{{ profile?.is_active ? 'true' : 'false' }}</div>
-          <div><strong>Trial Start</strong><br />{{ formatDate(profile?.trial_started_at) }}</div>
-          <div><strong>Trial Expires</strong><br />{{ formatDate(profile?.trial_expires_at) }}</div>
+          <div><strong>Company</strong><br />{{ safeProfile('company_name') || '-' }}</div>
+          <div><strong>Business Name</strong><br />{{ safeProfile('business_name') || '-' }}</div>
+          <div><strong>Plan Code</strong><br />{{ safeProfile('plan_code') || '-' }}</div>
+          <div><strong>Is Active</strong><br />{{ safeProfile('is_active') ? 'true' : 'false' }}</div>
+          <div><strong>Trial Start</strong><br />{{ formatDate(safeProfile('trial_started_at')) }}</div>
+          <div><strong>Trial Expires</strong><br />{{ formatDate(safeProfile('trial_expires_at')) }}</div>
         </div>
       </section>
 
+      <!-- 2) Team Members -->
       <section class="panel">
         <div class="panel-header">
           <h3 class="panel-title">2) Team Members</h3>
           <span class="chip">{{ teamMembers.length }} members</span>
           <span class="chip">{{ canManageMembers ? 'Can Manage' : 'Read Only' }}</span>
         </div>
+
         <div class="table-shell">
           <table>
             <thead>
@@ -95,12 +107,14 @@
                 <th class="th">Status</th>
               </tr>
             </thead>
+
             <tbody>
               <tr class="row" *ngFor="let member of teamMembers; trackBy: trackById">
-                <td>{{ member.user_label || member.user_id || '-' }}</td>
-                <td>{{ member.member_role || '-' }}</td>
-                <td>{{ member.status || '-' }}</td>
+                <td>{{ member?.user_label || member?.user_id || '-' }}</td>
+                <td>{{ member?.member_role || '-' }}</td>
+                <td>{{ member?.status || '-' }}</td>
               </tr>
+
               <tr *ngIf="!teamMembers.length">
                 <td colspan="3" class="empty-cell">No team members found.</td>
               </tr>
@@ -109,6 +123,7 @@
         </div>
       </section>
 
+      <!-- 3) Requests & Invites -->
       <section class="panel span-2">
         <div class="panel-header">
           <h3 class="panel-title">3) Requests & Invites</h3>
@@ -134,15 +149,17 @@
                 <th class="th">Timestamp</th>
               </tr>
             </thead>
+
             <tbody>
               <tr class="row" *ngFor="let req of requests; trackBy: trackById">
-                <td>{{ req.id }}</td>
-                <td>{{ req.target }}</td>
-                <td>{{ req.recipient }}</td>
-                <td>{{ req.required_state }}</td>
-                <td>{{ requestStatusLabel(req.response_status) }}</td>
-                <td>{{ formatDate(req.timestamp) }}</td>
+                <td>{{ req?.id || '-' }}</td>
+                <td>{{ requestTarget(req) }}</td>
+                <td>{{ requestRecipient(req) }}</td>
+                <td>{{ req?.required_state || '-' }}</td>
+                <td>{{ requestStatusLabel(req?.response_status) }}</td>
+                <td>{{ formatDate(req?.timestamp) }}</td>
               </tr>
+
               <tr *ngIf="!requests.length">
                 <td colspan="6" class="empty-cell">No requests found.</td>
               </tr>
@@ -156,15 +173,17 @@
               Request
               <select class="input" [(ngModel)]="inviteForm.requestId">
                 <option value="">Select request</option>
-                <option *ngFor="let req of requests; trackBy: trackById" [value]="req.id">
-                  {{ req.id }} - {{ req.recipient }}
+                <option *ngFor="let req of requests; trackBy: trackById" [value]="req?.id">
+                  {{ req?.id }} - {{ requestRecipient(req) }}
                 </option>
               </select>
             </label>
+
             <label>
               Invite Email
               <input class="input" placeholder="user@example.com" [(ngModel)]="inviteForm.email" />
             </label>
+
             <label>
               Invite Phone
               <input class="input" placeholder="+2010..." [(ngModel)]="inviteForm.phone" />
@@ -172,11 +191,15 @@
           </div>
 
           <div class="mt-4 flex items-center gap-3">
-            <button class="btn-primary px-4 py-2 rounded-full" [disabled]="inviteSubmitting" (click)="submitInvite()">
+            <button
+              class="btn-primary px-4 py-2 rounded-full"
+              [disabled]="inviteSubmitting"
+              (click)="submitInvite()">
               {{ inviteSubmitting ? 'Sending...' : 'Send Invite' }}
             </button>
           </div>
         </ng-container>
+
         <ng-template #inviteReadonlyState>
           <div class="mt-4 text-slate-300">
             Invite action is available for owner role only.
@@ -195,15 +218,17 @@
                 <th class="th">Expires</th>
               </tr>
             </thead>
+
             <tbody>
               <tr class="row" *ngFor="let invite of requestInvites; trackBy: trackById">
-                <td>{{ invite.id }}</td>
-                <td>{{ invite.request || '-' }}</td>
-                <td>{{ invite.email || invite.phone || '-' }}</td>
+                <td>{{ invite?.id || '-' }}</td>
+                <td>{{ invite?.request || '-' }}</td>
+                <td>{{ invite?.email || invite?.phone || '-' }}</td>
                 <td>{{ inviteStatusLabel(invite) }}</td>
-                <td>{{ formatDate(invite.sent_at || invite.date_created) }}</td>
-                <td>{{ formatDate(invite.expires_at) }}</td>
+                <td>{{ formatDate(invite?.sent_at || invite?.date_created) }}</td>
+                <td>{{ formatDate(invite?.expires_at) }}</td>
               </tr>
+
               <tr *ngIf="!requestInvites.length">
                 <td colspan="6" class="empty-cell">No invites found.</td>
               </tr>
@@ -212,6 +237,7 @@
         </div>
       </section>
 
+      <!-- 4) Export Center -->
       <section class="panel">
         <div class="panel-header">
           <h3 class="panel-title">4) Export Center</h3>
@@ -226,6 +252,7 @@
               <option value="pdf">PDF</option>
             </select>
           </label>
+
           <label class="full-width">
             Filters (optional JSON)
             <textarea class="input" rows="3" [(ngModel)]="exportForm.filters"></textarea>
@@ -233,10 +260,15 @@
         </div>
 
         <div class="mt-4 flex items-center gap-3">
-          <button *ngIf="canUseSystem && !isReadOnly; else exportReadonlyState" class="btn-primary px-4 py-2 rounded-full" [disabled]="exportSubmitting" (click)="submitExportRequest()">
+          <button
+            *ngIf="canUseSystem && !isReadOnly; else exportReadonlyState"
+            class="btn-primary px-4 py-2 rounded-full"
+            [disabled]="exportSubmitting"
+            (click)="submitExportRequest()">
             {{ exportSubmitting ? 'Submitting...' : 'Create Export Job' }}
           </button>
         </div>
+
         <ng-template #exportReadonlyState>
           <div class="text-slate-300">Your role is read-only for export creation.</div>
         </ng-template>
@@ -252,14 +284,16 @@
                 <th class="th">Completed At</th>
               </tr>
             </thead>
+
             <tbody>
               <tr class="row" *ngFor="let item of reportExports; trackBy: trackById">
-                <td>{{ item.id }}</td>
-                <td>{{ item.format.toUpperCase() }}</td>
-                <td>{{ item.status || '-' }}</td>
-                <td>{{ item.file || '-' }}</td>
-                <td>{{ formatDate(item.completed_at || item.date_created) }}</td>
+                <td>{{ item?.id || '-' }}</td>
+                <td>{{ (item?.format || '').toUpperCase() }}</td>
+                <td>{{ item?.status || '-' }}</td>
+                <td>{{ item?.file || '-' }}</td>
+                <td>{{ formatDate(item?.completed_at || item?.date_created) }}</td>
               </tr>
+
               <tr *ngIf="!reportExports.length">
                 <td colspan="5" class="empty-cell">No export jobs found.</td>
               </tr>
@@ -268,6 +302,7 @@
         </div>
       </section>
 
+      <!-- 5) Activity Log -->
       <section class="panel">
         <div class="panel-header">
           <h3 class="panel-title">5) Activity Log</h3>
@@ -284,13 +319,15 @@
                 <th class="th">Date</th>
               </tr>
             </thead>
+
             <tbody>
               <tr class="row" *ngFor="let event of activityEvents; trackBy: trackById">
-                <td>{{ event.actor_label || '-' }}</td>
-                <td>{{ event.action || '-' }}</td>
-                <td>{{ event.entity_type || '-' }} #{{ event.entity_id || '-' }}</td>
-                <td>{{ formatDate(event.date_created) }}</td>
+                <td>{{ event?.actor_label || '-' }}</td>
+                <td>{{ event?.action || '-' }}</td>
+                <td>{{ event?.entity_type || '-' }} #{{ event?.entity_id || '-' }}</td>
+                <td>{{ formatDate(event?.date_created) }}</td>
               </tr>
+
               <tr *ngIf="!activityEvents.length">
                 <td colspan="4" class="empty-cell">No activity events found.</td>
               </tr>
