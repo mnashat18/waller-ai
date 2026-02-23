@@ -12,36 +12,25 @@ export class CreateRequestModalComponent {
   @Output() submitRequest = new EventEmitter<CreateRequestForm>();
   @Input() feedback: SubmitFeedback | null = null;
   @Input() submitting = false;
-  @Input() requestedByDefault = '';
   @Input() businessTrialNotice = '';
   @Input() businessInviteTrialNotice = '';
 
-  onSubmit(
-    requestedBy: string,
-    requestedFor: string,
-    requiredState: string,
-    notes: string,
-    inviteChannel: string
-  ): void {
+  onSubmit(requestedFor: string): void {
     this.submitRequest.emit({
-      requestedBy,
-      requestedFor,
-      requiredState,
-      notes,
-      inviteChannel
+      target: 'scan',
+      requestedFor
     });
   }
 }
 
 export type CreateRequestForm = {
-  requestedBy: string;
+  target: RequestTarget;
   requestedFor: string;
-  requiredState: string;
-  notes: string;
-  inviteChannel: string;
 };
 
 export type SubmitFeedback = {
   type: 'success' | 'error' | 'info';
   message: string;
 };
+
+export type RequestTarget = 'scan';

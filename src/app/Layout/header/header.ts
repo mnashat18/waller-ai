@@ -31,7 +31,6 @@ export class HeaderComponent {
       history: 'History',
       'audit-logs': 'Audit Logs',
       requests: 'Requests',
-      'requests/create': 'Create Request',
       profile: 'Profile',
       'business-center': 'Business Center'
     };

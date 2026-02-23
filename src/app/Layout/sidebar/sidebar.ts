@@ -247,7 +247,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     if (!this.canUseBusinessFeatures) {
       return;
     }
-    this.router.navigate(['/requests/create']);
+    this.router.navigate(['/requests'], { queryParams: { create: '1' } });
   }
 
   private resolveCurrentUserId(): string | null {

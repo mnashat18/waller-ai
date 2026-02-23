@@ -18,25 +18,14 @@
       {{ businessTrialNotice }}
     </div>
 
-    <!-- Target (Admin) -->
-    <div>
-      <label class="label" for="requester-name">Requested By</label>
-      <input
-        #requestedByInput
-        class="input"
-        id="requester-name"
-        [value]="requestedByDefault"
-        placeholder="Company or admin name" />
-    </div>
-
     <!-- Requested For -->
     <div>
-      <label class="label" for="request-user-id">Requested For (Email or Phone)</label>
+      <label class="label" for="request-user-id">Requested For (Email)</label>
       <input
         #requestedForInput
         class="input"
         id="request-user-id"
-        placeholder="name@email.com or +201234567890" />
+        placeholder="name@email.com" />
       <p class="text-xs text-slate-500 mt-2">
         We will send an invite if the user is not registered yet.
       </p>
@@ -47,49 +36,11 @@
       </p>
     </div>
 
-    <div>
-      <label class="label" for="request-invite-channel">Invite Channel</label>
-      <select
-        #inviteChannelInput
-        class="input"
-        id="request-invite-channel">
-        <option value="auto">Auto (Email for email, WhatsApp for phone)</option>
-        <option value="email">Email</option>
-        <option value="whatsapp">WhatsApp</option>
-        <option value="sms">SMS</option>
-      </select>
-    </div>
-
-    <!-- Required State -->
-    <div>
-      <label class="label" for="request-required-state">Required Scan State</label>
-      <select
-        #requiredStateInput
-        class="input"
-        id="request-required-state">
-        <option>Stable</option>
-        <option>Low Focus</option>
-        <option>Elevated Fatigue</option>
-        <option>High Risk</option>
-      </select>
-    </div>
-
-    <!-- Notes -->
-    <div>
-      <label class="label" for="request-notes">Notes (optional)</label>
-      <textarea
-        #notesInput
-        id="request-notes"
-        rows="3"
-        class="input"
-        placeholder="Why is this scan required?"></textarea>
-    </div>
-
     <button
       type="button"
       class="btn-primary w-full disabled:opacity-60 disabled:cursor-not-allowed"
       [disabled]="submitting"
-      (click)="onSubmit(requestedByInput.value, requestedForInput.value, requiredStateInput.value, notesInput.value, inviteChannelInput.value)">
+      (click)="onSubmit(requestedForInput.value)">
       Send Request
     </button>
     <p

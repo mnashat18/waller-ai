@@ -3,7 +3,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
-import { Observable, from, of, throwError } from 'rxjs';
+import { Observable, from, of } from 'rxjs';
 import { catchError, concatMap, finalize, map, timeout, toArray } from 'rxjs/operators';
 import { Organization, OrganizationService } from '../../services/organization.service';
 import { BusinessCenterService, BusinessHubAccessState } from '../../services/business-center.service';
@@ -15,6 +15,7 @@ type Feedback = {
 };
 
 type RecipientKind = 'email';
+type RequestTarget = 'scan';
 
 type RequestRecipient = {
   id: string;
@@ -52,14 +53,11 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   recipientError = '';
   recipients: RequestRecipient[] = [];
   private lastSubmitError = '';
-  private inviteSentCount = 0;
   private readonly submitTimeoutMs = 30000;
   private readonly businessProfileTimeoutMs = 15000;
-  readonly targetOptions = ['Business', 'Ops'];
+  readonly targetOptions: RequestTarget[] = ['scan'];
   form = {
-    target: 'Business',
-    requiredState: 'Stable',
-    notes: ''
+    target: 'scan'
   };
 
   constructor(
@@ -113,7 +111,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   recipientEntryHint(): string {
-    return 'Add one or more emails with +. Each email will receive a Business request invitation.';
+    return 'Add one or more emails with +. Each email will receive a scan request invitation.';
   }
 
   trackRecipientById(_: number, item: RequestRecipient) {
@@ -171,14 +169,9 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const target = this.form.target.trim();
-    const requiredState = this.form.requiredState.trim();
+    const target = this.normalizeTarget(this.form.target);
     if (!target) {
-      this.submitFeedback = { type: 'error', message: 'Target is required.' };
-      return;
-    }
-    if (!requiredState) {
-      this.submitFeedback = { type: 'error', message: 'Required scan state is required.' };
+      this.submitFeedback = { type: 'error', message: 'Select a valid target first.' };
       return;
     }
     if (!this.consumePendingRecipientInput()) {
@@ -195,11 +188,21 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
       return;
     }
+    const currentUser = this.getCurrentUserContext();
+    if (!currentUser.id) {
+      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+      return;
+    }
+    const authenticatedUser = { id: currentUser.id, email: currentUser.email };
+
+    if (authenticatedUser.email && this.recipients.some((recipient) => recipient.value === authenticatedUser.email)) {
+      this.submitFeedback = { type: 'error', message: "You can't send a request to yourself." };
+      return;
+    }
 
     this.submittingRequest = true;
     this.submitFeedback = { type: 'info', message: 'Sending request(s)...' };
     this.lastSubmitError = '';
-    this.inviteSentCount = 0;
 
     const recipientsSnapshot = [...this.recipients];
     from(recipientsSnapshot).pipe(
@@ -207,8 +210,8 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
         this.submitRecipientWorkflow(
           target,
           recipient,
-          requiredState,
-          token
+          token,
+          authenticatedUser
         ).pipe(
           timeout(this.submitTimeoutMs),
           catchError((err) => {
@@ -237,27 +240,20 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
         }
 
         if (successCount < recipientsSnapshot.length) {
-          const inviteNote = this.inviteSentCount
-            ? ` ${this.inviteSentCount} invitation(s) sent. Ask them to sign up.`
-            : '';
           this.submitFeedback = {
             type: 'info',
-            message: `Sent ${successCount} of ${recipientsSnapshot.length} request(s). Some recipients failed.${inviteNote}`
+            message: `Sent ${successCount} of ${recipientsSnapshot.length} request(s). Some recipients failed.`
           };
         } else {
-          const inviteNote = this.inviteSentCount
-            ? ` ${this.inviteSentCount} invitation(s) sent. Ask them to sign up.`
-            : '';
           this.submitFeedback = {
             type: 'success',
-            message: `Request(s) sent successfully to ${successCount} recipient(s).${inviteNote}`
+            message: `Request(s) sent successfully to ${successCount} recipient(s).`
           };
         }
 
         this.recipients = [];
         this.recipientInput = '';
-        this.form.notes = '';
-        this.form.requiredState = 'Stable';
+        this.form.target = 'scan';
         if (this.redirectAfterSubmitTimer) {
           clearTimeout(this.redirectAfterSubmitTimer);
         }
@@ -275,19 +271,16 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private submitRecipientWorkflow(
-    target: string,
+    target: RequestTarget,
     recipient: RequestRecipient,
-    requiredState: string,
-    token: string
+    token: string,
+    currentUser: { id: string; email: string | null }
   ): Observable<boolean> {
-    const contact = { email: recipient.value };
-
     return this.submitRequestPayload(
       target,
-      contact,
-      requiredState,
+      recipient.value,
       token,
-      Boolean(contact.email)
+      currentUser
     ).pipe(
       catchError((err) => {
         this.lastSubmitError = this.toFriendlyHttpError(err, 'Failed to send request.');
@@ -329,7 +322,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     ).subscribe((org) => {
       this.org = org;
       if (!this.form.target.trim()) {
-        this.form.target = 'Business';
+        this.form.target = 'scan';
       }
     });
   }
@@ -422,74 +415,50 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private submitRequestPayload(
-    target: string,
-    contact: { email?: string },
-    requiredState: string,
+    target: RequestTarget,
+    requestedForEmail: string,
     token: string | null,
-    createInvite = false
+    currentUserContext?: { id: string; email: string | null }
   ): Observable<boolean> {
-    const currentUser = this.getCurrentUserContext();
+    const currentUser = currentUserContext ?? this.getCurrentUserContext();
     if (!currentUser.id) {
       this.lastSubmitError = 'Your session expired. Log in again.';
       return of(false);
     }
 
-    return this.resolveRequestedFor(contact, token).pipe(
-      concatMap((resolvedContact) => {
-        if (!resolvedContact) {
-          this.lastSubmitError = 'Add one valid recipient email.';
-          return of(false);
+    const email = this.normalizeEmail(requestedForEmail);
+    if (!email) {
+      this.lastSubmitError = 'Add one valid recipient email.';
+      return of(false);
+    }
+
+    if (currentUser.email && currentUser.email === email) {
+      this.lastSubmitError = "You can't send a request to yourself.";
+      return of(false);
+    }
+
+    const payload: CreateRequestPayload = {
+      requested_for_email: email,
+      target
+    };
+
+    return this.createRequest(payload, token).pipe(
+      concatMap((res) => {
+        const createdId = this.normalizeId(res?.data?.id);
+        if (!createdId) {
+          return of(true);
         }
 
-        const shouldCreateInvite = createInvite && Boolean(
-          resolvedContact.shouldInvite && resolvedContact.email
-        );
-
-        const payload: CreateRequestPayload = {
-          Target: target,
-          required_state: requiredState,
-          ...(this.org?.id ? { org_id: this.org.id } : {}),
-          ...(this.org?.id ? { requested_by_org: this.org.id } : {}),
-          requested_by_user: currentUser.id ?? undefined,
-          requested_for_user: resolvedContact.userId,
-          requested_for_email: resolvedContact.email,
-          response_status: 'Pending'
-        };
-
-        return this.createRequest(payload, token).pipe(
-          concatMap((res) => {
-            if (!shouldCreateInvite) {
-              return of(true);
-            }
-
-            if (!res?.data?.id) {
-              this.lastSubmitError = 'Request created, but invitation could not be linked.';
-              return of(false);
-            }
-
-            return this.createInvite(
-              res.data.id,
-              { email: resolvedContact.email },
-              token
-            ).pipe(
-              map((inviteCreated) => {
-                if (!inviteCreated) {
-                  this.lastSubmitError = 'Request created, but invitation could not be sent.';
-                  return false;
-                }
-                this.inviteSentCount += 1;
-                return true;
-              })
-            );
-          }),
+        return this.fetchCreatedRequestById(createdId, token).pipe(
+          map(() => true),
           catchError((err) => {
-            this.lastSubmitError = this.toFriendlySubmitError(err);
+            this.lastSubmitError = this.toFriendlyHttpError(err, 'Request created, but refresh failed.');
             return of(false);
           })
         );
       }),
       catchError((err) => {
-        this.lastSubmitError = this.toFriendlyHttpError(err, 'Failed to resolve user account.');
+        this.lastSubmitError = this.toFriendlyHttpError(err, 'Failed to create request.');
         return of(false);
       })
     );
@@ -498,69 +467,31 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   private createRequest(payload: CreateRequestPayload, token: string | null) {
     const headers = this.buildAuthHeaders(token);
     const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
-    console.info('[create-request] final payload -> /items/requests', payload);
     return this.http.post<{ data?: { id?: string } }>(
       `${environment.API_URL}/items/requests`,
       payload,
       requestOptions
-    ).pipe(
-      catchError((err) => {
-        if (err?.status === 500) {
-          console.error('[create-request] requests API 500 response body:', err?.error ?? err);
-        } else {
-          console.error('[create-request] requests API error response body:', err?.error ?? err);
-        }
-
-        if (!this.shouldRetryWithLowercaseTarget(err)) {
-          return throwError(() => err);
-        }
-
-        const fallbackPayload = this.createTargetFallbackPayload(payload);
-        if (!fallbackPayload) {
-          return throwError(() => err);
-        }
-
-        return this.http.post<{ data?: { id?: string } }>(
-          `${environment.API_URL}/items/requests`,
-          fallbackPayload,
-          requestOptions
-        );
-      })
     );
   }
 
-  private createInvite(
-    requestId: string | number,
-    contact: { email?: string },
-    token: string | null
-  ): Observable<boolean> {
-    const inviteToken = this.buildInviteToken();
-    const now = new Date();
-    const expiresAt = new Date(now);
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    const payload = {
-      org_id: this.org?.id ?? undefined,
-      request: requestId,
-      email: contact.email ?? undefined,
-      token: inviteToken,
-      status: 'pending',
-      sent_at: now.toISOString(),
-      expires_at: expiresAt.toISOString()
-    };
-
+  private fetchCreatedRequestById(requestId: string, token: string | null) {
     const headers = this.buildAuthHeaders(token);
     const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
-    return this.http.post(
-      `${environment.API_URL}/items/request_invites`,
-      payload,
+    const params = new URLSearchParams({
+      fields: [
+        'id',
+        'target',
+        'Target',
+        'requested_for_email',
+        'requested_for_user.id',
+        'requested_by_user.id',
+        'response_status',
+        'timestamp'
+      ].join(',')
+    });
+    return this.http.get<{ data?: Record<string, unknown> }>(
+      `${environment.API_URL}/items/requests/${encodeURIComponent(requestId)}?${params.toString()}`,
       requestOptions
-    ).pipe(
-      map(() => true),
-      catchError((err) => {
-        console.error('[create-request] create invite error:', err);
-        return of(false);
-      })
     );
   }
 
@@ -572,15 +503,6 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     return new HttpHeaders({
       Authorization: `Bearer ${token}`
     });
-  }
-
-  private buildInviteToken() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-    const random = Math.random().toString(36).slice(2, 12);
-    const time = Date.now().toString(36);
-    return `${time}${random}`.slice(0, 20);
   }
 
   private checkAdminAccess(): boolean {
@@ -631,69 +553,6 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     } catch {
       return false;
     }
-  }
-
-  private shouldRetryWithLowercaseTarget(err: any): boolean {
-    const message = this.readApiError(err).toLowerCase();
-    return message.includes('target') && (message.includes('field') || message.includes('payload'));
-  }
-
-  private createTargetFallbackPayload(payload: CreateRequestPayload): Record<string, unknown> | null {
-    if (!payload.Target) {
-      return null;
-    }
-
-    const { Target, ...rest } = payload;
-    return {
-      ...rest,
-      target: Target
-    };
-  }
-
-  private resolveRequestedFor(
-    contact: {
-      email?: string;
-    },
-    token: string | null
-  ): Observable<{ userId?: string; email?: string; shouldInvite: boolean } | null> {
-    const email = this.normalizeEmail(contact.email);
-    if (!email) {
-      return of(null);
-    }
-
-    const headers = this.buildAuthHeaders(token);
-    const params = new URLSearchParams({
-      'filter[email][_eq]': email,
-      fields: 'id,email',
-      limit: '1'
-    });
-    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
-
-    return this.http.get<{ data?: Array<{ id?: string; email?: string }> }>(
-      `${environment.API_URL}/users?${params.toString()}`,
-      requestOptions
-    ).pipe(
-      map((res) => {
-        const user = res?.data?.[0];
-        const resolvedUserId = this.normalizeId(user?.id);
-        if (resolvedUserId) {
-          return {
-            userId: resolvedUserId,
-            email: email ?? undefined,
-            shouldInvite: false
-          };
-        }
-
-        return {
-          email: email ?? undefined,
-          shouldInvite: true
-        };
-      })
-    );
-  }
-
-  private toFriendlySubmitError(err: any): string {
-    return this.toFriendlyHttpError(err, 'Failed to create request.');
   }
 
   private toFriendlyHttpError(err: any, fallback: string): string {
@@ -792,18 +651,19 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     return this.isValidEmail(email) ? email : null;
   }
 
+  private normalizeTarget(value: unknown): RequestTarget | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const target = value.trim();
+    return this.targetOptions.find((item) => item === target) ?? null;
+  }
+
 }
 
 type CreateRequestPayload = {
-  Target: string;
-  org_id?: string;
-  requested_by_org?: string;
-  requested_by_user?: string;
-  scan_id?: string;
-  requested_for_user?: string;
   requested_for_email?: string;
-  required_state: string;
-  response_status?: string;
+  target: RequestTarget;
 };
 
 

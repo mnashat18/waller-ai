@@ -36,12 +36,13 @@
     </div>
 
     <div class="mt-5 flex gap-3">
-      <a
+      <button
         *ngIf="canCreateRequests"
-        routerLink="/requests/create"
-        class="flex-1 bg-[#f5c451] text-slate-900 py-3 rounded-2xl font-semibold shadow-lg text-center">
+        type="button"
+        class="flex-1 bg-[#f5c451] text-slate-900 py-3 rounded-2xl font-semibold shadow-lg text-center"
+        (click)="openCreateModal()">
         Create Request
-      </a>
+      </button>
       <a
         *ngIf="!canCreateRequests"
         routerLink="/payment"
@@ -109,7 +110,6 @@
     *ngIf="showCreateModal"
     [feedback]="submitFeedback"
     [submitting]="submittingRequest"
-    [requestedByDefault]="requestedByDefault"
     [businessTrialNotice]="businessTrialNotice"
     [businessInviteTrialNotice]="businessInviteTrialNotice"
     (submitRequest)="handleCreateRequest($event)"
@@ -156,16 +156,17 @@
         </svg>
         <span>Audit logs</span>
       </a>
-      <a
+      <button
         *ngIf="canCreateRequests"
-        routerLink="/requests/create"
-        class="flex flex-col items-center gap-1">
+        type="button"
+        class="flex flex-col items-center gap-1"
+        (click)="openCreateModal()">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M12 5v14"></path>
           <path d="M5 12h14"></path>
         </svg>
         <span>Create</span>
-      </a>
+      </button>
       <a routerLink="/dashboard" routerLinkActive="text-white" [routerLinkActiveOptions]="{ exact: true }" class="flex flex-col items-center gap-1">
         <div class="w-11 h-11 rounded-full bg-[#f5c451] text-slate-900 flex items-center justify-center -mt-6 shadow-lg">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">

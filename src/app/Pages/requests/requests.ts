@@ -1,12 +1,14 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { Observable, forkJoin, of } from 'rxjs';
+import { ActivatedRoute, RouterModule } from '@angular/router';
+import { forkJoin, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import type {
-  CreateRequestForm,
-  SubmitFeedback
+import {
+  CreateRequestModalComponent,
+  type CreateRequestForm,
+  type RequestTarget,
+  type SubmitFeedback
 } from '../../components/create-request-modal/create-request-modal';
 import { AdminTokenService } from '../../services/admin-token';
 import { Organization, OrganizationService } from '../../services/organization.service';
@@ -15,7 +17,7 @@ import { environment } from 'src/environments/environment';
 
 @Component({
   selector: 'app-requests',
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, CreateRequestModalComponent],
   templateUrl: './requests.html',
   styleUrl: './requests.css',
 })
@@ -27,6 +29,7 @@ export class Requests implements OnInit {
   submittingRequest = false;
   showPermissionNotice = false;
   isAdminUser = false;
+  hasBusinessAccess = false;
   canCreateRequests = false;
   currentPlanName = 'Free';
   currentPlanCode = 'free';
@@ -36,6 +39,7 @@ export class Requests implements OnInit {
   businessInviteTrialNotice = '';
   org: Organization | null = null;
   requestedByDefault = '';
+  readonly fixedRequestTarget: RequestTarget = 'scan';
   pendingCreateModal = false;
   requestStats = {
     total: 0,
@@ -48,7 +52,6 @@ export class Requests implements OnInit {
     private http: HttpClient,
     private adminTokens: AdminTokenService,
     private route: ActivatedRoute,
-    private router: Router,
     private subscriptionService: SubscriptionService,
     private organizationService: OrganizationService,
     private cdr: ChangeDetectorRef
@@ -58,7 +61,6 @@ export class Requests implements OnInit {
     this.isAdminUser = this.checkAdminAccess();
     this.loadPlanAccess();
     this.loadOrganization();
-    this.loadRequests();
     this.openCreateFromQuery();
   }
 
@@ -81,29 +83,29 @@ export class Requests implements OnInit {
 
   handleCreateRequest(form: CreateRequestForm) {
     if (!this.canCreateRequests) {
-      this.router.navigate(['/payment']);
-      return;
-    }
-
-    const requestedBy = form.requestedBy.trim() || this.requestedByDefault;
-    const requestedFor = form.requestedFor.trim();
-    const requiredState = form.requiredState.trim();
-    const inviteChannel = this.normalizeInviteChannel(form.inviteChannel);
-
-    if (!requestedBy) {
-      this.submitFeedback = { type: 'error', message: 'Requested by is required.' };
+      this.showPermissionNotice = true;
       this.cdr.detectChanges();
       return;
     }
+
+    const requestedFor = this.normalizeEmail(form.requestedFor);
 
     if (!requestedFor) {
-      this.submitFeedback = { type: 'error', message: 'Requested for is required.' };
+      this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
       this.cdr.detectChanges();
       return;
     }
 
-    if (!requiredState) {
-      this.submitFeedback = { type: 'error', message: 'Required state is required.' };
+    const userToken = this.getUserToken();
+    const currentUserEmail = this.getUserEmailFromToken(userToken);
+    if (!userToken) {
+      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (currentUserEmail && requestedFor === currentUserEmail) {
+      this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
       this.cdr.detectChanges();
       return;
     }
@@ -112,74 +114,33 @@ export class Requests implements OnInit {
     this.submitFeedback = { type: 'info', message: 'Sending request...' };
     this.cdr.detectChanges();
 
-    const contact = this.normalizeContact(requestedFor);
-    const canInvite = this.canCreateRequests;
-
-    if ((contact.email || contact.phone) && !canInvite) {
-      this.submitFeedback = {
-        type: 'error',
-        message: 'Email/phone invites are paid Business features. Open Billing to activate Business.'
-      };
-      this.submittingRequest = false;
-      this.cdr.detectChanges();
-      return;
-    }
-
-    const userToken = this.getUserToken();
-    const currentUserId = this.getUserIdFromToken(userToken);
-    if (!userToken || !currentUserId) {
-      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
-      this.submittingRequest = false;
-      this.cdr.detectChanges();
-      return;
-    }
-
-    this.resolveRequestedFor(contact, userToken).subscribe({
-      next: (resolvedContact) => {
-        if (!resolvedContact) {
-          this.submitFeedback = {
-            type: 'error',
-            message: 'Please provide a valid recipient.'
-          };
-          this.submittingRequest = false;
-          this.cdr.detectChanges();
-          return;
-        }
-
-        const shouldCreateInvite = Boolean(
-          resolvedContact.shouldInvite && (resolvedContact.email || resolvedContact.phone)
-        );
-
-        this.submitRequestPayload(
-          requestedBy,
-          resolvedContact,
-          requiredState,
-          userToken,
-          shouldCreateInvite,
-          inviteChannel,
-          currentUserId
-        );
-      },
-      error: (err) => {
-        console.error('[requests] resolve user error:', err);
-        this.submitFeedback = {
-          type: 'error',
-          message: this.describeHttpError(err, 'Failed to resolve user account.')
-        };
-        this.submittingRequest = false;
-        this.cdr.detectChanges();
-      }
-    });
+    this.submitRequestPayload(this.fixedRequestTarget, requestedFor, userToken);
   }
 
   private loadRequests() {
+    if (this.canViewOrgRequests()) {
+      this.loadOrgScopedRequests();
+      return;
+    }
+
+    this.loadUserScopedRequests();
+  }
+
+  private loadOrgScopedRequests() {
+    const orgId = this.resolveOrgId();
+    if (!orgId) {
+      this.loadUserScopedRequests();
+      return;
+    }
+
     if (this.isAdminUser) {
       this.adminTokens.getToken().subscribe({
         next: (adminToken) => {
-          const tokenSource = adminToken ? 'admin' : 'none';
+          const token = adminToken ?? this.getUserToken();
+          const tokenSource = token ? (adminToken ? 'admin' : 'user') : 'none';
           console.info('[requests] using token source:', tokenSource);
 
-          this.fetchRequests(adminToken, null).subscribe({
+          this.fetchRequests(token, { orgId }).subscribe({
             next: (requests) => {
               console.info('[requests] requests count:', requests.length);
               this.applyRequests(requests);
@@ -197,12 +158,33 @@ export class Requests implements OnInit {
     }
 
     const userToken = this.getUserToken();
+    if (!userToken) {
+      this.requests = [];
+      this.requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.fetchRequests(userToken, { orgId }).subscribe({
+      next: (requests) => {
+        console.info('[requests] requests count:', requests.length);
+        this.applyRequests(requests);
+      },
+      error: (fetchErr) => {
+        console.error('[requests] requests error:', fetchErr);
+      }
+    });
+  }
+
+  private loadUserScopedRequests() {
+    const userToken = this.getUserToken();
     const userId = this.getUserIdFromToken(userToken);
     const tokenSource = userToken ? 'user' : 'none';
     console.info('[requests] using token source:', tokenSource);
 
     if (!userToken || !userId) {
       this.requests = [];
+      this.requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
       this.cdr.detectChanges();
       return;
     }
@@ -233,14 +215,24 @@ export class Requests implements OnInit {
     });
   }
 
+  private canViewOrgRequests(): boolean {
+    return this.isAdminUser || this.hasBusinessAccess;
+  }
+
   private fetchRequests(
     token: string | null,
-    filters: { requestedForUserId?: string; requestedByUserId?: string } | null
+    filters: { requestedForUserId?: string; requestedByUserId?: string; orgId?: string } | null
   ) {
     const headers = this.buildAuthHeaders(token);
+    if (!headers) {
+      return of([] as RequestRecord[]);
+    }
+
     const fields = [
       'id',
+      'target',
       'Target',
+      'org_id',
       'requested_by_user.id',
       'requested_by_user.email',
       'requested_by_user.first_name',
@@ -251,6 +243,7 @@ export class Requests implements OnInit {
       'requested_for_user.last_name',
       'requested_for_email',
       'requested_for_phone',
+      'requested_by_org',
       'requested_by_org.id',
       'requested_by_org.name',
       'required_state',
@@ -263,18 +256,21 @@ export class Requests implements OnInit {
       'fields': fields
     });
 
-    if (filters?.requestedForUserId) {
-      params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
+    if (filters?.orgId) {
+      params.set('filter[_or][0][org_id][_eq]', filters.orgId);
+      params.set('filter[_or][1][requested_by_org][_eq]', filters.orgId);
+    } else {
+      if (filters?.requestedForUserId) {
+        params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
+      }
+      if (filters?.requestedByUserId) {
+        params.set('filter[requested_by_user][_eq]', filters.requestedByUserId);
+      }
     }
-    if (filters?.requestedByUserId) {
-      params.set('filter[requested_by_user][_eq]', filters.requestedByUserId);
-    }
-
-    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
 
     return this.http.get<{ data?: RequestRecord[] }>(
       `${environment.API_URL}/items/requests?${params.toString()}`,
-      requestOptions
+      { headers, withCredentials: true }
     ).pipe(
       map(res => res.data ?? [])
     );
@@ -380,68 +376,38 @@ export class Requests implements OnInit {
     return 'Unknown';
   }
 
-  private resolveRequestedFor(
-    contact: { userId?: string; email?: string; phone?: string },
-    token: string | null
-  ): Observable<ResolvedContact | null> {
-    const userId = (contact.userId ?? '').trim();
-    if (userId) {
-      return of({
-        userId,
-        email: contact.email,
-        phone: contact.phone,
-        shouldInvite: false
-      });
-    }
-
-    const email = (contact.email ?? '').trim().toLowerCase();
-    const phone = (contact.phone ?? '').trim();
-    if (!email && !phone) {
-      return of(null);
-    }
-
-    const filterField: 'email' | 'phone' = email ? 'email' : 'phone';
-    const filterValue = email || phone;
-    const headers = this.buildAuthHeaders(token);
-    const params = new URLSearchParams({
-      [`filter[${filterField}][_eq]`]: filterValue,
-      fields: 'id,email,phone',
-      limit: '1'
-    });
-    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
-
-    return this.http.get<{ data?: Array<{ id?: string; email?: string; phone?: string }> }>(
-      `${environment.API_URL}/users?${params.toString()}`,
-      requestOptions
-    ).pipe(
-      map((res) => {
-        const user = res?.data?.[0];
-        const resolvedUserId = typeof user?.id === 'string' ? user.id.trim() : '';
-        if (resolvedUserId) {
-          return {
-            userId: resolvedUserId,
-            email: email || undefined,
-            phone: phone || undefined,
-            shouldInvite: false
-          };
-        }
-
-        return {
-          email: email || undefined,
-          phone: phone || undefined,
-          shouldInvite: true
-        };
-      })
-    );
-  }
-
   private createRequest(payload: CreateRequestPayload, token: string | null) {
     const headers = this.buildAuthHeaders(token);
-    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
+    if (!headers) {
+      return throwError(() => new Error('Authorization token is missing.'));
+    }
     return this.http.post<{ data?: { id?: string } }>(
       `${environment.API_URL}/items/requests`,
       payload,
-      requestOptions
+      { headers, withCredentials: true }
+    );
+  }
+
+  private fetchCreatedRequestById(requestId: string, token: string | null) {
+    const headers = this.buildAuthHeaders(token);
+    if (!headers) {
+      return throwError(() => new Error('Authorization token is missing.'));
+    }
+    const params = new URLSearchParams({
+      fields: [
+        'id',
+        'target',
+        'Target',
+        'requested_for_email',
+        'requested_for_user.id',
+        'requested_by_user.id',
+        'response_status',
+        'timestamp'
+      ].join(',')
+    });
+    return this.http.get<{ data?: RequestRecord }>(
+      `${environment.API_URL}/items/requests/${encodeURIComponent(requestId)}?${params.toString()}`,
+      { headers, withCredentials: true }
     );
   }
 
@@ -553,10 +519,12 @@ export class Requests implements OnInit {
 
   openCreateModal() {
     if (!this.canCreateRequests) {
-      this.router.navigate(['/payment']);
+      this.showPermissionNotice = true;
+      this.cdr.detectChanges();
       return;
     }
 
+    this.showPermissionNotice = false;
     this.submitFeedback = null;
     this.showCreateModal = true;
     this.cdr.detectChanges();
@@ -567,27 +535,32 @@ export class Requests implements OnInit {
     this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
       next: (snapshot) => {
         this.currentPlanCode = snapshot.planCode || 'free';
-        this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+        this.hasBusinessAccess = snapshot.hasBusinessAccess;
+        this.currentPlanName = snapshot.hasBusinessAccess || this.isAdminUser ? 'Business' : 'Free';
         this.isBusinessTrial = snapshot.isBusinessTrial;
         this.trialDaysRemaining =
           typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
         this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email or phone invites');
-        this.canCreateRequests = snapshot.hasBusinessAccess;
+        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
+        this.canCreateRequests = snapshot.hasBusinessAccess || this.isAdminUser;
         if (!this.requestedByDefault) {
           this.requestedByDefault = this.currentPlanName;
         }
-        if (this.pendingCreateModal && this.canCreateRequests) {
+        if (this.pendingCreateModal) {
           this.openCreateModal();
         }
+        this.loadRequests();
         this.loadingPlanAccess = false;
         this.cdr.detectChanges();
       },
       error: (err) => {
+        this.hasBusinessAccess = false;
+        this.canCreateRequests = this.isAdminUser;
         this.submitFeedback = {
           type: 'error',
           message: this.describeHttpError(err, 'Failed to load plan access.')
         };
+        this.loadRequests();
         this.loadingPlanAccess = false;
         this.cdr.detectChanges();
       }
@@ -600,43 +573,33 @@ export class Requests implements OnInit {
     ).subscribe((org) => {
       this.org = org;
       this.requestedByDefault = org?.name ?? this.requestedByDefault;
+      this.loadRequests();
       this.cdr.detectChanges();
     });
   }
 
   private submitRequestPayload(
-    requestedBy: string,
-    contact: ResolvedContact,
-    requiredState: string,
-    token: string | null,
-    createInvite = false,
-    inviteChannel: InviteChannel = 'auto',
-    currentUserId?: string
+    target: RequestTarget,
+    requestedForEmail: string,
+    token: string | null
   ) {
-    const requestedByUser = currentUserId ?? this.getUserIdFromToken(token);
-    if (!requestedByUser) {
-      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
+    const email = this.normalizeEmail(requestedForEmail);
+    if (!email) {
+      this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
       this.submittingRequest = false;
       this.cdr.detectChanges();
       return;
     }
 
     const payload: CreateRequestPayload = {
-      Target: requestedBy,
-      org_id: this.org?.id ?? undefined,
-      requested_by_org: this.org?.id ?? undefined,
-      requested_by_user: requestedByUser,
-      requested_for_user: contact.userId,
-      requested_for_email: contact.email,
-      requested_for_phone: contact.phone,
-      required_state: requiredState,
-      response_status: 'Pending'
+      requested_for_email: email,
+      target
     };
 
     this.createRequest(payload, token).subscribe({
       next: (res) => {
-        console.info('[requests] request created');
-        if (!createInvite) {
+        const createdId = this.normalizeId(res?.data?.id);
+        if (!createdId) {
           this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
           this.submittingRequest = false;
           this.showCreateModal = false;
@@ -645,31 +608,19 @@ export class Requests implements OnInit {
           return;
         }
 
-        if (!res?.data?.id) {
-          this.submitFeedback = {
-            type: 'error',
-            message: 'Request created, but invitation could not be linked.'
-          };
-          this.submittingRequest = false;
-          this.loadRequests();
-          this.cdr.detectChanges();
-          return;
-        }
-
-        this.createInvite(res.data.id, contact, token, inviteChannel).subscribe({
-          next: (inviteCreated) => {
-            if (inviteCreated) {
-              this.submitFeedback = {
-                type: 'success',
-                message: 'Invitation sent. Ask them to sign up.'
-              };
-              this.showCreateModal = false;
-            } else {
-              this.submitFeedback = {
-                type: 'error',
-                message: 'Request created, but invitation could not be sent.'
-              };
-            }
+        this.fetchCreatedRequestById(createdId, token).subscribe({
+          next: () => {
+            this.submitFeedback = { type: 'success', message: 'Request sent successfully.' };
+            this.submittingRequest = false;
+            this.showCreateModal = false;
+            this.loadRequests();
+            this.cdr.detectChanges();
+          },
+          error: (fetchErr) => {
+            this.submitFeedback = {
+              type: 'error',
+              message: this.describeHttpError(fetchErr, 'Request created, but refresh failed.')
+            };
             this.submittingRequest = false;
             this.loadRequests();
             this.cdr.detectChanges();
@@ -686,99 +637,6 @@ export class Requests implements OnInit {
         this.cdr.detectChanges();
       }
     });
-  }
-
-  private normalizeContact(value: string) {
-    const cleaned = value.trim();
-    if (!cleaned) {
-      return {};
-    }
-    if (cleaned.includes('@')) {
-      return { email: cleaned.toLowerCase() };
-    }
-    if (/^[+\\d][\\d\\s-]{6,}$/.test(cleaned)) {
-      return { phone: cleaned.replace(/\\s+/g, '') };
-    }
-    return { userId: cleaned };
-  }
-
-  private createInvite(
-    requestId: string | number,
-    contact: { email?: string; phone?: string },
-    token: string | null,
-    inviteChannel: InviteChannel
-  ) {
-    const inviteToken = this.buildInviteToken();
-    const now = new Date();
-    const expiresAt = new Date(now);
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    const channel = this.resolveInviteChannel(contact, inviteChannel);
-    const payload = {
-      org_id: this.org?.id ?? undefined,
-      request: requestId,
-      email: contact.email ?? undefined,
-      phone: contact.phone ?? undefined,
-      channel,
-      token: inviteToken,
-      status: 'pending',
-      sent_at: now.toISOString(),
-      expires_at: expiresAt.toISOString()
-    };
-
-    const headers = this.buildAuthHeaders(token);
-    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
-    return this.http.post(
-      `${environment.API_URL}/items/request_invites`,
-      payload,
-      requestOptions
-    ).pipe(
-      map(() => true),
-      catchError((err) => {
-        console.error('[requests] create invite error:', err);
-        return of(false);
-      })
-    );
-  }
-
-  private buildInviteToken() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-    const random = Math.random().toString(36).slice(2, 12);
-    const time = Date.now().toString(36);
-    return `${time}${random}`.slice(0, 20);
-  }
-
-  private normalizeInviteChannel(value: string): InviteChannel {
-    const normalized = (value ?? '').toLowerCase();
-    if (normalized === 'email' || normalized === 'whatsapp' || normalized === 'sms') {
-      return normalized;
-    }
-    return 'auto';
-  }
-
-  private resolveInviteChannel(
-    contact: { email?: string; phone?: string },
-    inviteChannel: InviteChannel
-  ): 'email' | 'whatsapp' | 'sms' {
-    if (inviteChannel === 'email' && contact.email) {
-      return 'email';
-    }
-    if (inviteChannel === 'whatsapp' && contact.phone) {
-      return 'whatsapp';
-    }
-    if (inviteChannel === 'sms' && contact.phone) {
-      return 'sms';
-    }
-
-    if (contact.email) {
-      return 'email';
-    }
-    if (contact.phone) {
-      return inviteChannel === 'sms' ? 'sms' : 'whatsapp';
-    }
-    return 'email';
   }
 
   private describeHttpError(err: any, fallback: string): string {
@@ -833,21 +691,75 @@ export class Requests implements OnInit {
     if (request.requested_for_phone) {
       return request.requested_for_phone;
     }
-    return this.formatTarget(request.Target);
+    return this.formatTarget(request.target ?? request.Target);
   }
 
   private openCreateFromQuery() {
     const createParam = this.route.snapshot.queryParamMap.get('create');
     if (createParam === '1' || createParam === 'true') {
       this.pendingCreateModal = true;
-      this.openCreateModal();
+      if (!this.loadingPlanAccess) {
+        this.openCreateModal();
+      }
     }
+  }
+
+  private isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  private normalizeEmail(value: unknown): string | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const normalized = value.trim().toLowerCase();
+    return this.isValidEmail(normalized) ? normalized : null;
+  }
+
+  private normalizeId(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return String(value);
+    }
+    if (value && typeof value === 'object') {
+      return this.normalizeId((value as Record<string, unknown>)['id']);
+    }
+    return null;
+  }
+
+  private resolveOrgId(): string | null {
+    const token = this.getUserToken();
+    const payload = token ? this.decodeJwtPayload(token) : null;
+    const payloadOrgId =
+      payload?.['org_id'] ??
+      payload?.['organization_id'] ??
+      payload?.['org'] ??
+      payload?.['organization'];
+    const storedOrgId = typeof localStorage !== 'undefined'
+      ? localStorage.getItem('current_user_org_id')
+      : null;
+    return this.normalizeId(this.org?.id) ??
+      this.normalizeId(payloadOrgId) ??
+      this.normalizeId(storedOrgId);
+  }
+
+  private getUserEmailFromToken(token: string | null): string | null {
+    const payload = token ? this.decodeJwtPayload(token) : null;
+    const payloadEmail = payload?.['email'];
+    const storedEmail = typeof localStorage !== 'undefined'
+      ? localStorage.getItem('user_email')
+      : null;
+    return this.normalizeEmail(payloadEmail) ?? this.normalizeEmail(storedEmail);
   }
 
 }
 
 type RequestRecord = {
   id?: string;
+  target?: unknown;
   Target?: unknown;
   requested_for_user?: unknown;
   requested_for_email?: string;
@@ -866,24 +778,8 @@ type RequestRow = {
 };
 
 type CreateRequestPayload = {
-  Target: string;
-  org_id?: string;
-  requested_by_org?: string;
-  requested_by_user?: string;
-  requested_for_user?: string;
+  target: RequestTarget;
   requested_for_email?: string;
-  requested_for_phone?: string;
-  required_state: string;
-  response_status?: string;
-};
-
-type InviteChannel = 'auto' | 'email' | 'whatsapp' | 'sms';
-
-type ResolvedContact = {
-  userId?: string;
-  email?: string;
-  phone?: string;
-  shouldInvite: boolean;
 };
 
 

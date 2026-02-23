@@ -110,7 +110,7 @@
           <p class="field-help">{{ recipientEntryHint() }}</p>
           <p *ngIf="recipientError" class="field-error">{{ recipientError }}</p>
           <p *ngIf="recipientInput.trim()" class="field-help invite-hint">
-            Hint: this email will receive a scan request from {{ form.target || 'your business' }} with a
+            Hint: this email will receive a scan request for {{ form.target || 'scan' }} with a
             "Scan now" message.
           </p>
           <p *ngIf="isBusinessTrial" class="section-note small">{{ businessInviteTrialNotice }}</p>
@@ -134,27 +134,6 @@
           </div>
         </div>
 
-        <label for="required-state">Required Scan State</label>
-        <select
-          id="required-state"
-          name="requiredState"
-          [(ngModel)]="form.requiredState"
-          class="input">
-          <option value="Stable">Stable</option>
-          <option value="Low Focus">Low Focus</option>
-          <option value="Elevated Fatigue">Elevated Fatigue</option>
-          <option value="High Risk">High Risk</option>
-        </select>
-
-        <label for="request-notes">Notes (Optional)</label>
-        <textarea
-          id="request-notes"
-          name="notes"
-          [(ngModel)]="form.notes"
-          class="input"
-          rows="4"
-          placeholder="Why is this scan required?"></textarea>
-
         <div class="form-actions">
           <button
             type="submit"
@@ -175,13 +154,13 @@
 
       <ul class="guide-list">
         <li>
-          <strong>Step 1:</strong> choose target (Business/Ops).
+          <strong>Step 1:</strong> choose target (scan).
         </li>
         <li>
           <strong>Step 2:</strong> add one or more recipients using + (email only).
         </li>
         <li>
-          <strong>Step 3:</strong> define required state and submit.
+          <strong>Step 3:</strong> submit and track the created request.
         </li>
       </ul>
 

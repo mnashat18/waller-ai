@@ -23,7 +23,6 @@ const isMobileViewport = () =>
 
 const mobileDashboardMatch: CanMatchFn = () => isMobileViewport();
 const mobileRequestsMatch: CanMatchFn = () => isMobileViewport();
-const mobileCreateRequestMatch: CanMatchFn = () => isMobileViewport();
 const mobileHistoryMatch: CanMatchFn = () => isMobileViewport();
 const mobileProfileMatch: CanMatchFn = () => isMobileViewport();
 const mobileAuditLogsMatch: CanMatchFn = () => isMobileViewport();
@@ -110,11 +109,9 @@ export const routes: Routes = [
 },
 {
   path: 'requests/create',
-  canMatch: [mobileCreateRequestMatch],
-  canActivate: [businessOnboardingGuard],
-  loadComponent: () =>
-    import('./Pages/create-request/create-request')
-      .then(m => m.CreateRequestComponent)
+  canMatch: [mobileRequestsMatch],
+  redirectTo: 'requests',
+  pathMatch: 'full'
 },
 {
   path: 'requests',
@@ -238,10 +235,8 @@ export const routes: Routes = [
       },
       {
         path: 'requests/create',
-        canActivate: [businessOnboardingGuard],
-        loadComponent: () =>
-          import('./Pages/create-request/create-request')
-            .then(m => m.CreateRequestComponent)
+        redirectTo: 'requests',
+        pathMatch: 'full'
       },
       {
         path: 'requests',
