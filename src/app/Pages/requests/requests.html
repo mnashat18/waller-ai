@@ -14,7 +14,7 @@
         *ngIf="canCreateRequests"
         type="button"
         class="btn-primary px-5 py-2 rounded-full"
-        (click)="showCreateModal = true">
+        (click)="openCreateModal()">
         + Create Scan Request
       </button>
 
@@ -146,7 +146,12 @@
   <!-- CREATE MODAL -->
   <app-create-request-modal
     *ngIf="showCreateModal"
+    [feedback]="submitFeedback"
+    [submitting]="submittingRequest"
+    [businessTrialNotice]="businessTrialNotice"
+    [businessInviteTrialNotice]="businessInviteTrialNotice"
     [requiredStateOptions]="requiredStateOptions"
+    (submitRequest)="handleCreateRequest($event)"
     (close)="showCreateModal = false">
   </app-create-request-modal>
 
