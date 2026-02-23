@@ -69,7 +69,6 @@ export class Requests implements OnInit, OnDestroy {
   private readonly accessTimeoutMs = 15000;
   private currentMemberRole: BusinessMemberRole | null = null;
   private currentBusinessProfileId: string | null = null;
-  private currentOrgId: string | null = null;
 
   constructor(
     private http: HttpClient,
@@ -225,7 +224,7 @@ export class Requests implements OnInit, OnDestroy {
       this.businessCenter.createScanRequest({
         requested_for_email: email,
         required_state: requiredState
-      }, this.currentOrgId).pipe(
+      }, this.currentBusinessProfileId).pipe(
         catchError((err) =>
           of({
             ok: false,
@@ -323,7 +322,7 @@ export class Requests implements OnInit, OnDestroy {
     }
 
     const memberCalls = recipientEmails.map((email) =>
-      this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
+      this.businessCenter.upsertTeamMember(profileId, email, role, this.currentMemberRole).pipe(
         catchError((err) =>
           of({
             ok: false,
@@ -461,7 +460,6 @@ export class Requests implements OnInit, OnDestroy {
         this.canAssignMemberRole = false;
         this.currentMemberRole = null;
         this.currentBusinessProfileId = null;
-        this.currentOrgId = null;
         this.businessTrialNotice = '';
         this.businessInviteTrialNotice = '';
         this.syncAssignableMemberRoleOptions();
@@ -473,7 +471,6 @@ export class Requests implements OnInit, OnDestroy {
       this.hasBusinessAccess = Boolean(state.hasPaidAccess);
       this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
       this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
-      this.currentOrgId = this.normalizeId(state.orgId);
 
       this.canViewRequestCenter =
         !this.hasBusinessAccess || this.canRoleAccessRequests(this.currentMemberRole);
@@ -548,7 +545,19 @@ export class Requests implements OnInit, OnDestroy {
 
     if (bustCache) params.set('_', Date.now().toString());
 
-    if (!this.hasBusinessAccess) {
+    if (this.hasBusinessAccess) {
+      if (!this.currentBusinessProfileId) {
+        this.requests = [];
+        this.updateStats();
+        this.submitFeedback = {
+          type: 'error',
+          message: 'Business profile is missing. Refresh Business access and try again.'
+        };
+        this.cdr.detectChanges();
+        return;
+      }
+      params.set('filter[business_profile][_eq]', this.currentBusinessProfileId);
+    } else {
       const userId = this.getUserIdFromToken(token);
       if (!userId) {
         this.requests = [];

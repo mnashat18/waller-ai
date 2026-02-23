@@ -81,10 +81,23 @@
         </div>
 
         <div class="summary-grid">
+          <div><strong>ID</strong><br />{{ safeProfile('id') || '-' }}</div>
+          <div><strong>Owner User</strong><br />{{ safeProfile('owner_user') || '-' }}</div>
+          <div><strong>Source Request</strong><br />{{ safeProfile('source_request') || '-' }}</div>
           <div><strong>Company</strong><br />{{ safeProfile('company_name') || '-' }}</div>
           <div><strong>Business Name</strong><br />{{ safeProfile('business_name') || '-' }}</div>
+          <div><strong>Contact Name</strong><br />{{ safeProfile('contact_name') || '-' }}</div>
+          <div><strong>Work Email</strong><br />{{ safeProfile('work_email') || '-' }}</div>
+          <div><strong>Phone</strong><br />{{ safeProfile('phone') || '-' }}</div>
+          <div><strong>Industry</strong><br />{{ safeProfile('industry') || '-' }}</div>
+          <div><strong>Team Size</strong><br />{{ safeProfile('team_size') || '-' }}</div>
+          <div><strong>Country</strong><br />{{ safeProfile('country') || '-' }}</div>
+          <div><strong>City</strong><br />{{ safeProfile('city') || '-' }}</div>
+          <div><strong>Address</strong><br />{{ safeProfile('address') || '-' }}</div>
+          <div><strong>Website</strong><br />{{ safeProfile('website') || '-' }}</div>
           <div><strong>Plan Code</strong><br />{{ safeProfile('plan_code') || '-' }}</div>
-          <div><strong>Is Active</strong><br />{{ safeProfile('is_active') ? 'true' : 'false' }}</div>
+          <div><strong>Billing Status</strong><br />{{ safeProfile('billing_status') || '-' }}</div>
+          <div><strong>Is Active</strong><br />{{ formatBoolean(safeProfile('is_active')) }}</div>
           <div><strong>Trial Start</strong><br />{{ formatDate(safeProfile('trial_started_at')) }}</div>
           <div><strong>Trial Expires</strong><br />{{ formatDate(safeProfile('trial_expires_at')) }}</div>
         </div>
@@ -175,6 +188,7 @@
         <div class="panel-header">
           <h3 class="panel-title">3) Requests & Invites</h3>
           <span class="chip">requests: {{ requests.length }}</span>
+          <span class="chip">{{ hasOrgScope() ? 'Scope: org' : 'Scope: fallback' }}</span>
         </div>
 
         <div class="metrics-row">
@@ -182,6 +196,10 @@
           <span class="chip">Sent: {{ inviteMetrics.sent }}</span>
           <span class="chip">Claimed: {{ inviteMetrics.claimed }}</span>
           <span class="chip">Expired: {{ inviteMetrics.expired }}</span>
+        </div>
+
+        <div class="section-note" *ngIf="orgScopeNote">
+          {{ orgScopeNote }}
         </div>
 
         <ng-container *ngIf="canCreateRequestsFromCenter(); else inviteReadonlyState">
@@ -320,6 +338,7 @@
         <div class="panel-header">
           <h3 class="panel-title">4) Export Center</h3>
           <span class="chip">{{ reportExports.length }} exports</span>
+          <span class="chip">{{ hasOrgScope() ? 'Scope: org' : 'Scope: team/user' }}</span>
         </div>
 
         <div class="form-grid">
@@ -427,6 +446,7 @@
         <div class="panel-header">
           <h3 class="panel-title">5) Activity Log</h3>
           <span class="chip">{{ filteredActivityEvents.length }} events</span>
+          <span class="chip">{{ hasOrgScope() ? 'Scope: org' : 'Scope: team/audit' }}</span>
           <span class="chip" *ngIf="filteredActivityEvents.length !== activityEvents.length">
             total: {{ activityEvents.length }}
           </span>

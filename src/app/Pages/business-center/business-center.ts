@@ -61,7 +61,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   missingBusinessProfile = false;
 
   accessReason = '';
-  memberRoleLabel = 'User';
+  memberRoleLabel = '';
 
   canInvite = false;
   canUpgrade = false;
@@ -78,8 +78,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
 
   accessState: BusinessHubAccessState | null = null;
+  orgScopeNote = '';
 
-  // ✅ نخلي profile any عشان الـ template ما يقفش لو الـ interface ناقصة fields
+  // Keep profile loosely typed so template rendering stays safe on partial records.
   profile: any = null;
 
   teamMembers: any[] = [];
@@ -108,10 +109,10 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private currentMemberRole: BusinessMemberRole | null = null;
 
   readonly memberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [
+    { value: 'owner', label: 'Owner' },
     { value: 'admin', label: 'Admin' },
     { value: 'manager', label: 'Manager' },
-    { value: 'member', label: 'Member' },
-    { value: 'owner', label: 'Owner' }
+    { value: 'member', label: 'Member' }
   ];
   assignableMemberRoleOptions: Array<{ value: ManageTeamMemberRole; label: string }> = [];
 
@@ -183,8 +184,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   accessBadgeLabel(): string {
-    if (this.loadingAccess || this.hasBusinessAccess) {
-      return 'Plan: Business';
+    if (this.loadingAccess) {
+      return 'Plan: Loading...';
+    }
+    if (!this.profile) {
+      return 'Plan: -';
     }
 
     const plan = (this.profile?.plan_code ?? 'free').toString().trim().toLowerCase();
@@ -192,7 +196,33 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   roleBadgeLabel(): string {
-    return `Role: ${this.memberRoleLabel}`;
+    if (this.loadingAccess) {
+      return 'Role: Loading...';
+    }
+    return `Role: ${this.memberRoleLabel || '-'}`;
+  }
+
+  hasOrgScope(): boolean {
+    return Boolean(this.pickId(this.accessState?.orgId));
+  }
+
+  formatBoolean(value: unknown): string {
+    if (typeof value === 'boolean') {
+      return value ? 'true' : 'false';
+    }
+    if (typeof value === 'number') {
+      return value === 1 ? 'true' : value === 0 ? 'false' : '-';
+    }
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+        return 'true';
+      }
+      if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+        return 'false';
+      }
+    }
+    return '-';
   }
 
   trialBadgeLabel(): string {
@@ -296,7 +326,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.upgradeSubmitting = true;
     this.showFeedback('info', 'Submitting upgrade request...');
 
-    this.businessCenter.submitUpgradeRequest(orgId).pipe(
+    this.businessCenter.submitUpgradeRequest(orgId, {
+      profile: this.profile
+    }).pipe(
       finalize(() => (this.upgradeSubmitting = false))
     ).subscribe((res: any) => {
       this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Upgrade request finished.');
@@ -593,7 +625,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       );
     }, this.actionTimeoutMs + 1500);
 
-    this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
+    this.businessCenter.upsertTeamMember(profileId, email, role, this.currentMemberRole).pipe(
       timeout(this.actionTimeoutMs),
       catchError((err) =>
         of({
@@ -622,6 +654,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private loadAccessState(): void {
     this.loadingAccess = true;
     this.missingBusinessProfile = false;
+    this.orgScopeNote = '';
+    this.memberRoleLabel = '';
 
     let accessState$: Observable<BusinessHubAccessState>;
     try {
@@ -684,9 +718,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.accessReason = (state as any)?.reason || '';
 
       const role = ((state as any)?.memberRole ?? '').toString();
-      this.memberRoleLabel = this.toTitleCase(role) || 'User';
+      this.memberRoleLabel = this.toTitleCase(role) || (this.profile ? 'Unknown' : '-');
       this.currentMemberRole = this.normalizeBusinessRole((state as any)?.memberRole);
       this.syncAssignableMemberRoleOptions();
+      this.orgScopeNote = this.hasOrgScope()
+        ? ''
+        : 'org_id is missing. Request invites are not available; exports and activity use team/user fallback scope.';
 
       const perms = (state as any)?.permissions ?? {};
       this.canInvite = Boolean(perms.canInvite);

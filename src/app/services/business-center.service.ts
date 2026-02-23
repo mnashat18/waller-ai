@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, forkJoin, of } from 'rxjs';
-import { catchError, map, switchMap, timeout } from 'rxjs/operators';
+import { catchError, map, switchMap, tap, timeout } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
 
 export type ActionResult = {
@@ -44,6 +44,13 @@ export type BusinessMemberRole = 'owner' | 'admin' | 'manager' | 'member' | 'vie
 
 export type ManageTeamMemberRole = 'owner' | 'admin' | 'manager' | 'member';
 
+export type BusinessUpgradeRequestStatus =
+  | 'Pending'
+  | 'Approved'
+  | 'Rejected'
+  | 'Needs_Info'
+  | 'Canceled';
+
 export type BusinessRolePermissions = {
   canInvite: boolean;
   canUpgrade: boolean;
@@ -57,6 +64,9 @@ export type RequestRecord = {
   target: string;
   recipient: string;
   requested_for_email?: string | null;
+  requested_by_user?: string | null;
+  requested_for_user?: string | null;
+  business_profile?: string | null;
   recipient_industry?: string | null;
   required_state: string;
   response_status: string;
@@ -142,6 +152,18 @@ type AccessContext = {
   orgId: string | null;
 };
 
+export type SubmitUpgradeRequestInput = {
+  profile?: BusinessProfile | null;
+  requestedPlan?: string | null;
+  currentPlan?: string | null;
+  billingCycle?: string | null;
+  notes?: string | null;
+  basePriceUsd?: number | null;
+  discountUsd?: number | null;
+  finalPriceUsd?: number | null;
+  isNewUserOffer?: boolean | null;
+};
+
 export type ActivityQueryOptions = {
   teamUserIds?: string[];
   teamUserEmails?: string[];
@@ -152,12 +174,25 @@ export class BusinessCenterService {
   private api = environment.API_URL;
   private readonly requestTimeoutMs = 15000;
   readonly dailyRequestLimit = 5;
+  private lastHubAccessState: BusinessHubAccessState | null = null;
 
   constructor(private http: HttpClient) {}
 
   getHubAccessState(): Observable<BusinessHubAccessState> {
     const access = this.getAccessContext();
+    this.debug('getHubAccessState:start', {
+      hasToken: Boolean(access.token),
+      userId: access.userId,
+      orgId: access.orgId
+    });
+
     return this.resolveAccessContext(access).pipe(
+      tap((resolved) =>
+        this.debug('getHubAccessState:resolvedAccess', {
+          userId: resolved.userId,
+          orgId: resolved.orgId
+        })
+      ),
       switchMap((resolved) => {
         if (!resolved.userId) {
           return of({
@@ -176,13 +211,30 @@ export class BusinessCenterService {
 
         return this.fetchOwnedProfile(resolved.userId as string, resolved.token).pipe(
           switchMap((ownedProfile) => {
+            this.debug('getHubAccessState:ownedProfileLookup', {
+              userId: resolved.userId,
+              found: Boolean(ownedProfile?.id),
+              profileId: ownedProfile?.id ?? null
+            });
+
             if (ownedProfile) {
               return of({
                 profile: ownedProfile,
                 membership: null
               });
             }
-            return this.fetchMemberProfile(resolved.userId as string, resolved.token);
+
+            return this.fetchMemberProfile(resolved.userId as string, resolved.token).pipe(
+              tap(({ profile, membership }) =>
+                this.debug('getHubAccessState:membershipLookup', {
+                  userId: resolved.userId,
+                  membershipFound: Boolean(membership?.id),
+                  membershipRole: membership?.member_role ?? null,
+                  membershipStatus: membership?.status ?? null,
+                  profileId: profile?.id ?? null
+                })
+              )
+            );
           }),
           map(({ profile, membership }) =>
             this.buildAccessState(resolved, profile, membership)
@@ -216,7 +268,19 @@ export class BusinessCenterService {
           trialExpiresAt: null,
           reason: this.toFriendlyError(err, 'Failed to verify Business access.')
         })
-      )
+      ),
+      tap((state) => {
+        this.lastHubAccessState = state;
+        this.debug('getHubAccessState:result', {
+          userId: state.userId,
+          orgId: state.orgId,
+          profileId: state.profile?.id ?? null,
+          memberRole: state.memberRole,
+          hasPaidAccess: state.hasPaidAccess,
+          permissions: state.permissions,
+          reason: state.reason
+        });
+      })
     );
   }
 
@@ -276,11 +340,13 @@ export class BusinessCenterService {
   upsertTeamMember(
     profileId: string | null,
     userEmail: string,
-    role: ManageTeamMemberRole
+    role: ManageTeamMemberRole,
+    actorRole?: BusinessMemberRole | null
   ): Observable<ActionResult> {
     const access = this.getAccessContext();
     const normalizedProfileId = this.normalizeId(profileId);
     const normalizedEmail = this.pickString(userEmail)?.toLowerCase() ?? null;
+    const normalizedActorRole = this.normalizeBusinessMemberRole(actorRole);
 
     if (!normalizedProfileId) {
       return of({ ok: false, message: 'Business profile is missing.' });
@@ -290,6 +356,15 @@ export class BusinessCenterService {
     }
 
     const backendRole = this.mapManagedRole(role);
+    if (normalizedActorRole && !this.resolvePermissions(normalizedActorRole).canManageMembers) {
+      return of({ ok: false, message: 'Your role cannot manage team members.' });
+    }
+    if (normalizedActorRole && !this.isRoleAssignableByActor(normalizedActorRole, backendRole)) {
+      return of({
+        ok: false,
+        message: 'Your role cannot assign this member role.'
+      });
+    }
 
     return this.findUserIdByEmail(normalizedEmail, access.token).pipe(
       switchMap((userId) => {
@@ -317,21 +392,33 @@ export class BusinessCenterService {
     );
   }
 
-  listRequests(orgId: string | null, limit = 60): Observable<RequestRecord[]> {
+  listRequests(_businessProfileHint: string | null, limit = 60): Observable<RequestRecord[]> {
     const access = this.getAccessContext();
     if (!access.token && !access.userId) {
       return of([]);
     }
 
-    const source$ = orgId
-      ? this.fetchRequestsByOrg(orgId, limit, access.token).pipe(
-          catchError(() => this.fetchRequestsVisible(limit, access.token))
-        )
-      : this.fetchRequestsVisible(limit, access.token);
+    return this.resolveRequestScope().pipe(
+      switchMap((scope) => {
+        if (scope.hasBusinessAccess) {
+          if (!scope.businessProfileId) {
+            this.debug('listRequests:missingBusinessProfile', {
+              userId: scope.userId
+            });
+            return of([] as RequestRecord[]);
+          }
+          return this.fetchRequestsByBusinessProfile(scope.businessProfileId, limit, access.token);
+        }
 
-    return source$.pipe(
+        if (!scope.userId) {
+          return of([] as RequestRecord[]);
+        }
+
+        return this.fetchRequestsByRequestedUser(scope.userId, limit, access.token);
+      }),
       map((rows) => this.mergeRequestsById(rows)),
-      switchMap((rows) => this.attachRecipientIndustries(rows, access.token))
+      switchMap((rows) => this.attachRecipientIndustries(rows, access.token)),
+      catchError(() => of([]))
     );
   }
 
@@ -361,7 +448,7 @@ export class BusinessCenterService {
 
   createScanRequest(
     payload: CreateScanRequestPayload,
-    _orgId?: string | null
+    _businessProfileHint?: string | null
   ): Observable<CreateScanRequestResult> {
     const access = this.getAccessContext();
     if (!access.token && !access.userId) {
@@ -378,15 +465,136 @@ export class BusinessCenterService {
       return of({ ok: false, message: 'Required state is missing.' });
     }
 
-    const body: CreateScanRequestPayload = {
-      requested_for_email: requestedForEmail,
-      required_state: requiredState
-    };
+    return this.resolveRequestScope().pipe(
+      switchMap((scope) => {
+        const requestedByUser = this.normalizeId(scope.userId ?? access.userId);
+        if (!requestedByUser) {
+          return of({
+            ok: false,
+            message: 'Failed to resolve the current user context. Please sign in again.'
+          } as CreateScanRequestResult);
+        }
 
+        if (scope.hasBusinessAccess && !scope.businessProfileId) {
+          return of({
+            ok: false,
+            message: 'Business profile is missing for this account. Please refresh and try again.'
+          } as CreateScanRequestResult);
+        }
+
+        const body: Record<string, unknown> = {
+          requested_for_email: requestedForEmail,
+          required_state: requiredState,
+          requested_by_user: requestedByUser
+        };
+        if (scope.hasBusinessAccess) {
+          body['business_profile'] = scope.businessProfileId;
+        }
+
+        this.debug('createScanRequest:payload', {
+          requestedByUser,
+          businessProfileId: scope.businessProfileId,
+          hasBusinessAccess: scope.hasBusinessAccess,
+          requestedForEmail
+        });
+
+        return this.postRequestWithRetry(body, access.token);
+      })
+    );
+  }
+
+  private fetchRequestsByBusinessProfile(
+    businessProfileId: string,
+    limit: number,
+    token: string | null
+  ): Observable<RequestRecord[]> {
+    const params = this.buildRequestsParams(limit);
+    params.set('filter[business_profile][_eq]', businessProfileId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+      catchError(() => of([]))
+    );
+  }
+
+  private fetchRequestsByRequestedUser(
+    userId: string,
+    limit: number,
+    token: string | null
+  ): Observable<RequestRecord[]> {
+    const params = this.buildRequestsParams(limit);
+    params.set('filter[requested_for_user][_eq]', userId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+      catchError(() => of([]))
+    );
+  }
+
+  private buildRequestsParams(limit: number): URLSearchParams {
+    return new URLSearchParams({
+      sort: '-timestamp',
+      limit: String(limit),
+      fields: [
+        'id',
+        'business_profile',
+        'requested_by_user',
+        'requested_for_user',
+        'required_state',
+        'response_status',
+        'timestamp',
+        'requested_for_email',
+        'requested_for_phone'
+      ].join(',')
+    });
+  }
+
+  private resolveRequestScope(): Observable<{
+    userId: string | null;
+    hasBusinessAccess: boolean;
+    businessProfileId: string | null;
+  }> {
+    const cachedState = this.lastHubAccessState;
+    if (cachedState) {
+      return of({
+        userId: this.normalizeId(cachedState.userId),
+        hasBusinessAccess: Boolean(cachedState.hasPaidAccess),
+        businessProfileId: this.normalizeId(cachedState.profile?.id)
+      });
+    }
+
+    const access = this.getAccessContext();
+    return this.getHubAccessState().pipe(
+      timeout(this.requestTimeoutMs),
+      map((state) => ({
+        userId: this.normalizeId(state.userId ?? access.userId),
+        hasBusinessAccess: Boolean(state.hasPaidAccess),
+        businessProfileId: this.normalizeId(state.profile?.id)
+      })),
+      catchError(() =>
+        of({
+          userId: this.normalizeId(access.userId),
+          hasBusinessAccess: false,
+          businessProfileId: null
+        })
+      )
+    );
+  }
+
+  private postRequestWithRetry(
+    body: Record<string, unknown>,
+    token: string | null
+  ): Observable<CreateScanRequestResult> {
     return this.http.post<{ data?: { id?: unknown } }>(
       `${this.api}/items/requests`,
       body,
-      this.requestOptions(access.token)
+      this.requestOptions(token)
     ).pipe(
       timeout(this.requestTimeoutMs),
       map((res) => ({
@@ -405,7 +613,7 @@ export class BusinessCenterService {
         return this.http.post<{ data?: { id?: unknown } }>(
           `${this.api}/items/requests`,
           body,
-          this.requestOptions(access.token)
+          this.requestOptions(token)
         ).pipe(
           timeout(this.requestTimeoutMs),
           map((res) => ({
@@ -417,7 +625,7 @@ export class BusinessCenterService {
             this.http.post<{ data?: { id?: unknown } }>(
               `${this.api}/items/requests`,
               body,
-              this.requestOptions(access.token)
+              this.requestOptions(token)
             ).pipe(
               timeout(this.requestTimeoutMs),
               map((res) => ({
@@ -436,53 +644,6 @@ export class BusinessCenterService {
         );
       })
     );
-  }
-
-  private fetchRequestsByOrg(
-    orgId: string,
-    limit: number,
-    token: string | null
-  ): Observable<RequestRecord[]> {
-    const params = this.buildRequestsParams(limit);
-    params.set('filter[_or][0][org_id][_eq]', orgId);
-    params.set('filter[_or][1][requested_by_org][_eq]', orgId);
-
-    return this.http.get<{ data?: any[] }>(
-      `${this.api}/items/requests?${params.toString()}`,
-      this.requestOptions(token)
-    ).pipe(
-      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row)))
-    );
-  }
-
-  private fetchRequestsVisible(
-    limit: number,
-    token: string | null
-  ): Observable<RequestRecord[]> {
-    const params = this.buildRequestsParams(limit);
-
-    return this.http.get<{ data?: any[] }>(
-      `${this.api}/items/requests?${params.toString()}`,
-      this.requestOptions(token)
-    ).pipe(
-      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
-      catchError(() => of([]))
-    );
-  }
-
-  private buildRequestsParams(limit: number): URLSearchParams {
-    return new URLSearchParams({
-      sort: '-timestamp',
-      limit: String(limit),
-      fields: [
-        'id',
-        'required_state',
-        'response_status',
-        'timestamp',
-        'requested_for_email',
-        'requested_for_phone'
-      ].join(',')
-    });
   }
 
   private mergeRequestsById(rows: RequestRecord[]): RequestRecord[] {
@@ -887,20 +1048,53 @@ export class BusinessCenterService {
     ].join(',');
   }
 
-  submitUpgradeRequest(orgId: string | null): Observable<ActionResult> {
+  submitUpgradeRequest(orgId: string | null, input?: SubmitUpgradeRequestInput): Observable<ActionResult> {
     const access = this.getAccessContext();
     if (!access.userId) {
       return of({ ok: false, message: 'Please sign in first.' });
     }
+
+    const profile = this.normalizeProfile(input?.profile);
+    const requestedPlan = this.pickString(input?.requestedPlan) ?? 'business';
+    const currentPlan = this.pickString(input?.currentPlan) ?? profile?.plan_code ?? null;
 
     const primary: Record<string, unknown> = {
       requested_by_user: access.userId,
       requested_at: new Date().toISOString(),
       status: 'Pending'
     };
+    this.assignString(primary, 'requested_plan', requestedPlan);
+    this.assignString(primary, 'current_plan', currentPlan);
+    this.assignString(primary, 'billing_cycle', input?.billingCycle);
+    this.assignString(primary, 'notes', input?.notes);
+    this.assignNumber(primary, 'base_price_usd', input?.basePriceUsd);
+    this.assignNumber(primary, 'discount_usd', input?.discountUsd);
+    this.assignNumber(primary, 'final_price_usd', input?.finalPriceUsd);
+    this.assignBoolean(primary, 'is_new_user_offer', input?.isNewUserOffer);
+
+    if (profile) {
+      this.assignString(primary, 'company_name', profile.company_name);
+      this.assignString(primary, 'business_name', profile.business_name);
+      this.assignString(primary, 'contact_name', profile.contact_name);
+      this.assignString(primary, 'work_email', profile.work_email);
+      this.assignString(primary, 'phone', profile.phone);
+      this.assignString(primary, 'industry', profile.industry);
+      this.assignString(primary, 'team_size', profile.team_size);
+      this.assignString(primary, 'country', profile.country);
+      this.assignString(primary, 'city', profile.city);
+      this.assignString(primary, 'website', profile.website);
+      this.assignString(primary, 'address', profile.address);
+    }
     if (orgId) {
       primary['org_id'] = orgId;
     }
+
+    this.debug('submitUpgradeRequest:payload', {
+      userId: access.userId,
+      orgId,
+      profileId: profile?.id ?? null,
+      fields: Object.keys(primary)
+    });
 
     return this.http.post(
       `${this.api}/items/business_upgrade_requests`,
@@ -918,7 +1112,11 @@ export class BusinessCenterService {
 
         return this.http.post(
           `${this.api}/items/business_upgrade_requests`,
-          { requested_by_user: access.userId },
+          {
+            requested_by_user: access.userId,
+            requested_at: primary['requested_at'],
+            status: 'Pending'
+          },
           this.requestOptions(access.token)
         ).pipe(
           map(() => ({ ok: true, message: 'Upgrade request submitted successfully.' })),
@@ -988,6 +1186,19 @@ export class BusinessCenterService {
         'user.first_name',
         'user.last_name',
         'business_profile.id',
+        'business_profile.owner_user',
+        'business_profile.source_request',
+        'business_profile.company_name',
+        'business_profile.business_name',
+        'business_profile.contact_name',
+        'business_profile.work_email',
+        'business_profile.phone',
+        'business_profile.industry',
+        'business_profile.team_size',
+        'business_profile.country',
+        'business_profile.city',
+        'business_profile.address',
+        'business_profile.website',
         'business_profile.plan_code',
         'business_profile.billing_status',
         'business_profile.trial_started_at',
@@ -1079,6 +1290,20 @@ export class BusinessCenterService {
       }
     }
 
+    this.debug('buildAccessState:evaluation', {
+      userId: access.userId,
+      orgId,
+      profileId: profile.id,
+      plan_code: profile.plan_code ?? null,
+      billing_status: profile.billing_status ?? null,
+      is_active: profile.is_active ?? null,
+      trial_expires_at: trialExpiresAt,
+      paidActive,
+      trialActive,
+      memberRole,
+      permissions
+    });
+
     return {
       userId: access.userId,
       orgId,
@@ -1140,6 +1365,9 @@ export class BusinessCenterService {
       target: 'scan',
       recipient: this.requestRecipient(raw),
       requested_for_email: requestedForEmail,
+      requested_by_user: this.normalizeId(raw?.requested_by_user),
+      requested_for_user: this.normalizeId(raw?.requested_for_user),
+      business_profile: this.normalizeId(raw?.business_profile),
       recipient_industry: null,
       required_state: this.pickString(raw?.required_state) ?? 'Unknown',
       response_status: this.pickString(raw?.response_status) ?? 'Pending',
@@ -1411,15 +1639,35 @@ export class BusinessCenterService {
     return headers ? { headers, withCredentials: true } : { withCredentials: true };
   }
 
+  private readStoredAccessContext(): { userId: string | null; orgId: string | null } {
+    if (typeof localStorage === 'undefined') {
+      return { userId: null, orgId: null };
+    }
+
+    return {
+      userId: this.normalizeId(localStorage.getItem('current_user_id')),
+      orgId: this.normalizeId(localStorage.getItem('current_user_org_id'))
+    };
+  }
+
   private getAccessContext(): AccessContext {
     const token = this.getToken();
+    const stored = this.readStoredAccessContext();
     const payload = token ? this.decodeJwtPayload(token) : null;
-    const userIdValue = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
+    const userIdValue =
+      payload?.['id'] ??
+      payload?.['user_id'] ??
+      payload?.['sub'] ??
+      payload?.['user'] ??
+      payload?.['userId'] ??
+      stored.userId;
     const orgIdValue =
       payload?.['org_id'] ??
       payload?.['organization_id'] ??
       payload?.['org'] ??
-      payload?.['organization'];
+      payload?.['organization'] ??
+      payload?.['organizationId'] ??
+      stored.orgId;
     return {
       token,
       userId: this.normalizeId(userIdValue),
@@ -1428,37 +1676,50 @@ export class BusinessCenterService {
   }
 
   private resolveAccessContext(access: AccessContext): Observable<AccessContext> {
-    if (!access.token) {
-      return of(access);
-    }
+    const stored = this.readStoredAccessContext();
+    const fallback: AccessContext = {
+      token: access.token,
+      userId: access.userId ?? stored.userId,
+      orgId: access.orgId ?? stored.orgId
+    };
 
-    if (access.userId && access.orgId) {
-      return of(access);
+    if (!access.token) {
+      return of(fallback);
     }
 
     return this.resolveCurrentUserFromSession(access.token).pipe(
       map((resolved) => ({
-        token: access.token,
-        userId: resolved.userId ?? access.userId,
-        orgId: resolved.orgId ?? access.orgId
+        token: fallback.token,
+        userId: resolved.userId ?? fallback.userId,
+        orgId: resolved.orgId ?? fallback.orgId
       })),
-      catchError(() => of(access))
+      catchError((err) => {
+        this.debug('resolveAccessContext:fallback', {
+          status: err?.status ?? null,
+          reason: this.readError(err, ''),
+          userId: fallback.userId,
+          orgId: fallback.orgId
+        });
+        return of(fallback);
+      })
     );
   }
 
   private resolveCurrentUserFromSession(token: string | null): Observable<{ userId: string | null; orgId: string | null }> {
+    const stored = this.readStoredAccessContext();
+
     return this.http.get<any>(
-    `${this.api}/users/me?fields=id,org_id,organization_id,organization.id&_=${Date.now()}`,
-    this.requestOptions(token)
+      `${this.api}/users/me?fields=id,org_id,organization_id,organization.id&_=${Date.now()}`,
+      this.requestOptions(token)
     ).pipe(
       map((res) => {
         const user = res?.data ?? res ?? {};
-        const userId = this.normalizeId(user?.id);
+        const userId = this.normalizeId(user?.id) ?? stored.userId;
         const orgId = this.normalizeId(
           user?.org_id ??
           user?.organization_id ??
           user?.organization?.id
-        );
+        ) ?? stored.orgId;
 
         if (typeof localStorage !== 'undefined') {
           if (userId) {
@@ -1471,9 +1732,22 @@ export class BusinessCenterService {
           }
         }
 
+        this.debug('resolveCurrentUserFromSession:resolved', {
+          userId,
+          orgId
+        });
+
         return { userId, orgId };
       }),
-      catchError(() => of({ userId: null, orgId: null }))
+      catchError((err) => {
+        this.debug('resolveCurrentUserFromSession:fallback', {
+          status: err?.status ?? null,
+          reason: this.readError(err, ''),
+          userId: stored.userId,
+          orgId: stored.orgId
+        });
+        return of({ userId: stored.userId, orgId: stored.orgId });
+      })
     );
   }
 
@@ -1738,6 +2012,27 @@ export class BusinessCenterService {
     return null;
   }
 
+  private assignString(target: Record<string, unknown>, key: string, value: unknown): void {
+    const normalized = this.pickString(value);
+    if (normalized !== null) {
+      target[key] = normalized;
+    }
+  }
+
+  private assignNumber(target: Record<string, unknown>, key: string, value: unknown): void {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return;
+    }
+    target[key] = value;
+  }
+
+  private assignBoolean(target: Record<string, unknown>, key: string, value: unknown): void {
+    if (typeof value !== 'boolean') {
+      return;
+    }
+    target[key] = value;
+  }
+
   private normalizeId(value: unknown): string | null {
     if (typeof value === 'string' && value.trim()) {
       return value;
@@ -1791,6 +2086,25 @@ export class BusinessCenterService {
       return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'active';
     }
     return false;
+  }
+
+  private isDebugEnabled(): boolean {
+    if (typeof localStorage === 'undefined') {
+      return false;
+    }
+    const raw = (localStorage.getItem('business_center_debug') ?? '').trim().toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+  }
+
+  private debug(message: string, details?: unknown): void {
+    if (!this.isDebugEnabled()) {
+      return;
+    }
+    if (details === undefined) {
+      console.debug(`[BusinessCenter] ${message}`);
+      return;
+    }
+    console.debug(`[BusinessCenter] ${message}`, details);
   }
 
   private resolveMemberRole(
@@ -1873,6 +2187,27 @@ export class BusinessCenterService {
       canUseSystem: false,
       isReadOnly: true
     };
+  }
+
+  private normalizeBusinessMemberRole(value: unknown): BusinessMemberRole | null {
+    const raw = this.readString(value).toLowerCase();
+    if (raw === 'owner' || raw === 'admin' || raw === 'manager' || raw === 'member' || raw === 'viewer') {
+      return raw;
+    }
+    return null;
+  }
+
+  private isRoleAssignableByActor(
+    actorRole: BusinessMemberRole,
+    targetRole: BusinessMemberRole
+  ): boolean {
+    if (actorRole === 'owner') {
+      return true;
+    }
+    if (actorRole === 'admin') {
+      return targetRole !== 'owner';
+    }
+    return false;
   }
 
   private pickBestOwnedProfile(rows: any[]): BusinessProfile | null {
@@ -1999,4 +2334,3 @@ export class BusinessCenterService {
     return '';
   }
 }
-
