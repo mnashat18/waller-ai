@@ -146,7 +146,6 @@ export class Requests implements OnInit {
       limit: '50',
       fields: [
         'id',
-        'target',
         'Target',
         'requested_for_user.id',
         'requested_for_user.first_name',
@@ -231,7 +230,6 @@ export class Requests implements OnInit {
         const params = new URLSearchParams({
           fields: [
             'id',
-            'target',
             'Target',
             'requested_for_email',
             'required_state',
