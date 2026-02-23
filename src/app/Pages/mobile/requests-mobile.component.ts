@@ -1,17 +1,15 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { ActivatedRoute, RouterModule } from '@angular/router';
-import { forkJoin, of, throwError } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { RouterModule } from '@angular/router';
+import { of, throwError } from 'rxjs';
+import { map } from 'rxjs/operators';
 import {
-  CreateRequestForm,
+  type CreateRequestForm,
   CreateRequestModalComponent,
-  RequestTarget,
-  SubmitFeedback
+  type RequestTarget,
+  type SubmitFeedback
 } from '../../components/create-request-modal/create-request-modal';
-import { AdminTokenService } from '../../services/admin-token';
-import { Organization, OrganizationService } from '../../services/organization.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import { environment } from 'src/environments/environment';
@@ -29,7 +27,6 @@ export class RequestsMobileComponent implements OnInit {
   submitFeedback: SubmitFeedback | null = null;
   submittingRequest = false;
   showPermissionNotice = false;
-  isAdminUser = false;
   hasBusinessAccess = false;
   canCreateRequests = false;
   currentPlanName = 'Free';
@@ -38,26 +35,17 @@ export class RequestsMobileComponent implements OnInit {
   trialDaysRemaining: number | null = null;
   businessTrialNotice = '';
   businessInviteTrialNotice = '';
-  org: Organization | null = null;
-  requestedByDefault = '';
   readonly fixedRequestTarget: RequestTarget = 'scan';
-  pendingCreateModal = false;
   requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
 
   constructor(
     private http: HttpClient,
-    private adminTokens: AdminTokenService,
-    private route: ActivatedRoute,
     private subscriptionService: SubscriptionService,
-    private organizationService: OrganizationService,
     private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
-    this.isAdminUser = this.checkAdminAccess();
     this.loadPlanAccess();
-    this.loadOrganization();
-    this.openCreateFromQuery();
   }
 
   badgeClass(state: string): string {
@@ -77,7 +65,6 @@ export class RequestsMobileComponent implements OnInit {
     }
 
     const requestedFor = this.normalizeEmail(form.requestedFor);
-
     if (!requestedFor) {
       this.submitFeedback = { type: 'error', message: 'Enter a valid recipient email.' };
       this.cdr.detectChanges();
@@ -149,89 +136,84 @@ export class RequestsMobileComponent implements OnInit {
     this.cdr.detectChanges();
   }
 
+  private loadPlanAccess() {
+    this.loadingPlanAccess = true;
+    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
+      next: (snapshot) => {
+        this.hasBusinessAccess = snapshot.hasBusinessAccess;
+        this.currentPlanName = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+        this.currentPlanCode = snapshot.planCode || 'free';
+        this.isBusinessTrial = snapshot.isBusinessTrial;
+        this.trialDaysRemaining =
+          typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
+        this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
+        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
+        this.canCreateRequests = snapshot.hasBusinessAccess;
+        this.loadingPlanAccess = false;
+        this.loadRequests();
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.hasBusinessAccess = false;
+        this.canCreateRequests = false;
+        this.submitFeedback = {
+          type: 'error',
+          message: this.describeHttpError(err, 'Failed to load plan access.')
+        };
+        this.loadingPlanAccess = false;
+        this.loadRequests();
+        this.cdr.detectChanges();
+      }
+    });
+  }
+
   private loadRequests() {
-    if (this.canViewOrgRequests()) {
-      this.loadOrgScopedRequests();
+    if (this.hasBusinessAccess) {
+      this.loadBusinessRequests();
       return;
     }
 
-    this.loadUserScopedRequests();
+    this.loadIncomingRequests();
   }
 
-  private loadOrgScopedRequests() {
-    const orgId = this.resolveOrgId();
-    if (!orgId) {
-      this.loadUserScopedRequests();
-      return;
-    }
-
-    if (this.isAdminUser) {
-      this.adminTokens.getToken().subscribe({
-        next: (adminToken) => {
-          const token = adminToken ?? this.getUserToken();
-          this.fetchRequests(token, { orgId }).subscribe({
-            next: (requests) => this.applyRequests(requests),
-            error: (err) => console.error('[requests-mobile] requests error:', err)
-          });
-        },
-        error: (err) => console.error('[requests-mobile] admin token error:', err)
-      });
-      return;
-    }
-
-    const userToken = this.getUserToken();
-    if (!userToken) {
+  private loadBusinessRequests() {
+    const token = this.getUserToken();
+    if (!token) {
       this.requests = [];
       this.requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
       this.cdr.detectChanges();
       return;
     }
 
-    this.fetchRequests(userToken, { orgId }).subscribe({
+    this.fetchRequests(token, null).subscribe({
       next: (requests) => this.applyRequests(requests),
       error: (fetchErr) => console.error('[requests-mobile] requests error:', fetchErr)
     });
   }
 
-  private loadUserScopedRequests() {
-    const userToken = this.getUserToken();
-    const userId = this.getUserIdFromToken(userToken);
+  private loadIncomingRequests() {
+    const token = this.getUserToken();
+    const userId = this.getUserIdFromToken(token);
 
-    if (!userToken || !userId) {
+    if (!token || !userId) {
       this.requests = [];
       this.requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
       this.cdr.detectChanges();
       return;
     }
 
-    forkJoin({
-      incoming: this.fetchRequests(userToken, { requestedForUserId: userId }).pipe(
-        catchError((err) => {
-          console.error('[requests-mobile] incoming requests error:', err);
-          return of([] as RequestRecord[]);
-        })
-      ),
-      outgoing: this.fetchRequests(userToken, { requestedByUserId: userId }).pipe(
-        catchError((err) => {
-          console.error('[requests-mobile] outgoing requests error:', err);
-          return of([] as RequestRecord[]);
-        })
-      )
-    }).pipe(
-      map(({ incoming, outgoing }) => this.mergeUniqueRequests([...incoming, ...outgoing]))
-    ).subscribe({
+    this.fetchRequests(token, { requestedForUserId: userId }).subscribe({
       next: (requests) => this.applyRequests(requests),
-      error: (fetchErr) => console.error('[requests-mobile] requests error:', fetchErr)
+      error: (fetchErr) => {
+        console.error('[requests-mobile] incoming requests error:', fetchErr);
+        this.applyRequests([]);
+      }
     });
-  }
-
-  private canViewOrgRequests(): boolean {
-    return this.isAdminUser || this.hasBusinessAccess;
   }
 
   private fetchRequests(
     token: string | null,
-    filters: { requestedForUserId?: string; requestedByUserId?: string; orgId?: string } | null
+    filters: { requestedForUserId?: string } | null
   ) {
     const headers = this.buildAuthHeaders(token);
     if (!headers) {
@@ -242,7 +224,6 @@ export class RequestsMobileComponent implements OnInit {
       'id',
       'target',
       'Target',
-      'org_id',
       'requested_by_user.id',
       'requested_by_user.email',
       'requested_by_user.first_name',
@@ -253,9 +234,6 @@ export class RequestsMobileComponent implements OnInit {
       'requested_for_user.last_name',
       'requested_for_email',
       'requested_for_phone',
-      'requested_by_org',
-      'requested_by_org.id',
-      'requested_by_org.name',
       'required_state',
       'response_status',
       'timestamp'
@@ -266,16 +244,8 @@ export class RequestsMobileComponent implements OnInit {
       fields
     });
 
-    if (filters?.orgId) {
-      params.set('filter[_or][0][org_id][_eq]', filters.orgId);
-      params.set('filter[_or][1][requested_by_org][_eq]', filters.orgId);
-    } else {
-      if (filters?.requestedForUserId) {
-        params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
-      }
-      if (filters?.requestedByUserId) {
-        params.set('filter[requested_by_user][_eq]', filters.requestedByUserId);
-      }
+    if (filters?.requestedForUserId) {
+      params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
     }
 
     return this.http.get<{ data?: RequestRecord[] }>(
@@ -284,34 +254,6 @@ export class RequestsMobileComponent implements OnInit {
     ).pipe(
       map(res => res.data ?? [])
     );
-  }
-
-  private mergeUniqueRequests(requests: RequestRecord[]): RequestRecord[] {
-    const mapById = new Map<string, RequestRecord>();
-    const withoutId: RequestRecord[] = [];
-
-    for (const request of requests) {
-      const id = typeof request.id === 'string' ? request.id : '';
-      if (!id) {
-        withoutId.push(request);
-        continue;
-      }
-      if (!mapById.has(id)) {
-        mapById.set(id, request);
-      }
-    }
-
-    return [...mapById.values(), ...withoutId].sort(
-      (a, b) => this.toTimestampValue(b.timestamp) - this.toTimestampValue(a.timestamp)
-    );
-  }
-
-  private toTimestampValue(value: string | number | Date | undefined): number {
-    if (!value) {
-      return 0;
-    }
-    const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
-    return Number.isNaN(time) ? 0 : time;
   }
 
   private applyRequests(requests: RequestRecord[]) {
@@ -394,13 +336,6 @@ export class RequestsMobileComponent implements OnInit {
     return new HttpHeaders({ Authorization: `Bearer ${token}` });
   }
 
-  private checkAdminAccess(): boolean {
-    const token = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
-    if (!token) return false;
-    const payload = this.decodeJwtPayload(token);
-    return payload?.['admin_access'] === true;
-  }
-
   private decodeJwtPayload(token: string): Record<string, unknown> | null {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -436,54 +371,6 @@ export class RequestsMobileComponent implements OnInit {
     } catch {
       return false;
     }
-  }
-
-  private loadPlanAccess() {
-    this.loadingPlanAccess = true;
-    this.subscriptionService.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe({
-      next: (snapshot) => {
-        this.hasBusinessAccess = snapshot.hasBusinessAccess;
-        this.currentPlanName = snapshot.hasBusinessAccess || this.isAdminUser ? 'Business' : 'Free';
-        this.currentPlanCode = snapshot.planCode || 'free';
-        this.isBusinessTrial = snapshot.isBusinessTrial;
-        this.trialDaysRemaining =
-          typeof snapshot.daysRemaining === 'number' ? snapshot.daysRemaining : null;
-        this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-        this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
-        this.canCreateRequests = snapshot.hasBusinessAccess || this.isAdminUser;
-        if (!this.requestedByDefault) {
-          this.requestedByDefault = this.currentPlanName;
-        }
-        if (this.pendingCreateModal) {
-          this.openCreateModal();
-        }
-        this.loadingPlanAccess = false;
-        this.loadRequests();
-        this.cdr.detectChanges();
-      },
-      error: (err) => {
-        this.hasBusinessAccess = false;
-        this.canCreateRequests = this.isAdminUser;
-        this.submitFeedback = {
-          type: 'error',
-          message: this.describeHttpError(err, 'Failed to load plan access.')
-        };
-        this.loadingPlanAccess = false;
-        this.loadRequests();
-        this.cdr.detectChanges();
-      }
-    });
-  }
-
-  private loadOrganization() {
-    this.organizationService.getUserOrganization().pipe(
-      catchError(() => of(null))
-    ).subscribe((org) => {
-      this.org = org;
-      this.requestedByDefault = org?.name ?? this.requestedByDefault;
-      this.loadRequests();
-      this.cdr.detectChanges();
-    });
   }
 
   private submitRequestPayload(
@@ -575,16 +462,6 @@ export class RequestsMobileComponent implements OnInit {
     return 'Unknown';
   }
 
-  private openCreateFromQuery() {
-    const createParam = this.route.snapshot.queryParamMap.get('create');
-    if (createParam === '1' || createParam === 'true') {
-      this.pendingCreateModal = true;
-      if (!this.loadingPlanAccess) {
-        this.openCreateModal();
-      }
-    }
-  }
-
   private describeHttpError(err: any, fallback: string): string {
     const status = typeof err?.status === 'number' ? err.status : 0;
     const detail =
@@ -643,22 +520,6 @@ export class RequestsMobileComponent implements OnInit {
     return null;
   }
 
-  private resolveOrgId(): string | null {
-    const token = this.getUserToken();
-    const payload = token ? this.decodeJwtPayload(token) : null;
-    const payloadOrgId =
-      payload?.['org_id'] ??
-      payload?.['organization_id'] ??
-      payload?.['org'] ??
-      payload?.['organization'];
-    const storedOrgId = typeof localStorage !== 'undefined'
-      ? localStorage.getItem('current_user_org_id')
-      : null;
-    return this.normalizeId(this.org?.id) ??
-      this.normalizeId(payloadOrgId) ??
-      this.normalizeId(storedOrgId);
-  }
-
   private getUserEmailFromToken(token: string | null): string | null {
     const payload = token ? this.decodeJwtPayload(token) : null;
     const payloadEmail = payload?.['email'];
@@ -667,7 +528,6 @@ export class RequestsMobileComponent implements OnInit {
       : null;
     return this.normalizeEmail(payloadEmail) ?? this.normalizeEmail(storedEmail);
   }
-
 }
 
 type RequestRecord = {
@@ -677,7 +537,6 @@ type RequestRecord = {
   requested_for_user?: unknown;
   requested_for_email?: string;
   requested_for_phone?: string;
-  requested_by_org?: unknown;
   required_state?: string;
   response_status?: string;
   timestamp?: string;
@@ -694,4 +553,3 @@ type CreateRequestPayload = {
   target: RequestTarget;
   requested_for_email?: string;
 };
-

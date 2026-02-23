@@ -108,12 +108,6 @@ export const routes: Routes = [
   component: AuditLogsMobileComponent
 },
 {
-  path: 'requests/create',
-  canMatch: [mobileRequestsMatch],
-  redirectTo: 'requests',
-  pathMatch: 'full'
-},
-{
   path: 'requests',
   canMatch: [mobileRequestsMatch],
   canActivate: [businessOnboardingGuard],
@@ -232,11 +226,6 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./Pages/audit-logs/audit-logs')
             .then(m => m.AuditLogs)
-      },
-      {
-        path: 'requests/create',
-        redirectTo: 'requests',
-        pathMatch: 'full'
       },
       {
         path: 'requests',

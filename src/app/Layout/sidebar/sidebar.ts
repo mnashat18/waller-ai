@@ -242,14 +242,6 @@ export class SidebarComponent implements OnInit, OnDestroy {
     }
   }
 
-  openCreateRequest(event: Event): void {
-    event.preventDefault();
-    if (!this.canUseBusinessFeatures) {
-      return;
-    }
-    this.router.navigate(['/requests'], { queryParams: { create: '1' } });
-  }
-
   private resolveCurrentUserId(): string | null {
     if (typeof localStorage === 'undefined') {
       return null;
