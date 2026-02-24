@@ -3,7 +3,7 @@ import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
-import { catchError, map, timeout } from 'rxjs/operators';
+import { catchError, map, take, timeout } from 'rxjs/operators';
 import {
   type CreateRequestForm,
   CreateRequestModalComponent,
@@ -19,6 +19,7 @@ import {
   type CreateScanRequestResult,
   type ManageTeamMemberRole
 } from '../../services/business-center.service';
+import { AuthService } from '../../services/auth';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import { environment } from 'src/environments/environment';
 
@@ -48,6 +49,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
   hasBusinessAccess = false;
   canViewRequestCenter = true;
+  canViewAllBusinessRequests = false;
   canCreateRequests = false;
   canOpenBusinessCenter = false;
   canAssignMemberRole = false;
@@ -61,10 +63,13 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
 
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private emptyResultRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly accessTimeoutMs = 15000;
+  private readonly postAuthRetryDelaysMs = [900, 1800, 3000];
+  private recoveringSession = false;
   private currentMemberRole: BusinessMemberRole | null = null;
   private currentBusinessProfileId: string | null = null;
-  private currentOrgId: string | null = null;
+  private optimisticRequests = new Map<string, RequestRow>();
 
   requestStats = { total: 0, pending: 0, approved: 0, denied: 0 };
   todayRequestCount = 0;
@@ -72,6 +77,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   constructor(
     private http: HttpClient,
     private businessCenter: BusinessCenterService,
+    private auth: AuthService,
     private cdr: ChangeDetectorRef
   ) {
     this.dailyRequestLimit = this.businessCenter.dailyRequestLimit;
@@ -86,6 +92,10 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       clearTimeout(this.successToastTimer);
       this.successToastTimer = null;
     }
+    if (this.emptyResultRetryTimer) {
+      clearTimeout(this.emptyResultRetryTimer);
+      this.emptyResultRetryTimer = null;
+    }
   }
 
   badgeClass(state: string): string {
@@ -95,6 +105,10 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     if (normalized.includes('fatigue')) return 'badge-fatigue';
     if (normalized.includes('risk')) return 'badge-risk';
     return '';
+  }
+
+  trackById(index: number, row: RequestRow): string {
+    return row?.id ?? String(index);
   }
 
   dailyRequestsRemaining(): number {
@@ -181,9 +195,21 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     this.submittingRequest = true;
     this.submitFeedback = { type: 'info', message: 'Sending requests...' };
+
+    const optimisticRows = uniqueEmails.map((email) =>
+      this.buildOptimisticRow(email, requiredState)
+    );
+    for (const row of optimisticRows) {
+      this.optimisticRequests.set(row.id, row);
+    }
+    this.requests = this.mergeRequestRows(this.requests, optimisticRows);
+    this.requestStats = this.calculateStats(this.requests);
+    this.todayRequestCount = this.businessCenter.countTodayRequests(
+      this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+    );
     this.cdr.detectChanges();
 
-    this.submitRequestBatch(uniqueEmails, requiredState, selectedMemberRole);
+    this.submitRequestBatch(uniqueEmails, requiredState, selectedMemberRole, optimisticRows);
   }
 
   dismissPermissionNotice() {
@@ -254,6 +280,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       if (!state) {
         this.hasBusinessAccess = false;
         this.canViewRequestCenter = true;
+        this.canViewAllBusinessRequests = false;
         this.canCreateRequests = false;
         this.canOpenBusinessCenter = false;
         this.canAssignMemberRole = false;
@@ -265,7 +292,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
         this.businessInviteTrialNotice = '';
         this.currentMemberRole = null;
         this.currentBusinessProfileId = null;
-        this.currentOrgId = null;
         this.syncAssignableMemberRoleOptions();
         this.loadingPlanAccess = false;
         this.loadRequests();
@@ -279,10 +305,8 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
       this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
       this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
-      this.currentOrgId = this.normalizeId(state.orgId);
-
-      this.canViewRequestCenter =
-        !this.hasBusinessAccess || this.canRoleAccessRequests(this.currentMemberRole);
+      this.canViewAllBusinessRequests = this.hasBusinessAccess && this.currentMemberRole === 'owner';
+      this.canViewRequestCenter = true;
 
       const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
       this.isBusinessTrial = billingStatus === 'trial' && !state.trialExpired;
@@ -294,15 +318,14 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
 
       const hasWritableRequestAccess =
-        this.hasBusinessAccess &&
-        this.canRoleAccessRequests(this.currentMemberRole) &&
+        this.canViewAllBusinessRequests &&
         Boolean(state.permissions?.canUseSystem) &&
         !Boolean(state.permissions?.isReadOnly) &&
         !Boolean(state.trialExpired);
 
       this.canCreateRequests = hasWritableRequestAccess;
       this.canOpenBusinessCenter =
-        this.hasBusinessAccess && this.canRoleAccessRequests(this.currentMemberRole);
+        this.canViewAllBusinessRequests;
       this.canAssignMemberRole =
         hasWritableRequestAccess &&
         Boolean(state.permissions?.canManageMembers) &&
@@ -316,49 +339,68 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     });
   }
 
-  private loadRequests() {
-    if (this.hasBusinessAccess && !this.canViewRequestCenter) {
-      this.applyRequests([]);
+  private loadRequests(retryAttempt = 0) {
+    if (this.hasBusinessAccess && this.canViewAllBusinessRequests) {
+      this.loadBusinessRequests(retryAttempt);
       return;
     }
 
-    if (this.hasBusinessAccess) {
-      this.loadBusinessRequests();
-      return;
-    }
-
-    this.loadIncomingRequests();
+    this.loadOwnRequests(retryAttempt);
   }
 
-  private loadBusinessRequests() {
+  private loadBusinessRequests(retryAttempt = 0) {
     const token = this.getUserToken();
     if (!token) {
+      this.tryRecoverSessionAndReload();
       this.applyRequests([]);
       return;
     }
 
-    this.fetchRequests(token, null).subscribe({
+    if (!this.currentBusinessProfileId) {
+      this.applyRequests([]);
+      return;
+    }
+
+    this.fetchRequests(token, {
+      businessProfileId: this.currentBusinessProfileId,
+      bustCache: true
+    }).subscribe({
       next: (requests) => this.applyRequests(requests),
       error: (fetchErr) => {
         console.error('[requests-mobile] requests error:', fetchErr);
+        if (fetchErr?.status === 401 || fetchErr?.status === 403) {
+          this.tryRecoverSessionAndReload();
+        }
         this.applyRequests([]);
       }
     });
   }
 
-  private loadIncomingRequests() {
+  private loadOwnRequests(retryAttempt = 0) {
     const token = this.getUserToken();
-    const userId = this.getUserIdFromToken(token);
+    const userId = this.resolveCurrentUserId(token);
 
     if (!token || !userId) {
+      this.tryRecoverSessionAndReload();
       this.applyRequests([]);
       return;
     }
 
-    this.fetchRequests(token, { requestedForUserId: userId }).subscribe({
-      next: (requests) => this.applyRequests(requests),
+    this.fetchRequests(token, {
+      requestedForUserId: userId,
+      bustCache: true
+    }).subscribe({
+      next: (requests) => {
+        this.applyRequests(requests);
+        if (this.shouldRetryEmptyResult(requests.length, retryAttempt)) {
+          this.scheduleEmptyResultRetry(retryAttempt + 1);
+        }
+      },
       error: (fetchErr) => {
-        console.error('[requests-mobile] incoming requests error:', fetchErr);
+        console.error('[requests-mobile] own requests error:', fetchErr);
+        if (fetchErr?.status === 401 || fetchErr?.status === 403) {
+          this.tryRecoverSessionAndReload();
+        }
         this.applyRequests([]);
       }
     });
@@ -366,7 +408,11 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
   private fetchRequests(
     token: string | null,
-    filters: { requestedForUserId?: string } | null
+    filters: {
+      requestedForUserId?: string;
+      businessProfileId?: string;
+      bustCache?: boolean;
+    } | null
   ) {
     const headers = this.buildAuthHeaders(token);
     if (!headers) {
@@ -375,6 +421,9 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     const fields = [
       'id',
+      'business_profile',
+      'requested_by_user',
+      'requested_for_user',
       'requested_for_email',
       'requested_for_phone',
       'required_state',
@@ -387,7 +436,13 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       fields
     });
 
-    if (filters?.requestedForUserId) {
+    if (filters?.bustCache) {
+      params.set('_', Date.now().toString());
+    }
+
+    if (filters?.businessProfileId) {
+      params.set('filter[business_profile][_eq]', filters.businessProfileId);
+    } else if (filters?.requestedForUserId) {
       params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
     }
 
@@ -399,18 +454,72 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     );
   }
 
+  private scheduleEmptyResultRetry(nextAttempt: number): void {
+    if (this.emptyResultRetryTimer) {
+      clearTimeout(this.emptyResultRetryTimer);
+      this.emptyResultRetryTimer = null;
+    }
+
+    const delayIndex = Math.max(0, Math.min(nextAttempt - 1, this.postAuthRetryDelaysMs.length - 1));
+    const delayMs = this.postAuthRetryDelaysMs[delayIndex];
+    this.emptyResultRetryTimer = setTimeout(() => {
+      this.emptyResultRetryTimer = null;
+      this.loadRequests(nextAttempt);
+    }, delayMs);
+  }
+
+  private shouldRetryEmptyResult(totalRows: number, retryAttempt: number): boolean {
+    if (totalRows > 0) {
+      return false;
+    }
+    if (retryAttempt >= this.postAuthRetryDelaysMs.length) {
+      return false;
+    }
+    return this.isRecentAuthWindow();
+  }
+
+  private isRecentAuthWindow(windowMs = 60000): boolean {
+    if (typeof sessionStorage === 'undefined') {
+      return false;
+    }
+
+    if (sessionStorage.getItem('auth_callback_pending') === '1') {
+      return true;
+    }
+
+    const raw = sessionStorage.getItem('auth_session_established_at');
+    const ts = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(ts)) {
+      return false;
+    }
+
+    const delta = Date.now() - ts;
+    return delta >= 0 && delta <= windowMs;
+  }
+
+  private tryRecoverSessionAndReload(): void {
+    if (this.recoveringSession) {
+      return;
+    }
+
+    this.recoveringSession = true;
+    this.auth.ensureSessionToken().pipe(
+      take(1),
+      catchError(() => of(false))
+    ).subscribe((ok) => {
+      this.recoveringSession = false;
+      if (!ok) {
+        return;
+      }
+      this.loadPlanAccess();
+    });
+  }
+
   private applyRequests(requests: RequestRecord[]) {
-    this.requests = requests.map((request) => this.mapToRequestRow(request));
-    this.requestStats = this.requests.reduce(
-      (acc, req) => {
-        acc.total += 1;
-        if (req.status === 'Approved') acc.approved += 1;
-        if (req.status === 'Denied') acc.denied += 1;
-        if (req.status === 'Pending') acc.pending += 1;
-        return acc;
-      },
-      { total: 0, pending: 0, approved: 0, denied: 0 }
-    );
+    const remoteRows = requests.map((request) => this.mapToRequestRow(request));
+    this.reconcileOptimisticRequests(remoteRows);
+    this.requests = this.mergeRequestRows(remoteRows, Array.from(this.optimisticRequests.values()));
+    this.requestStats = this.calculateStats(this.requests);
     this.todayRequestCount = this.businessCenter.countTodayRequests(
       this.requests.map((row) => ({ timestamp: row.timestampRaw }))
     );
@@ -420,6 +529,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   private mapToRequestRow(request: RequestRecord): RequestRow {
     const timestampRaw = request.timestamp ?? '';
     return {
+      id: this.normalizeId(request.id) ?? this.newTempRequestId(),
       target: this.formatRequestTarget(request),
       required_state: request.required_state ?? 'Unknown',
       status: this.normalizeStatus(request.response_status),
@@ -467,6 +577,19 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     return this.normalizeId(id);
   }
 
+  private resolveCurrentUserId(token: string | null): string | null {
+    const tokenUserId = this.getUserIdFromToken(token);
+    if (tokenUserId) {
+      return tokenUserId;
+    }
+
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    return this.normalizeId(localStorage.getItem('current_user_id'));
+  }
+
   private getUserToken(): string | null {
     const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
     if (!userToken || this.isTokenExpired(userToken)) return null;
@@ -489,13 +612,14 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   private submitRequestBatch(
     recipientEmails: string[],
     requiredState: RequiredState,
-    selectedMemberRole: ManageTeamMemberRole
+    selectedMemberRole: ManageTeamMemberRole,
+    optimisticRows: RequestRow[]
   ) {
     const createCalls = recipientEmails.map((email) =>
       this.businessCenter.createScanRequest({
         requested_for_email: email,
         required_state: requiredState
-      }, this.currentOrgId).pipe(
+      }, this.currentBusinessProfileId).pipe(
         catchError((err) =>
           of({
             ok: false,
@@ -513,16 +637,33 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
         let firstError = '';
 
         results.forEach((result, index) => {
+          const optimistic = optimisticRows[index];
+          if (!optimistic) {
+            return;
+          }
+
           if (result?.ok) {
             successCount += 1;
             successEmails.push(recipientEmails[index]);
+            const createdId = this.normalizeId(result?.id);
+            if (createdId) {
+              this.promoteOptimisticRequestId(optimistic.id, createdId);
+            }
             return;
           }
+
+          this.dropOptimisticRequest(optimistic.id);
           failedCount += 1;
           if (!firstError) {
             firstError = result?.message || 'Failed to send request.';
           }
         });
+
+        this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
+        this.requestStats = this.calculateStats(this.requests);
+        this.todayRequestCount = this.businessCenter.countTodayRequests(
+          this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+        );
 
         if (!successCount) {
           this.submittingRequest = false;
@@ -544,6 +685,14 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
         this.completeRequestSubmit(successCount, failedCount, firstError);
       },
       error: (err) => {
+        for (const row of optimisticRows) {
+          this.dropOptimisticRequest(row.id);
+        }
+        this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
+        this.requestStats = this.calculateStats(this.requests);
+        this.todayRequestCount = this.businessCenter.countTodayRequests(
+          this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+        );
         this.submittingRequest = false;
         this.submitFeedback = {
           type: 'error',
@@ -609,7 +758,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     }
 
     const memberCalls = recipientEmails.map((email) =>
-      this.businessCenter.upsertTeamMember(profileId, email, role).pipe(
+      this.businessCenter.upsertTeamMember(profileId, email, role, this.currentMemberRole).pipe(
         catchError((err) =>
           of({
             ok: false,
@@ -765,8 +914,157 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     return null;
   }
 
-  private canRoleAccessRequests(role: BusinessMemberRole | null): boolean {
-    return role === 'owner' || role === 'admin' || role === 'manager';
+  private calculateStats(rows: RequestRow[]) {
+    return (rows ?? []).reduce(
+      (acc, req) => {
+        acc.total += 1;
+        if (req.status === 'Approved') acc.approved += 1;
+        if (req.status === 'Denied') acc.denied += 1;
+        if (req.status === 'Pending') acc.pending += 1;
+        return acc;
+      },
+      { total: 0, pending: 0, approved: 0, denied: 0 }
+    );
+  }
+
+  private buildOptimisticRow(email: string, requiredState: RequiredState): RequestRow {
+    const timestampRaw = new Date().toISOString();
+    return {
+      id: this.newTempRequestId(),
+      target: email,
+      required_state: requiredState,
+      status: 'Pending',
+      timestamp: this.formatTimestamp(timestampRaw),
+      timestampRaw
+    };
+  }
+
+  private newTempRequestId(): string {
+    return `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+
+  private promoteOptimisticRequestId(fromId: string, toId: string): void {
+    const sourceId = this.normalizeId(fromId);
+    const targetId = this.normalizeId(toId);
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
+
+    const source = this.optimisticRequests.get(sourceId);
+    if (source) {
+      this.optimisticRequests.delete(sourceId);
+      this.optimisticRequests.set(targetId, { ...source, id: targetId });
+    }
+
+    const idx = this.requests.findIndex((row) => row.id === sourceId);
+    if (idx !== -1) {
+      this.requests[idx] = { ...this.requests[idx], id: targetId };
+    }
+  }
+
+  private dropOptimisticRequest(rowId: string): void {
+    const id = this.normalizeId(rowId);
+    if (!id) {
+      return;
+    }
+    this.optimisticRequests.delete(id);
+    this.requests = this.requests.filter((row) => row.id !== id);
+  }
+
+  private reconcileOptimisticRequests(remoteRows: RequestRow[]): void {
+    const remoteIds = new Set(
+      (remoteRows ?? [])
+        .map((row) => this.normalizeId(row?.id))
+        .filter((value): value is string => Boolean(value))
+    );
+
+    for (const [key, optimistic] of Array.from(this.optimisticRequests.entries())) {
+      if (remoteIds.has(key)) {
+        this.optimisticRequests.delete(key);
+        continue;
+      }
+
+      if (!this.isTempRequestId(key)) {
+        continue;
+      }
+
+      const optimisticTarget = this.normalizeEmail(optimistic.target) ?? this.normalizeLooseText(optimistic.target);
+      const optimisticState = this.normalizeLooseText(optimistic.required_state);
+      const optimisticTs = this.timestampMs(optimistic.timestampRaw);
+
+      const matched = (remoteRows ?? []).some((row) => {
+        const remoteTarget = this.normalizeEmail(row?.target) ?? this.normalizeLooseText(row?.target);
+        const remoteState = this.normalizeLooseText(row?.required_state);
+        if (!optimisticTarget || optimisticTarget !== remoteTarget || optimisticState !== remoteState) {
+          return false;
+        }
+        const remoteTs = this.timestampMs(row?.timestampRaw);
+        return Math.abs(remoteTs - optimisticTs) <= 2 * 60 * 1000;
+      });
+
+      if (matched) {
+        this.optimisticRequests.delete(key);
+      }
+    }
+  }
+
+  private mergeRequestRows(baseRows: RequestRow[], extraRows: RequestRow[]): RequestRow[] {
+    const byId = new Map<string, RequestRow>();
+    const push = (row: RequestRow | null | undefined) => {
+      const id = this.normalizeId(row?.id);
+      if (!id) {
+        return;
+      }
+
+      const normalized = {
+        ...row,
+        id,
+        target: row?.target ?? '-',
+        required_state: row?.required_state ?? 'Unknown',
+        status: row?.status ?? 'Pending',
+        timestampRaw: row?.timestampRaw ?? '',
+        timestamp: row?.timestamp ?? this.formatTimestamp(row?.timestampRaw ?? '')
+      } as RequestRow;
+
+      const existing = byId.get(id);
+      if (!existing) {
+        byId.set(id, normalized);
+        return;
+      }
+
+      const existingTs = this.timestampMs(existing.timestampRaw);
+      const nextTs = this.timestampMs(normalized.timestampRaw);
+      if (nextTs >= existingTs) {
+        byId.set(id, { ...existing, ...normalized, id });
+      }
+    };
+
+    for (const row of baseRows ?? []) push(row);
+    for (const row of extraRows ?? []) push(row);
+
+    return Array.from(byId.values()).sort((a, b) =>
+      this.timestampMs(b.timestampRaw) - this.timestampMs(a.timestampRaw)
+    );
+  }
+
+  private timestampMs(value: unknown): number {
+    const input = typeof value === 'string' ? value : '';
+    const ts = input ? new Date(input).getTime() : NaN;
+    return Number.isNaN(ts) ? 0 : ts;
+  }
+
+  private normalizeLooseText(value: unknown): string {
+    if (typeof value === 'string') {
+      return value.trim().toLowerCase();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value).trim().toLowerCase();
+    }
+    return '';
+  }
+
+  private isTempRequestId(id: string): boolean {
+    return id.startsWith('tmp_');
   }
 
   private syncAssignableMemberRoleOptions(): void {
@@ -838,7 +1136,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 }
 
 type RequestRecord = {
-  id?: string;
+  id?: unknown;
   target?: unknown;
   Target?: unknown;
   requested_for_user?: unknown;
@@ -850,6 +1148,7 @@ type RequestRecord = {
 };
 
 type RequestRow = {
+  id: string;
   target: string;
   required_state: string;
   status: 'Approved' | 'Pending' | 'Denied';

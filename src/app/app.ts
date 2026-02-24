@@ -47,6 +47,8 @@ export class App implements OnDestroy {
         root.classList.remove('light');
       }
 
+      this.captureInviteContextFromPath();
+
       const isAuthCallback = window.location.pathname === '/auth-callback';
       if (!isAuthCallback) {
         this.auth.captureAuthFromUrl();
@@ -86,6 +88,36 @@ export class App implements OnDestroy {
         this.isRouteTransitioning = false;
       }, 420);
     }, 0);
+  }
+
+  private captureInviteContextFromPath(): void {
+    const pathname = window.location.pathname ?? '';
+    const match = pathname.match(/^\/invite\/([^/?#]+)/i);
+    if (!match?.[1]) {
+      return;
+    }
+
+    const inviteToken = decodeURIComponent(match[1]).trim();
+    if (!inviteToken) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem('pending_invite_token', inviteToken);
+    } catch {
+      // ignore storage errors
+    }
+
+    this.auth.setPostAuthRedirect('/requests');
+
+    const next = this.auth.isLoggedIn()
+      ? '/requests'
+      : `/login?auth=signup&invite=${encodeURIComponent(inviteToken)}`;
+
+    const current = window.location.pathname + window.location.search;
+    if (current !== next) {
+      this.router.navigateByUrl(next, { replaceUrl: true });
+    }
   }
 
   ngOnDestroy() {

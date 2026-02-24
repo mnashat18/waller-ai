@@ -183,7 +183,8 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.memberRoleLabel = role ? this.toTitleCase(role) : (this.hasBusinessProfile ? 'Business' : 'User');
     const canOpenOwnerViews = this.canOpenOwnerViews(role);
     this.canOpenAuditLogs = !this.hasBusinessAccess || canOpenOwnerViews;
-    this.canOpenRequestsCenter = !this.hasBusinessAccess || canOpenOwnerViews;
+    // Requests page is available for all signed-in users; non-owner roles are limited to personal scope.
+    this.canOpenRequestsCenter = true;
     this.canOpenBusinessCenter =
       (this.hasBusinessProfile || this.hasBusinessAccess) &&
       canOpenOwnerViews;
@@ -205,7 +206,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.hasBusinessAccess = cached.hasBusinessAccess;
         this.canUseBusinessFeatures = cached.canUseBusinessFeatures;
         this.canOpenAuditLogs = cached.canOpenAuditLogs;
-        this.canOpenRequestsCenter = cached.canOpenRequestsCenter;
+        this.canOpenRequestsCenter = true;
         this.canOpenBusinessCenter = cached.canOpenBusinessCenter;
         this.isBusinessTrial = cached.isBusinessTrial;
         this.trialExpired = cached.trialExpired;
@@ -225,7 +226,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
       this.hasBusinessAccess = hubFallback.hasBusinessAccess;
       this.canUseBusinessFeatures = hubFallback.canUseBusinessFeatures;
       this.canOpenAuditLogs = hubFallback.canOpenAuditLogs;
-      this.canOpenRequestsCenter = hubFallback.canOpenRequestsCenter;
+      this.canOpenRequestsCenter = true;
       this.canOpenBusinessCenter = hubFallback.canOpenBusinessCenter;
       this.isBusinessTrial = hubFallback.isBusinessTrial;
       this.trialExpired = hubFallback.trialExpired;
@@ -244,7 +245,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
       this.hasBusinessAccess = hasBusinessHint;
       this.canUseBusinessFeatures = hasBusinessHint;
       this.canOpenAuditLogs = !hasBusinessHint || this.canOpenOwnerViews((roleHint ?? '').toLowerCase());
-      this.canOpenRequestsCenter = !hasBusinessHint || this.canOpenOwnerViews((roleHint ?? '').toLowerCase());
+      this.canOpenRequestsCenter = true;
       this.canOpenBusinessCenter = hasBusinessHint;
       this.isBusinessTrial = false;
       this.trialExpired = false;
@@ -453,7 +454,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
         hasBusinessAccess,
         canUseBusinessFeatures: hasBusinessAccess && canUseSystem,
         canOpenAuditLogs: !hasBusinessAccess || canOpenOwnerViews,
-        canOpenRequestsCenter: !hasBusinessAccess || canOpenOwnerViews,
+        canOpenRequestsCenter: true,
         canOpenBusinessCenter: (hasBusinessProfile || hasBusinessAccess) && canOpenOwnerViews,
         isBusinessTrial,
         trialExpired,

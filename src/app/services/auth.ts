@@ -228,11 +228,38 @@ export class AuthService {
     if (typeof window === 'undefined') {
       return;
     }
+    sessionStorage.setItem('auth_callback_pending', '1');
+    sessionStorage.removeItem('auth_refresh_attempted');
     const params = new URLSearchParams({
       redirect: `${window.location.origin}/auth-callback`,
       mode: 'cookie'
     });
     window.location.href = `${this.api}/auth/login/google?${params.toString()}`;
+  }
+
+  setPostAuthRedirect(path: string): void {
+    if (typeof sessionStorage === 'undefined') {
+      return;
+    }
+    if (!path || !path.startsWith('/')) {
+      return;
+    }
+    sessionStorage.setItem('post_auth_redirect', path);
+  }
+
+  consumePostAuthRedirect(defaultPath = '/dashboard'): string {
+    if (typeof sessionStorage === 'undefined') {
+      return defaultPath;
+    }
+
+    const raw = sessionStorage.getItem('post_auth_redirect');
+    sessionStorage.removeItem('post_auth_redirect');
+
+    if (raw && raw.startsWith('/')) {
+      return raw;
+    }
+
+    return defaultPath;
   }
 
   refreshFromCookie(): Observable<string | null> {
@@ -375,6 +402,7 @@ export class AuthService {
     localStorage.setItem('access_token', token);
     localStorage.setItem('directus_token', token);
     sessionStorage.setItem('is_logged_in', '1');
+    sessionStorage.setItem('auth_session_established_at', Date.now().toString());
     localStorage.removeItem('auth_error');
     this.subscriptions.notifyAuthStateChanged();
   }
@@ -403,6 +431,8 @@ export class AuthService {
     sessionStorage.removeItem('auth_callback_pending');
     sessionStorage.removeItem('auth_refresh_attempted');
     sessionStorage.removeItem('auth_callback_raw_url');
+    sessionStorage.removeItem('auth_session_established_at');
+    sessionStorage.removeItem('post_auth_redirect');
     sessionStorage.removeItem(this.refreshEndpointMissingSessionKey);
     this.subscriptions.notifyAuthStateChanged();
   }

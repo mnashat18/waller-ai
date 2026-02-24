@@ -130,6 +130,11 @@ const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
         return true;
       }
 
+      if (targetPath === '/requests') {
+        // Non-owner roles can access Requests in personal scope only.
+        return true;
+      }
+
       if (targetPath === '/business-center') {
         return router.createUrlTree(['/dashboard'], { queryParams: { restricted: 'business-center' } });
       }
@@ -158,7 +163,7 @@ export const routes: Routes = [
 {
   path: 'requests',
   canMatch: [mobileRequestsMatch],
-  canActivate: [businessOnboardingGuard, ownerWorkspaceGuard],
+  canActivate: [businessOnboardingGuard],
   component: RequestsMobileComponent
 },
 {
@@ -277,7 +282,6 @@ export const routes: Routes = [
       },
       {
         path: 'requests',
-        canActivate: [ownerWorkspaceGuard],
         loadComponent: () =>
           import('./Pages/requests/requests')
             .then(m => m.Requests)

@@ -156,8 +156,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.assignableMemberRoleOptions = [...this.memberRoleOptions];
-    // Always start with a fresh access snapshot to avoid stale first-render state.
-    this.loadAccessState(true);
+    // Use cached hub state first so first navigation renders immediately, then revalidate in background.
+    this.loadAccessState(false);
   }
 
   ngOnDestroy(): void {
@@ -658,9 +658,10 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.showFeedback(res?.ok ? 'success' : 'error', res?.message || 'Member update finished.');
       if (!res?.ok) return;
 
+      this.upsertOptimisticTeamMember(email, role);
       this.teamMemberForm.email = '';
       this.teamMemberForm.role = 'member';
-      this.reloadTeamMembers();
+      setTimeout(() => this.reloadTeamMembers(), 700);
     });
   }
 
@@ -1248,6 +1249,43 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }
 
     return visible;
+  }
+
+  private upsertOptimisticTeamMember(email: string, role: ManageTeamMemberRole): void {
+    const normalizedEmail = this.normalizeEmail(email);
+    if (!normalizedEmail) {
+      return;
+    }
+
+    const normalizedRole = (role ?? 'member').toString().trim().toLowerCase();
+    const nowId = `tmp_member_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+    const nextRows = [...(this.teamMembers ?? [])];
+    const existingIndex = nextRows.findIndex((row) => {
+      const label = this.normalizeEmail(row?.user_label ?? row?.user_id ?? '');
+      return Boolean(label && label === normalizedEmail);
+    });
+
+    const optimisticRow = {
+      id: existingIndex !== -1 ? nextRows[existingIndex]?.id ?? nowId : nowId,
+      user_id: nextRows[existingIndex]?.user_id ?? null,
+      user_label: normalizedEmail,
+      member_role: normalizedRole || 'member',
+      status: nextRows[existingIndex]?.status ?? 'active'
+    };
+
+    if (existingIndex !== -1) {
+      nextRows[existingIndex] = {
+        ...nextRows[existingIndex],
+        ...optimisticRow
+      };
+    } else {
+      nextRows.unshift(optimisticRow);
+    }
+
+    this.teamMembers = this.buildVisibleTeamMembers(nextRows);
+    this.syncExportSelectionWithTeam();
+    this.refreshFilteredActivityEvents();
   }
 
   private buildFallbackOwnerMember(): any | null {

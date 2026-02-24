@@ -53,7 +53,7 @@ export class AuthCallbackComponent implements OnInit {
       .subscribe({
         next: (user) => {
           if (user) {
-            this.router.navigate(['/dashboard']);
+            this.router.navigateByUrl(this.auth.consumePostAuthRedirect('/dashboard'));
             return;
           }
 

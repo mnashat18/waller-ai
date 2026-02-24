@@ -3,7 +3,7 @@ import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
-import { catchError, map, timeout } from 'rxjs/operators';
+import { catchError, map, take, timeout } from 'rxjs/operators';
 import {
   CreateRequestModalComponent,
   type CreateRequestForm,
@@ -19,6 +19,7 @@ import {
   type CreateScanRequestResult,
   type ManageTeamMemberRole
 } from '../../services/business-center.service';
+import { AuthService } from '../../services/auth';
 import { environment } from 'src/environments/environment';
 
 @Component({
@@ -49,6 +50,7 @@ export class Requests implements OnInit, OnDestroy {
 
   hasBusinessAccess = false;
   canViewRequestCenter = true;
+  canViewAllBusinessRequests = false;
   canCreateRequests = false;
   canOpenBusinessCenter = false;
   canAssignMemberRole = false;
@@ -66,13 +68,18 @@ export class Requests implements OnInit, OnDestroy {
   todayRequestCount = 0;
 
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private emptyResultRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly accessTimeoutMs = 15000;
+  private readonly postAuthRetryDelaysMs = [900, 1800, 3000];
+  private recoveringSession = false;
   private currentMemberRole: BusinessMemberRole | null = null;
   private currentBusinessProfileId: string | null = null;
+  private optimisticRequests = new Map<string, RequestRow>();
 
   constructor(
     private http: HttpClient,
     private businessCenter: BusinessCenterService,
+    private auth: AuthService,
     private cdr: ChangeDetectorRef
   ) {
     this.dailyRequestLimit = this.businessCenter.dailyRequestLimit;
@@ -86,6 +93,10 @@ export class Requests implements OnInit, OnDestroy {
     if (this.successToastTimer) {
       clearTimeout(this.successToastTimer);
       this.successToastTimer = null;
+    }
+    if (this.emptyResultRetryTimer) {
+      clearTimeout(this.emptyResultRetryTimer);
+      this.emptyResultRetryTimer = null;
     }
   }
 
@@ -215,7 +226,10 @@ export class Requests implements OnInit, OnDestroy {
       this.buildOptimisticRow(email, requiredState)
     );
 
-    this.requests = [...optimisticRows, ...this.requests];
+    for (const row of optimisticRows) {
+      this.optimisticRequests.set(row.id, row);
+    }
+    this.requests = this.mergeRequestRows(this.requests, optimisticRows);
     this.updateStats();
     this.showCreateModal = false;
     this.cdr.detectChanges();
@@ -380,10 +394,7 @@ export class Requests implements OnInit, OnDestroy {
 
         const createdId = this.normalizeId(result?.id);
         if (createdId) {
-          const idx = this.requests.findIndex((row) => row.id === optimistic.id);
-          if (idx !== -1) {
-            this.requests[idx] = { ...this.requests[idx], id: createdId };
-          }
+          this.promoteOptimisticRequestId(optimistic.id, createdId);
         }
         return;
       }
@@ -392,9 +403,10 @@ export class Requests implements OnInit, OnDestroy {
       if (!firstError) {
         firstError = result?.message || 'Failed to send request.';
       }
-      this.requests = this.requests.filter((row) => row.id !== optimistic.id);
+      this.dropOptimisticRequest(optimistic.id);
     });
 
+    this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
     this.updateStats();
 
     return {
@@ -406,15 +418,17 @@ export class Requests implements OnInit, OnDestroy {
   }
 
   private rollbackOptimisticRows(rows: RequestRow[]): void {
-    const ids = new Set(rows.map((item) => item.id));
-    this.requests = this.requests.filter((row) => !ids.has(row.id));
+    for (const row of rows) {
+      this.dropOptimisticRequest(row.id);
+    }
+    this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
     this.updateStats();
   }
 
   private buildOptimisticRow(email: string, requiredState: RequiredState): RequestRow {
     const optimisticId =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
+        ? `tmp_${crypto.randomUUID()}`
         : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const timestampRaw = new Date().toISOString();
 
@@ -455,6 +469,7 @@ export class Requests implements OnInit, OnDestroy {
       if (!state) {
         this.hasBusinessAccess = false;
         this.canViewRequestCenter = true;
+        this.canViewAllBusinessRequests = false;
         this.canCreateRequests = false;
         this.canOpenBusinessCenter = false;
         this.canAssignMemberRole = false;
@@ -471,20 +486,18 @@ export class Requests implements OnInit, OnDestroy {
       this.hasBusinessAccess = Boolean(state.hasPaidAccess);
       this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
       this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
-
-      this.canViewRequestCenter =
-        !this.hasBusinessAccess || this.canRoleAccessRequests(this.currentMemberRole);
+      this.canViewAllBusinessRequests = this.hasBusinessAccess && this.currentMemberRole === 'owner';
+      this.canViewRequestCenter = true;
 
       const hasWritableRequestAccess =
-        this.hasBusinessAccess &&
-        this.canRoleAccessRequests(this.currentMemberRole) &&
+        this.canViewAllBusinessRequests &&
         Boolean(state.permissions?.canUseSystem) &&
         !Boolean(state.permissions?.isReadOnly) &&
         !Boolean(state.trialExpired);
 
       this.canCreateRequests = hasWritableRequestAccess;
       this.canOpenBusinessCenter =
-        this.hasBusinessAccess && this.canRoleAccessRequests(this.currentMemberRole);
+        this.canViewAllBusinessRequests;
       this.canAssignMemberRole =
         hasWritableRequestAccess &&
         Boolean(state.permissions?.canManageMembers) &&
@@ -512,19 +525,13 @@ export class Requests implements OnInit, OnDestroy {
     });
   }
 
-  private loadRequests(bustCache = false) {
-    if (this.hasBusinessAccess && !this.canViewRequestCenter) {
-      this.requests = [];
-      this.updateStats();
-      this.cdr.detectChanges();
-      return;
-    }
-
+  private loadRequests(bustCache = false, retryAttempt = 0) {
     const token = this.getUserToken();
     const headers = this.buildAuthHeaders(token);
 
     if (!headers) {
-      this.requests = [];
+      this.tryRecoverSessionAndReload();
+      this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
       this.updateStats();
       this.cdr.detectChanges();
       return;
@@ -537,6 +544,9 @@ export class Requests implements OnInit, OnDestroy {
         'id',
         'requested_for_email',
         'requested_for_phone',
+        'requested_for_user',
+        'requested_by_user',
+        'business_profile',
         'required_state',
         'response_status',
         'timestamp'
@@ -545,9 +555,11 @@ export class Requests implements OnInit, OnDestroy {
 
     if (bustCache) params.set('_', Date.now().toString());
 
-    if (this.hasBusinessAccess) {
+    const useBusinessScope = this.hasBusinessAccess && this.canViewAllBusinessRequests;
+
+    if (useBusinessScope) {
       if (!this.currentBusinessProfileId) {
-        this.requests = [];
+        this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
         this.updateStats();
         this.submitFeedback = {
           type: 'error',
@@ -558,9 +570,10 @@ export class Requests implements OnInit, OnDestroy {
       }
       params.set('filter[business_profile][_eq]', this.currentBusinessProfileId);
     } else {
-      const userId = this.getUserIdFromToken(token);
+      const userId = this.resolveCurrentUserId(token);
       if (!userId) {
-        this.requests = [];
+        this.tryRecoverSessionAndReload();
+        this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
         this.updateStats();
         this.cdr.detectChanges();
         return;
@@ -575,16 +588,86 @@ export class Requests implements OnInit, OnDestroy {
       map(res => res.data ?? [])
     ).subscribe({
       next: data => {
-        this.requests = data.map(r => this.mapToRow(r));
+        const remoteRows = data.map(r => this.mapToRow(r));
+        this.reconcileOptimisticRequests(remoteRows);
+        this.requests = this.mergeRequestRows(remoteRows, Array.from(this.optimisticRequests.values()));
         this.updateStats();
         this.cdr.detectChanges();
+
+        if (!useBusinessScope && this.shouldRetryEmptyResult(remoteRows.length, retryAttempt)) {
+          this.scheduleEmptyResultRetry(retryAttempt + 1);
+        }
       },
       error: err => {
         console.error('Load requests error:', err);
-        this.requests = [];
+        if (err?.status === 401 || err?.status === 403) {
+          this.tryRecoverSessionAndReload();
+        }
+        this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
         this.updateStats();
         this.cdr.detectChanges();
       }
+    });
+  }
+
+  private scheduleEmptyResultRetry(nextAttempt: number): void {
+    if (this.emptyResultRetryTimer) {
+      clearTimeout(this.emptyResultRetryTimer);
+      this.emptyResultRetryTimer = null;
+    }
+
+    const delayIndex = Math.max(0, Math.min(nextAttempt - 1, this.postAuthRetryDelaysMs.length - 1));
+    const delayMs = this.postAuthRetryDelaysMs[delayIndex];
+    this.emptyResultRetryTimer = setTimeout(() => {
+      this.emptyResultRetryTimer = null;
+      this.loadRequests(true, nextAttempt);
+    }, delayMs);
+  }
+
+  private shouldRetryEmptyResult(totalRows: number, retryAttempt: number): boolean {
+    if (totalRows > 0) {
+      return false;
+    }
+    if (retryAttempt >= this.postAuthRetryDelaysMs.length) {
+      return false;
+    }
+    return this.isRecentAuthWindow();
+  }
+
+  private isRecentAuthWindow(windowMs = 60000): boolean {
+    if (typeof sessionStorage === 'undefined') {
+      return false;
+    }
+
+    if (sessionStorage.getItem('auth_callback_pending') === '1') {
+      return true;
+    }
+
+    const raw = sessionStorage.getItem('auth_session_established_at');
+    const ts = raw ? Number(raw) : NaN;
+    if (!Number.isFinite(ts)) {
+      return false;
+    }
+
+    const delta = Date.now() - ts;
+    return delta >= 0 && delta <= windowMs;
+  }
+
+  private tryRecoverSessionAndReload(): void {
+    if (this.recoveringSession) {
+      return;
+    }
+
+    this.recoveringSession = true;
+    this.auth.ensureSessionToken().pipe(
+      take(1),
+      catchError(() => of(false))
+    ).subscribe((ok) => {
+      this.recoveringSession = false;
+      if (!ok) {
+        return;
+      }
+      this.loadPlanAccess();
     });
   }
 
@@ -670,6 +753,19 @@ export class Requests implements OnInit, OnDestroy {
     return this.normalizeId(id);
   }
 
+  private resolveCurrentUserId(token: string | null): string | null {
+    const tokenUserId = this.getUserIdFromToken(token);
+    if (tokenUserId) {
+      return tokenUserId;
+    }
+
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    return this.normalizeId(localStorage.getItem('current_user_id'));
+  }
+
   private getUserEmailFromToken(token: string | null): string | null {
     const payload = token ? this.decodeJwtPayload(token) : null;
     const payloadEmail = payload?.['email'];
@@ -742,8 +838,130 @@ export class Requests implements OnInit, OnDestroy {
     return null;
   }
 
-  private canRoleAccessRequests(role: BusinessMemberRole | null): boolean {
-    return role === 'owner' || role === 'admin' || role === 'manager';
+  private promoteOptimisticRequestId(fromId: string, toId: string): void {
+    const sourceId = this.normalizeId(fromId);
+    const targetId = this.normalizeId(toId);
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
+
+    const source = this.optimisticRequests.get(sourceId);
+    if (source) {
+      this.optimisticRequests.delete(sourceId);
+      this.optimisticRequests.set(targetId, { ...source, id: targetId });
+    }
+
+    const idx = this.requests.findIndex((row) => row.id === sourceId);
+    if (idx !== -1) {
+      this.requests[idx] = {
+        ...this.requests[idx],
+        id: targetId
+      };
+    }
+  }
+
+  private dropOptimisticRequest(rowId: string): void {
+    const id = this.normalizeId(rowId);
+    if (!id) {
+      return;
+    }
+    this.optimisticRequests.delete(id);
+    this.requests = this.requests.filter((row) => row.id !== id);
+  }
+
+  private reconcileOptimisticRequests(remoteRows: RequestRow[]): void {
+    const remoteIds = new Set(
+      (remoteRows ?? [])
+        .map((row) => this.normalizeId(row?.id))
+        .filter((value): value is string => Boolean(value))
+    );
+
+    for (const [key, optimistic] of Array.from(this.optimisticRequests.entries())) {
+      if (remoteIds.has(key)) {
+        this.optimisticRequests.delete(key);
+        continue;
+      }
+
+      if (!this.isTempRequestId(key)) {
+        continue;
+      }
+
+      const optimisticTarget = this.normalizeEmail(optimistic.target) ?? this.normalizeLooseText(optimistic.target);
+      const optimisticState = this.normalizeLooseText(optimistic.required_state);
+      const optimisticTs = this.timestampMs(optimistic.timestampRaw);
+
+      const matched = (remoteRows ?? []).some((row) => {
+        const remoteTarget = this.normalizeEmail(row?.target) ?? this.normalizeLooseText(row?.target);
+        const remoteState = this.normalizeLooseText(row?.required_state);
+        if (!optimisticTarget || optimisticTarget !== remoteTarget || optimisticState !== remoteState) {
+          return false;
+        }
+        const remoteTs = this.timestampMs(row?.timestampRaw);
+        return Math.abs(remoteTs - optimisticTs) <= 2 * 60 * 1000;
+      });
+
+      if (matched) {
+        this.optimisticRequests.delete(key);
+      }
+    }
+  }
+
+  private mergeRequestRows(baseRows: RequestRow[], extraRows: RequestRow[]): RequestRow[] {
+    const byId = new Map<string, RequestRow>();
+    const push = (row: RequestRow | null | undefined) => {
+      const id = this.normalizeId(row?.id);
+      if (!id) {
+        return;
+      }
+      const normalized = {
+        ...row,
+        id,
+        target: row?.target ?? '-',
+        required_state: row?.required_state ?? 'Unknown',
+        response_status: row?.response_status ?? 'Pending',
+        timestampRaw: row?.timestampRaw ?? '',
+        timestamp: row?.timestamp ?? this.formatTimestamp(row?.timestampRaw ?? '')
+      } as RequestRow;
+
+      const existing = byId.get(id);
+      if (!existing) {
+        byId.set(id, normalized);
+        return;
+      }
+
+      const existingTs = this.timestampMs(existing.timestampRaw);
+      const nextTs = this.timestampMs(normalized.timestampRaw);
+      if (nextTs >= existingTs) {
+        byId.set(id, { ...existing, ...normalized, id });
+      }
+    };
+
+    for (const row of baseRows ?? []) push(row);
+    for (const row of extraRows ?? []) push(row);
+
+    return Array.from(byId.values()).sort((a, b) =>
+      this.timestampMs(b.timestampRaw) - this.timestampMs(a.timestampRaw)
+    );
+  }
+
+  private timestampMs(value: unknown): number {
+    const input = typeof value === 'string' ? value : '';
+    const ts = input ? new Date(input).getTime() : NaN;
+    return Number.isNaN(ts) ? 0 : ts;
+  }
+
+  private normalizeLooseText(value: unknown): string {
+    if (typeof value === 'string') {
+      return value.trim().toLowerCase();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value).trim().toLowerCase();
+    }
+    return '';
+  }
+
+  private isTempRequestId(id: string): boolean {
+    return id.startsWith('tmp_');
   }
 
   private syncAssignableMemberRoleOptions(): void {

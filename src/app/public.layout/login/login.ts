@@ -30,7 +30,7 @@ export class LoginComponent {
     this.auth.login(this.email, this.password).subscribe({
       next: () => {
         this.loading = false;
-        this.router.navigate(['/dashboard']);
+        this.router.navigateByUrl(this.auth.consumePostAuthRedirect('/dashboard'));
       },
       error: (err) => {
         this.loading = false;

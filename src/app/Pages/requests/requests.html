@@ -13,6 +13,9 @@
       <span *ngIf="canCreateRequests" class="chip">
         Daily: {{ todayRequestCount }}/{{ dailyRequestLimit }} (remaining {{ dailyRequestsRemaining() }})
       </span>
+      <span *ngIf="hasBusinessAccess && !canViewAllBusinessRequests" class="chip">
+        Scope: My requests only
+      </span>
 
       <button
         *ngIf="canCreateRequests"
@@ -31,13 +34,13 @@
     </div>
   </div>
 
-  <div class="panel" *ngIf="hasBusinessAccess && !canViewRequestCenter">
-    Requests dashboard is visible for owner, admin, and manager roles only.
-    Members can continue scans from the app while the owner tracks outcomes.
+  <div class="panel" *ngIf="hasBusinessAccess && !canViewAllBusinessRequests">
+    You are viewing your own requests only.
+    Owner role can access full team requests and create new requests.
   </div>
 
   <!-- KPI GRID -->
-  <div class="kpi-grid" *ngIf="!hasBusinessAccess || canViewRequestCenter">
+  <div class="kpi-grid">
     <div class="kpi-card">
       <p class="text-sm text-slate-400">Total Requests</p>
       <p class="kpi-value">{{ requestStats.total }}</p>
@@ -61,10 +64,10 @@
 
 
   <!-- REQUEST TABLE -->
-  <div class="panel" *ngIf="!hasBusinessAccess || canViewRequestCenter">
+  <div class="panel">
     <div class="panel-header">
-      <h3 class="panel-title">Latest Requests</h3>
-      <span class="chip">Updated</span>
+      <h3 class="panel-title">{{ hasBusinessAccess && canViewAllBusinessRequests ? 'Team Requests' : 'My Requests' }}</h3>
+      <span class="chip">{{ hasBusinessAccess && canViewAllBusinessRequests ? 'Owner Scope' : 'Personal Scope' }}</span>
     </div>
 
     <div class="table-shell">

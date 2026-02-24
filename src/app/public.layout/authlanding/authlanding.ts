@@ -159,7 +159,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
       this.submitting = false;
       this.closeAuth();
-      this.router.navigateByUrl('/dashboard');
+      this.router.navigateByUrl(this.auth.consumePostAuthRedirect('/dashboard'));
     });
   }
 
@@ -184,7 +184,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
       this.submitting = false;
       this.closeAuth();
-      this.router.navigateByUrl('/dashboard');
+      this.router.navigateByUrl(this.auth.consumePostAuthRedirect('/dashboard'));
     });
   }
 
@@ -193,6 +193,8 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   }
 
   private applyRouteAuthMode() {
+    this.captureInviteFromQuery();
+
     const dataMode = this.route.snapshot.data?.['authMode'];
     const queryMode = this.route.snapshot.queryParamMap.get('auth');
     const mode = queryMode ?? dataMode;
@@ -206,6 +208,21 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     const path = this.route.snapshot.routeConfig?.path;
     const hasAuthQuery = this.route.snapshot.queryParamMap.has('auth');
     return path === 'login' || path === 'signup' || hasAuthQuery;
+  }
+
+  private captureInviteFromQuery() {
+    const inviteToken = this.route.snapshot.queryParamMap.get('invite')?.trim() ?? '';
+    if (!inviteToken) {
+      return;
+    }
+
+    try {
+      localStorage.setItem('pending_invite_token', inviteToken);
+    } catch {
+      // ignore storage errors
+    }
+
+    this.auth.setPostAuthRedirect('/requests');
   }
 
   private resolveSignupError(err: any): string {

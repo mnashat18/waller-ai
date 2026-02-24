@@ -54,12 +54,15 @@
     <p *ngIf="canCreateRequests" class="mt-2 text-xs text-slate-300">
       Daily usage: {{ todayRequestCount }}/{{ dailyRequestLimit }} (remaining {{ dailyRequestsRemaining() }}).
     </p>
+    <p *ngIf="hasBusinessAccess && !canViewAllBusinessRequests" class="mt-2 text-xs text-slate-300">
+      Scope: showing your requests only.
+    </p>
 
     <div
-      *ngIf="hasBusinessAccess && !canViewRequestCenter"
+      *ngIf="hasBusinessAccess && !canViewAllBusinessRequests"
       class="mt-4 rounded-2xl border border-amber-300/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-      Requests dashboard is available for owner, admin, and manager roles only.
-      Team members can continue scanning from the app.
+      Owner role can view all team requests and create new requests.
+      Your account currently sees personal requests only.
     </div>
 
     <a
@@ -68,7 +71,7 @@
       class="mt-3 w-full inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 transition text-white py-3 rounded-2xl border border-white/15">
       <span class="text-sm font-semibold">Open Business Center</span>
     </a>
-    <div class="grid grid-cols-2 gap-3 mt-6" *ngIf="!hasBusinessAccess || canViewRequestCenter">
+    <div class="grid grid-cols-2 gap-3 mt-6">
       <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
         <p class="text-xs text-slate-400">Total</p>
         <p class="text-2xl font-semibold mt-2">{{ requestStats.total }}</p>
@@ -87,10 +90,10 @@
       </div>
     </div>
 
-    <div class="mt-6 space-y-3" *ngIf="!hasBusinessAccess || canViewRequestCenter">
+    <div class="mt-6 space-y-3">
       <div
         class="rounded-2xl bg-white/5 border border-white/10 p-4"
-        *ngFor="let req of requests">
+        *ngFor="let req of requests; trackBy: trackById">
         <div class="flex items-center justify-between">
           <p class="text-sm font-semibold">{{ req.target }}</p>
           <span
