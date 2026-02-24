@@ -938,6 +938,187 @@ export class BusinessCenterService {
     );
   }
 
+  claimPendingInviteForUser(
+    user: Record<string, unknown> | null | undefined,
+    accessToken?: string
+  ): Observable<boolean> {
+    const userId = this.normalizeId(user?.['id']);
+    const userEmail = this.pickString(user?.['email'])?.toLowerCase() ?? null;
+    const token = accessToken ?? this.getToken();
+
+    if (!userId || !token) {
+      return of(false);
+    }
+
+    const linkByEmail$ = this.linkRequestsToUserByEmail(userId, userEmail, token);
+    const inviteToken = this.readPendingInviteToken();
+    if (!inviteToken) {
+      return linkByEmail$;
+    }
+
+    const params = new URLSearchParams({
+      sort: '-sent_at',
+      limit: '1',
+      fields: 'id,request,email,status,claimed_at,expires_at,token'
+    });
+    params.set('filter[token][_eq]', inviteToken);
+
+    const nowIso = new Date().toISOString();
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/request_invites?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      timeout(this.requestTimeoutMs),
+      map((res) => (Array.isArray(res?.data) ? res.data[0] ?? null : null)),
+      switchMap((invite) => {
+        const inviteId = this.normalizeId(invite?.id);
+        if (!inviteId) {
+          this.clearPendingInviteToken();
+          return linkByEmail$;
+        }
+
+        const inviteEmail = this.pickString(invite?.email)?.toLowerCase() ?? null;
+        if (inviteEmail && userEmail && inviteEmail !== userEmail) {
+          return linkByEmail$;
+        }
+
+        const expiresAtRaw = this.pickString(invite?.expires_at);
+        const expiresTs = expiresAtRaw ? new Date(expiresAtRaw).getTime() : NaN;
+        if (Number.isFinite(expiresTs) && expiresTs < Date.now()) {
+          this.clearPendingInviteToken();
+          return linkByEmail$;
+        }
+
+        const requestId = this.normalizeId(invite?.request);
+        const statusRaw = this.pickString(invite?.status)?.toLowerCase() ?? '';
+        const inviteAlreadyClaimed = statusRaw.includes('claim') || Boolean(this.pickString(invite?.claimed_at));
+
+        const claimInvite$ = inviteAlreadyClaimed
+          ? of(true)
+          : this.http.patch(
+              `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`,
+              {
+                status: 'claimed',
+                claimed_at: nowIso
+              },
+              this.requestOptions(token)
+            ).pipe(
+              map(() => true),
+              catchError(() => of(false))
+            );
+
+        const requestPatchPayload: Record<string, unknown> = {
+          requested_for_user: userId
+        };
+        if (userEmail) {
+          requestPatchPayload['requested_for_email'] = userEmail;
+        }
+
+        const linkRequest$ = requestId
+          ? this.http.patch(
+              `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
+              requestPatchPayload,
+              this.requestOptions(token)
+            ).pipe(
+              map(() => true),
+              catchError((err) => {
+                if (!this.shouldRetryWithMinimalPayload(err)) {
+                  return of(false);
+                }
+                return this.http.patch(
+                  `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
+                  { requested_for_user: userId },
+                  this.requestOptions(token)
+                ).pipe(
+                  map(() => true),
+                  catchError(() => of(false))
+                );
+              })
+            )
+          : of(false);
+
+        return forkJoin([claimInvite$, linkRequest$, linkByEmail$]).pipe(
+          map(([inviteClaimed, requestLinked, emailLinked]) => inviteClaimed || requestLinked || emailLinked),
+          tap((ok) => {
+            if (ok || inviteAlreadyClaimed) {
+              this.clearPendingInviteToken();
+            }
+          })
+        );
+      }),
+      catchError(() => of(false))
+    );
+  }
+
+  private linkRequestsToUserByEmail(
+    userId: string,
+    userEmail: string | null,
+    token: string
+  ): Observable<boolean> {
+    if (!userEmail || !this.isEmailLike(userEmail)) {
+      return of(false);
+    }
+
+    const params = new URLSearchParams({
+      sort: '-timestamp',
+      limit: '60',
+      fields: 'id,requested_for_user,requested_for_email'
+    });
+    params.set('filter[requested_for_email][_eq]', userEmail);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      timeout(this.requestTimeoutMs),
+      map((res) => (res.data ?? [])
+        .map((row) => ({
+          id: this.normalizeId(row?.id),
+          requestedForUserId: this.normalizeId(row?.requested_for_user)
+        }))
+        .filter((row) => Boolean(row.id) && row.requestedForUserId !== userId)
+        .map((row) => row.id as string)),
+      switchMap((requestIds) => {
+        if (!requestIds.length) {
+          return of(false);
+        }
+
+        const linkCalls = requestIds.map((requestId) =>
+          this.http.patch(
+            `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
+            {
+              requested_for_user: userId,
+              requested_for_email: userEmail
+            },
+            this.requestOptions(token)
+          ).pipe(
+            map(() => true),
+            catchError((err) => {
+              if (!this.shouldRetryWithMinimalPayload(err)) {
+                return of(false);
+              }
+
+              return this.http.patch(
+                `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
+                { requested_for_user: userId },
+                this.requestOptions(token)
+              ).pipe(
+                map(() => true),
+                catchError(() => of(false))
+              );
+            })
+          )
+        );
+
+        return forkJoin(linkCalls).pipe(
+          map((results) => results.some(Boolean))
+        );
+      }),
+      catchError(() => of(false))
+    );
+  }
+
   listReportExports(
     _scopeHint: string | null,
     limit = 40,
@@ -1898,6 +2079,31 @@ export class BusinessCenterService {
   private requestOptions(token: string | null): { headers?: HttpHeaders; withCredentials: boolean } {
     const headers = this.buildAuthHeaders(token);
     return headers ? { headers, withCredentials: true } : { withCredentials: true };
+  }
+
+  private readPendingInviteToken(): string | null {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    try {
+      const token = localStorage.getItem('pending_invite_token');
+      return this.pickString(token);
+    } catch {
+      return null;
+    }
+  }
+
+  private clearPendingInviteToken(): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorage.removeItem('pending_invite_token');
+    } catch {
+      // ignore storage errors
+    }
   }
 
   private readStoredAccessContext(): { userId: string | null } {
