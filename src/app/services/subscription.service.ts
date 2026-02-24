@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
-import { Observable, of, Subject } from 'rxjs';
+import { Observable, of, ReplaySubject } from 'rxjs';
 import { catchError, finalize, map, shareReplay, switchMap, tap } from 'rxjs/operators';
 
 export type Plan = {
@@ -58,7 +58,7 @@ export class SubscriptionService {
   private businessUpgradeRequestsEndpointForbidden = false;
   private snapshotCacheByUser = new Map<string, { snapshot: BusinessAccessSnapshot; cachedAt: number }>();
   private snapshotInFlightByUser = new Map<string, Observable<BusinessAccessSnapshot>>();
-  private snapshotRefreshSubject = new Subject<void>();
+  private snapshotRefreshSubject = new ReplaySubject<void>(1);
   private readonly subscriptionFields = [
     'id',
     'status',

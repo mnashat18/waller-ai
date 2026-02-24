@@ -14,7 +14,7 @@ import { SubscriptionService } from '../../services/subscription.service';
 })
 export class SidebarComponent implements OnInit, OnDestroy {
   private readonly sidebarStateStorageKey = 'wellar_sidebar_business_state_v1';
-  planLabel = 'Free';
+  planLabel = 'Loading...';
   hasBusinessAccess = false;
   hasBusinessProfile = false;
   canUseBusinessFeatures = false;
@@ -24,11 +24,15 @@ export class SidebarComponent implements OnInit, OnDestroy {
   isBusinessTrial = false;
   trialExpired = false;
   trialDaysRemaining: number | null = null;
-  memberRoleLabel = 'User';
+  memberRoleLabel = '-';
+  loadingAccessState = true;
   private accessSub?: RxSubscription;
   private navSub?: RxSubscription;
   private refreshSub?: RxSubscription;
+  private accessRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly accessTimeoutMs = 10000;
+  private readonly maxAccessRefreshAttempts = 2;
+  private accessRefreshAttempts = 0;
   private currentUserId: string | null = null;
 
   constructor(
@@ -55,10 +59,17 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.accessSub?.unsubscribe();
     this.navSub?.unsubscribe();
     this.refreshSub?.unsubscribe();
+    if (this.accessRetryTimer) {
+      clearTimeout(this.accessRetryTimer);
+    }
   }
 
   statusText(): string {
-    if (this.hasBusinessAccess && typeof this.trialDaysRemaining === 'number') {
+    if (this.loadingAccessState) {
+      return 'Loading...';
+    }
+
+    if (this.hasBusinessAccess && typeof this.trialDaysRemaining === 'number' && this.trialDaysRemaining > 0) {
       return `${this.trialDaysRemaining}d left`;
     }
 
@@ -78,7 +89,11 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   trialProgressPercent(): number {
-    if (!this.isBusinessTrial || typeof this.trialDaysRemaining !== 'number') {
+    if (
+      !this.isBusinessTrial ||
+      typeof this.trialDaysRemaining !== 'number' ||
+      this.trialDaysRemaining <= 0
+    ) {
       return this.hasBusinessAccess ? 100 : 0;
     }
     const percent = Math.round((this.trialDaysRemaining / 14) * 100);
@@ -92,9 +107,16 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   private loadAccessState(_forceRefresh = false): void {
-    const cachedState = _forceRefresh ? null : this.businessCenter.getCachedHubAccessState();
-    if (cachedState && !_forceRefresh) {
+    if (this.accessRetryTimer) {
+      clearTimeout(this.accessRetryTimer);
+      this.accessRetryTimer = null;
+    }
+
+    const cachedState = this.businessCenter.getCachedHubAccessState();
+    if (cachedState) {
       this.applyHubAccessState(cachedState);
+      this.loadingAccessState = false;
+      this.accessRefreshAttempts = 0;
     }
 
     this.accessSub?.unsubscribe();
@@ -103,10 +125,26 @@ export class SidebarComponent implements OnInit, OnDestroy {
       catchError(() => of(null))
     ).subscribe((state) => {
       if (!state) {
+        if (this.hasSessionToken() && this.accessRefreshAttempts < this.maxAccessRefreshAttempts) {
+          this.accessRefreshAttempts += 1;
+          this.accessRetryTimer = setTimeout(() => this.loadAccessState(true), 500 * this.accessRefreshAttempts);
+          return;
+        }
+        this.loadingAccessState = false;
         this.applyFallbackFromSession();
         return;
       }
+
+      const looksUnresolved = this.hasSessionToken() && !state.hasPaidAccess && !state.profile?.id;
+      if (looksUnresolved && this.accessRefreshAttempts < this.maxAccessRefreshAttempts) {
+        this.accessRefreshAttempts += 1;
+        this.accessRetryTimer = setTimeout(() => this.loadAccessState(true), 500 * this.accessRefreshAttempts);
+        return;
+      }
+
+      this.accessRefreshAttempts = 0;
       this.applyHubAccessState(state);
+      this.loadingAccessState = false;
     });
   }
 
@@ -128,11 +166,12 @@ export class SidebarComponent implements OnInit, OnDestroy {
       Boolean(state.permissions?.canUseSystem);
     this.trialExpired = Boolean(state.trialExpired);
 
-    const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
-    this.isBusinessTrial = billingStatus === 'trial' && !this.trialExpired;
-    this.trialDaysRemaining = this.isBusinessTrial
-      ? this.daysUntil(state.trialExpiresAt)
-      : null;
+    const daysRemaining = this.daysUntil(state.trialExpiresAt);
+    this.trialDaysRemaining =
+      this.hasBusinessAccess && typeof daysRemaining === 'number' && daysRemaining >= 0
+        ? daysRemaining
+        : null;
+    this.isBusinessTrial = this.hasBusinessAccess && typeof this.trialDaysRemaining === 'number';
 
     const planCode = (state.profile?.plan_code ?? '').toString().trim().toLowerCase();
     this.planLabel = planCode === 'business' || this.hasBusinessProfile
@@ -172,8 +211,24 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.isBusinessTrial = cached.isBusinessTrial;
         this.trialExpired = cached.trialExpired;
         this.trialDaysRemaining = cached.trialDaysRemaining;
+        this.loadingAccessState = false;
         return;
       }
+    }
+
+    if (this.hasSessionToken()) {
+      this.planLabel = 'Loading...';
+      this.memberRoleLabel = '-';
+      this.hasBusinessProfile = false;
+      this.hasBusinessAccess = false;
+      this.canUseBusinessFeatures = false;
+      this.canOpenAuditLogs = true;
+      this.canOpenRequestsCenter = true;
+      this.canOpenBusinessCenter = false;
+      this.isBusinessTrial = false;
+      this.trialExpired = false;
+      this.trialDaysRemaining = null;
+      return;
     }
 
     this.planLabel = 'Free';
@@ -324,5 +379,16 @@ export class SidebarComponent implements OnInit, OnDestroy {
     } catch {
       // ignore storage errors
     }
+  }
+
+  private hasSessionToken(): boolean {
+    if (typeof localStorage === 'undefined') {
+      return false;
+    }
+    const token =
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token') ??
+      localStorage.getItem('directus_token');
+    return Boolean(token && token.trim());
   }
 }

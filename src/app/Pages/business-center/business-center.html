@@ -179,10 +179,10 @@
         </div>
       </section>
 
-      <!-- 3) Requests & Invites -->
+      <!-- 3) Requests -->
       <section class="panel span-2">
         <div class="panel-header">
-          <h3 class="panel-title">3) Requests & Invites</h3>
+          <h3 class="panel-title">3) Requests</h3>
           <span class="chip">requests: {{ requests.length }}</span>
           <span class="chip">{{ hasOrgScope() ? 'Scope: org' : 'Scope: fallback' }}</span>
         </div>
@@ -192,10 +192,6 @@
           <span class="chip">Sent: {{ inviteMetrics.sent }}</span>
           <span class="chip">Claimed: {{ inviteMetrics.claimed }}</span>
           <span class="chip">Expired: {{ inviteMetrics.expired }}</span>
-        </div>
-
-        <div class="section-note" *ngIf="orgScopeNote">
-          {{ orgScopeNote }}
         </div>
 
         <ng-container *ngIf="canCreateRequestsFromCenter(); else inviteReadonlyState">
@@ -265,36 +261,6 @@
             Request creation is available for Business members with write access.
           </div>
         </ng-template>
-
-        <div class="table-shell mt-5">
-          <table>
-            <thead>
-              <tr>
-                <th class="th">Invite ID</th>
-                <th class="th">Request</th>
-                <th class="th">Contact</th>
-                <th class="th">Status</th>
-                <th class="th">Sent At</th>
-                <th class="th">Expires</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              <tr class="row" *ngFor="let invite of requestInvites; trackBy: trackById">
-                <td>{{ invite?.id || '-' }}</td>
-                <td>{{ invite?.request || '-' }}</td>
-                <td>{{ invite?.email || invite?.phone || '-' }}</td>
-                <td>{{ inviteStatusLabel(invite) }}</td>
-                <td>{{ formatDate(invite?.sent_at || invite?.date_created) }}</td>
-                <td>{{ formatDate(invite?.expires_at) }}</td>
-              </tr>
-
-              <tr *ngIf="!requestInvites.length">
-                <td colspan="6" class="empty-cell">No invites found.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
 
         <div class="table-shell mt-5">
           <table>

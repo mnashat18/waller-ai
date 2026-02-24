@@ -78,6 +78,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
   private accessLoadFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
   private businessDataFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
+  private businessDataLoadSeq = 0;
 
   accessState: BusinessHubAccessState | null = null;
   orgScopeNote = '';
@@ -785,10 +786,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
     this.loadingData = true;
     this.clearBusinessData();
+    const loadSeq = ++this.businessDataLoadSeq;
     const businessProfileId = profileId;
     this.clearBusinessDataFailSafeTimer();
     this.businessDataFailSafeTimer = setTimeout(() => {
-      if (!this.loadingData) return;
+      if (loadSeq !== this.businessDataLoadSeq || !this.loadingData) return;
       this.loadingData = false;
       this.showFeedback(
         'error',
@@ -847,11 +849,18 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         });
       }),
       finalize(() => {
+        if (loadSeq !== this.businessDataLoadSeq) {
+          return;
+        }
         this.loadingData = false;
         this.clearBusinessDataFailSafeTimer();
       })
     ).subscribe(({ team, requests, invites, exports, events }) => {
-      this.teamMembers = (team as any[]) ?? [];
+      if (loadSeq !== this.businessDataLoadSeq) {
+        return;
+      }
+
+      this.teamMembers = this.buildVisibleTeamMembers((team as any[]) ?? []);
       const requestRows = (requests as RequestRecord[]) ?? [];
       this.reconcileOptimisticRequests(requestRows);
       this.requests = this.mergeRequestRows(requestRows, Array.from(this.optimisticRequests.values()));
@@ -1073,7 +1082,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
     this.businessCenter.listTeamMembers(profileId).subscribe({
       next: (rows: any) => {
-        this.teamMembers = rows ?? [];
+        this.teamMembers = this.buildVisibleTeamMembers(rows ?? []);
         this.syncExportSelectionWithTeam();
         this.reloadExports();
         this.reloadActivityEvents();
@@ -1156,6 +1165,44 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.filteredActivityEvents = [];
     this.exportForm.selectedMemberIds = [];
     this.inviteMetrics = { pending: 0, sent: 0, claimed: 0, expired: 0 };
+  }
+
+  private buildVisibleTeamMembers(rows: any[]): any[] {
+    const source = Array.isArray(rows) ? rows : [];
+    const visible: any[] = [];
+    const seenByUserId = new Set<string>();
+
+    for (const row of source) {
+      const userId = this.pickId(row?.user_id);
+      if (!userId) {
+        visible.push(row);
+        continue;
+      }
+      if (seenByUserId.has(userId)) {
+        continue;
+      }
+      seenByUserId.add(userId);
+      visible.push(row);
+    }
+
+    const currentUserId = this.currentUserId();
+    if (!currentUserId || seenByUserId.has(currentUserId)) {
+      return visible;
+    }
+
+    const ownerId = this.pickId(this.profile?.owner_user);
+    const fallbackRole: BusinessMemberRole =
+      this.currentMemberRole ?? (ownerId && ownerId === currentUserId ? 'owner' : 'member');
+
+    visible.unshift({
+      id: `self_${currentUserId}`,
+      user_id: currentUserId,
+      user_label: this.currentUserEmail() ?? currentUserId,
+      member_role: fallbackRole,
+      status: 'active'
+    });
+
+    return visible;
   }
 
   private sectionFallback<T>(err: any, section: string, fallback: T): Observable<T> {
