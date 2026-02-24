@@ -463,11 +463,20 @@ export class BusinessCenterService {
   listRequestsForBusinessProfile(profileId: string | null, limit = 60): Observable<RequestRecord[]> {
     const access = this.getAccessContext();
     const normalizedProfileId = this.normalizeId(profileId);
-    if (!normalizedProfileId) {
-      return of([]);
-    }
+    const userId = this.normalizeId(access.userId);
 
-    return this.fetchRequestsByBusinessProfile(normalizedProfileId, limit, access.token).pipe(
+    const profileRequests$ = normalizedProfileId
+      ? this.fetchRequestsByBusinessProfile(normalizedProfileId, limit, access.token)
+      : of([] as RequestRecord[]);
+
+    return profileRequests$.pipe(
+      switchMap((rows) => {
+        if (rows.length || !userId) {
+          return of(rows);
+        }
+        // Fallback for legacy rows that may not have business_profile populated.
+        return this.fetchRequestsForUserFallback(userId, limit, access.token);
+      }),
       map((rows) => this.mergeRequestsById(rows)),
       switchMap((rows) => this.attachRecipientIndustries(rows, access.token)),
       catchError(() => of([]))
@@ -585,6 +594,39 @@ export class BusinessCenterService {
       this.requestOptions(token)
     ).pipe(
       map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+      catchError(() => of([]))
+    );
+  }
+
+  private fetchRequestsByRequesterUser(
+    userId: string,
+    limit: number,
+    token: string | null
+  ): Observable<RequestRecord[]> {
+    const params = this.buildRequestsParams(limit);
+    params.set('filter[requested_by_user][_eq]', userId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
+      catchError(() => of([]))
+    );
+  }
+
+  private fetchRequestsForUserFallback(
+    userId: string,
+    limit: number,
+    token: string | null
+  ): Observable<RequestRecord[]> {
+    return forkJoin({
+      requestedFor: this.fetchRequestsByRequestedUser(userId, limit, token),
+      requestedBy: this.fetchRequestsByRequesterUser(userId, limit, token)
+    }).pipe(
+      map(({ requestedFor, requestedBy }) =>
+        this.mergeRequestsById([...(requestedFor ?? []), ...(requestedBy ?? [])])
+      ),
       catchError(() => of([]))
     );
   }

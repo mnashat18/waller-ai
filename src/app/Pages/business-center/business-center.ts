@@ -78,6 +78,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
   private accessLoadFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
   private businessDataFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
+  private teamMembersRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private businessDataLoadSeq = 0;
 
   accessState: BusinessHubAccessState | null = null;
@@ -106,6 +107,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   requestSubmitting = false;
   memberSubmitting = false;
   showTeamMemberManager = false;
+  teamMembersLoading = false;
   readonly dailyRequestLimit: number;
   readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
   todayRequestCount = 0;
@@ -156,6 +158,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.clearMemberSubmitFailSafeTimer();
     this.clearAccessLoadFailSafeTimer();
     this.clearBusinessDataFailSafeTimer();
+    this.clearTeamMembersRetryTimer();
   }
 
   // ===============================
@@ -785,7 +788,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }
 
     this.loadingData = true;
+    this.teamMembersLoading = true;
     this.clearBusinessData();
+    this.clearTeamMembersRetryTimer();
     const loadSeq = ++this.businessDataLoadSeq;
     const businessProfileId = profileId;
     this.clearBusinessDataFailSafeTimer();
@@ -803,11 +808,18 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       timeout(this.actionTimeoutMs),
       catchError((err) => this.sectionFallback<BusinessProfileMember[]>(err, 'team members', [])),
       switchMap((teamRows) => {
-        const team = (teamRows as any[]) ?? [];
-        const activityOptions = this.activityQueryOptions(team, state);
+        const team = this.buildVisibleTeamMembers((teamRows as any[]) ?? []);
+        this.teamMembers = team;
+        this.teamMembersLoading = false;
+        this.syncExportSelectionWithTeam();
+
+        if (!team.length) {
+          this.scheduleTeamMembersRetry(profileId, loadSeq, 1);
+        }
+
+        const activityOptions = this.activityQueryOptions(this.teamMembers, state);
 
         return forkJoin({
-          team: of(team) as Observable<BusinessProfileMember[]>,
           requests: this.businessCenter.listRequestsForBusinessProfile(businessProfileId).pipe(
             take(1),
             timeout(this.actionTimeoutMs),
@@ -841,7 +853,6 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       catchError((err) => {
         this.showFeedback('error', this.describeHttpError(err, 'Failed to load Business modules.'));
         return of({
-          team: [] as BusinessProfileMember[],
           requests: [] as RequestRecord[],
           invites: [] as RequestInviteRecord[],
           exports: [] as ReportExportRecord[],
@@ -853,14 +864,14 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
           return;
         }
         this.loadingData = false;
+        this.teamMembersLoading = false;
         this.clearBusinessDataFailSafeTimer();
       })
-    ).subscribe(({ team, requests, invites, exports, events }) => {
+    ).subscribe(({ requests, invites, exports, events }) => {
       if (loadSeq !== this.businessDataLoadSeq) {
         return;
       }
 
-      this.teamMembers = this.buildVisibleTeamMembers((team as any[]) ?? []);
       const requestRows = (requests as RequestRecord[]) ?? [];
       this.reconcileOptimisticRequests(requestRows);
       this.requests = this.mergeRequestRows(requestRows, Array.from(this.optimisticRequests.values()));
@@ -1082,12 +1093,14 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
     this.businessCenter.listTeamMembers(profileId).subscribe({
       next: (rows: any) => {
+        this.teamMembersLoading = false;
         this.teamMembers = this.buildVisibleTeamMembers(rows ?? []);
         this.syncExportSelectionWithTeam();
         this.reloadExports();
         this.reloadActivityEvents();
       },
       error: (err: any) => {
+        this.teamMembersLoading = false;
         this.showFeedback('error', this.describeHttpError(err, 'Failed to reload team members.'));
       }
     });
@@ -1156,6 +1169,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private clearBusinessData(): void {
     this.teamMembers = [];
+    this.teamMembersLoading = false;
     this.requests = [];
     this.todayRequestCount = 0;
     this.optimisticRequests.clear();
@@ -1165,6 +1179,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.filteredActivityEvents = [];
     this.exportForm.selectedMemberIds = [];
     this.inviteMetrics = { pending: 0, sent: 0, claimed: 0, expired: 0 };
+    this.clearTeamMembersRetryTimer();
   }
 
   private buildVisibleTeamMembers(rows: any[]): any[] {
@@ -1185,24 +1200,79 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       visible.push(row);
     }
 
-    const currentUserId = this.currentUserId();
-    if (!currentUserId || seenByUserId.has(currentUserId)) {
-      return visible;
+    const fallbackOwner = this.buildFallbackOwnerMember();
+    const fallbackOwnerUserId = this.pickId(fallbackOwner?.user_id);
+    if (fallbackOwnerUserId && !seenByUserId.has(fallbackOwnerUserId)) {
+      visible.unshift(fallbackOwner);
     }
 
-    const ownerId = this.pickId(this.profile?.owner_user);
-    const fallbackRole: BusinessMemberRole =
-      this.currentMemberRole ?? (ownerId && ownerId === currentUserId ? 'owner' : 'member');
+    return visible;
+  }
 
-    visible.unshift({
-      id: `self_${currentUserId}`,
-      user_id: currentUserId,
-      user_label: this.currentUserEmail() ?? currentUserId,
+  private buildFallbackOwnerMember(): any | null {
+    const ownerId = this.pickId(this.profile?.owner_user) ?? this.currentUserId();
+    if (!ownerId) {
+      return null;
+    }
+
+    const ownerEmail = this.pickString(this.profile?.work_email) ?? this.currentUserEmail() ?? ownerId;
+    const fallbackRole: BusinessMemberRole =
+      this.currentMemberRole ?? (ownerId === this.pickId(this.profile?.owner_user) ? 'owner' : 'member');
+
+    return {
+      id: `owner_${ownerId}`,
+      user_id: ownerId,
+      user_label: ownerEmail,
       member_role: fallbackRole,
       status: 'active'
-    });
+    };
+  }
 
-    return visible;
+  private scheduleTeamMembersRetry(profileId: string, loadSeq: number, attempt: number): void {
+    if (attempt > 2) {
+      return;
+    }
+
+    this.clearTeamMembersRetryTimer();
+    this.teamMembersRetryTimer = setTimeout(() => {
+      if (loadSeq !== this.businessDataLoadSeq) {
+        return;
+      }
+
+      this.businessCenter.listTeamMembers(profileId).pipe(take(1)).subscribe({
+        next: (rows) => {
+          if (loadSeq !== this.businessDataLoadSeq) {
+            return;
+          }
+
+          const resolved = this.buildVisibleTeamMembers((rows as any[]) ?? []);
+          if (resolved.length) {
+            this.teamMembers = resolved;
+            this.syncExportSelectionWithTeam();
+            this.refreshFilteredActivityEvents();
+            this.reloadExports();
+            this.reloadActivityEvents();
+            return;
+          }
+
+          this.scheduleTeamMembersRetry(profileId, loadSeq, attempt + 1);
+        },
+        error: () => {
+          if (loadSeq !== this.businessDataLoadSeq) {
+            return;
+          }
+          this.scheduleTeamMembersRetry(profileId, loadSeq, attempt + 1);
+        }
+      });
+    }, 700 * attempt);
+  }
+
+  private clearTeamMembersRetryTimer(): void {
+    if (!this.teamMembersRetryTimer) {
+      return;
+    }
+    clearTimeout(this.teamMembersRetryTimer);
+    this.teamMembersRetryTimer = null;
   }
 
   private sectionFallback<T>(err: any, section: string, fallback: T): Observable<T> {
@@ -1432,7 +1502,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return [];
     }
 
-    if (selection.scope === 'team' && !selection.userIds.length && !selection.labels.length) {
+    // Team scope should always show full activity feed.
+    if (selection.scope === 'team') {
       return [...this.activityEvents];
     }
 

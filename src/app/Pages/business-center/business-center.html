@@ -103,7 +103,7 @@
       <section class="panel">
         <div class="panel-header">
           <h3 class="panel-title">2) Team Members</h3>
-          <span class="chip">{{ teamMembers.length }} members</span>
+          <span class="chip">{{ teamMembersLoading ? 'Loading...' : (teamMembers.length + ' members') }}</span>
           <button
             *ngIf="canManageMembers; else memberReadonlyChip"
             type="button"
@@ -127,13 +127,17 @@
             </thead>
 
             <tbody>
+              <tr *ngIf="teamMembersLoading">
+                <td colspan="3" class="empty-cell">Loading team members...</td>
+              </tr>
+
               <tr class="row" *ngFor="let member of teamMembers; trackBy: trackById">
                 <td>{{ member?.user_label || member?.user_id || '-' }}</td>
                 <td>{{ member?.member_role || '-' }}</td>
                 <td>{{ member?.status || '-' }}</td>
               </tr>
 
-              <tr *ngIf="!teamMembers.length">
+              <tr *ngIf="!teamMembersLoading && !teamMembers.length">
                 <td colspan="3" class="empty-cell">No team members found.</td>
               </tr>
             </tbody>

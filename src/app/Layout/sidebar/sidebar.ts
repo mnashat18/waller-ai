@@ -14,6 +14,7 @@ import { SubscriptionService } from '../../services/subscription.service';
 })
 export class SidebarComponent implements OnInit, OnDestroy {
   private readonly sidebarStateStorageKey = 'wellar_sidebar_business_state_v1';
+  private readonly businessHubStateStorageKey = 'wellar_business_hub_access_state_v1';
   planLabel = 'Loading...';
   hasBusinessAccess = false;
   hasBusinessProfile = false;
@@ -195,9 +196,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
       const maxAgeMs = 5 * 60 * 1000;
       const isFresh = cached.updatedAt > 0 && Date.now() - cached.updatedAt <= maxAgeMs;
 
-      if (!isFresh) {
-        this.clearSidebarState();
-      } else if (this.currentUserId && cached.userId && cached.userId !== this.currentUserId) {
+      if (this.currentUserId && cached.userId && cached.userId !== this.currentUserId) {
         this.clearSidebarState();
       } else {
         this.planLabel = cached.planLabel;
@@ -212,22 +211,45 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.trialExpired = cached.trialExpired;
         this.trialDaysRemaining = cached.trialDaysRemaining;
         this.loadingAccessState = false;
-        return;
+        if (isFresh) {
+          return;
+        }
       }
     }
 
+    const hubFallback = this.readStoredHubStateFallback();
+    if (hubFallback) {
+      this.planLabel = hubFallback.planLabel;
+      this.memberRoleLabel = hubFallback.memberRoleLabel;
+      this.hasBusinessProfile = hubFallback.hasBusinessProfile;
+      this.hasBusinessAccess = hubFallback.hasBusinessAccess;
+      this.canUseBusinessFeatures = hubFallback.canUseBusinessFeatures;
+      this.canOpenAuditLogs = hubFallback.canOpenAuditLogs;
+      this.canOpenRequestsCenter = hubFallback.canOpenRequestsCenter;
+      this.canOpenBusinessCenter = hubFallback.canOpenBusinessCenter;
+      this.isBusinessTrial = hubFallback.isBusinessTrial;
+      this.trialExpired = hubFallback.trialExpired;
+      this.trialDaysRemaining = hubFallback.trialDaysRemaining;
+      this.loadingAccessState = false;
+      return;
+    }
+
     if (this.hasSessionToken()) {
-      this.planLabel = 'Loading...';
-      this.memberRoleLabel = '-';
-      this.hasBusinessProfile = false;
-      this.hasBusinessAccess = false;
-      this.canUseBusinessFeatures = false;
-      this.canOpenAuditLogs = true;
-      this.canOpenRequestsCenter = true;
-      this.canOpenBusinessCenter = false;
+      const roleHint = this.readSessionRoleHint();
+      const hasBusinessHint = this.hasBusinessSessionHint(roleHint);
+
+      this.planLabel = hasBusinessHint ? 'Business' : 'Free';
+      this.memberRoleLabel = roleHint ?? 'User';
+      this.hasBusinessProfile = hasBusinessHint;
+      this.hasBusinessAccess = hasBusinessHint;
+      this.canUseBusinessFeatures = hasBusinessHint;
+      this.canOpenAuditLogs = !hasBusinessHint || this.canOpenOwnerViews((roleHint ?? '').toLowerCase());
+      this.canOpenRequestsCenter = !hasBusinessHint || this.canOpenOwnerViews((roleHint ?? '').toLowerCase());
+      this.canOpenBusinessCenter = hasBusinessHint;
       this.isBusinessTrial = false;
       this.trialExpired = false;
       this.trialDaysRemaining = null;
+      this.loadingAccessState = false;
       return;
     }
 
@@ -242,6 +264,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.isBusinessTrial = false;
     this.trialExpired = false;
     this.trialDaysRemaining = null;
+    this.loadingAccessState = false;
   }
 
   private daysUntil(value: string | null): number | null {
@@ -390,5 +413,178 @@ export class SidebarComponent implements OnInit, OnDestroy {
       localStorage.getItem('access_token') ??
       localStorage.getItem('directus_token');
     return Boolean(token && token.trim());
+  }
+
+  private readStoredHubStateFallback(): {
+    planLabel: string;
+    memberRoleLabel: string;
+    hasBusinessProfile: boolean;
+    hasBusinessAccess: boolean;
+    canUseBusinessFeatures: boolean;
+    canOpenAuditLogs: boolean;
+    canOpenRequestsCenter: boolean;
+    canOpenBusinessCenter: boolean;
+    isBusinessTrial: boolean;
+    trialExpired: boolean;
+    trialDaysRemaining: number | null;
+  } | null {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    try {
+      const raw = localStorage.getItem(this.businessHubStateStorageKey);
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const state = (parsed['state'] ?? null) as Record<string, unknown> | null;
+      if (!state || typeof state !== 'object') {
+        return null;
+      }
+
+      const stateUserId = this.pickString(state['userId']);
+      if (this.currentUserId && stateUserId && this.currentUserId !== stateUserId) {
+        return null;
+      }
+
+      const profile = (state['profile'] ?? null) as Record<string, unknown> | null;
+      const permissions = (state['permissions'] ?? null) as Record<string, unknown> | null;
+
+      const hasBusinessProfile = Boolean(this.pickString(profile?.['id']));
+      const hasBusinessAccess = state['hasPaidAccess'] === true;
+      const role = (this.pickString(state['memberRole']) ?? '').toLowerCase();
+      const roleLabel = role ? this.normalizeRoleLabel(role) : (hasBusinessProfile ? 'Business' : 'User');
+      const planCode = (this.pickString(profile?.['plan_code']) ?? '').toLowerCase();
+      const planLabel = planCode === 'business' || hasBusinessProfile ? 'Business' : 'Free';
+      const trialExpired = state['trialExpired'] === true;
+      const trialDaysRemaining = this.daysUntil(this.pickString(state['trialExpiresAt']));
+      const isBusinessTrial =
+        hasBusinessAccess && typeof trialDaysRemaining === 'number' && trialDaysRemaining >= 0;
+      const canUseSystem = permissions?.['canUseSystem'] === true;
+      const canOpenOwnerViews = this.canOpenOwnerViews(role);
+
+      return {
+        planLabel,
+        memberRoleLabel: roleLabel,
+        hasBusinessProfile,
+        hasBusinessAccess,
+        canUseBusinessFeatures: hasBusinessAccess && canUseSystem,
+        canOpenAuditLogs: !hasBusinessAccess || canOpenOwnerViews,
+        canOpenRequestsCenter: !hasBusinessAccess || canOpenOwnerViews,
+        canOpenBusinessCenter: (hasBusinessProfile || hasBusinessAccess) && canOpenOwnerViews,
+        isBusinessTrial,
+        trialExpired,
+        trialDaysRemaining:
+          hasBusinessAccess && typeof trialDaysRemaining === 'number' ? trialDaysRemaining : null
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private readSessionRoleHint(): string | null {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    const storedRoleName = this.pickString(localStorage.getItem('user_role_name'));
+    if (storedRoleName) {
+      return this.normalizeRoleLabel(storedRoleName);
+    }
+
+    const payload = this.readJwtPayload();
+    if (!payload) {
+      return null;
+    }
+
+    const businessRole =
+      this.pickString(payload['member_role']) ??
+      this.pickString(payload['business_role']) ??
+      this.pickString(payload['role_name']) ??
+      this.pickString(payload['role_label']);
+
+    if (businessRole) {
+      return this.normalizeRoleLabel(businessRole);
+    }
+
+    return null;
+  }
+
+  private hasBusinessSessionHint(roleLabel: string | null): boolean {
+    const payload = this.readJwtPayload();
+    const planCode = (this.pickString(payload?.['plan_code']) ?? '').toLowerCase();
+    if (planCode === 'business') {
+      return true;
+    }
+
+    const normalizedRole = (roleLabel ?? '').trim().toLowerCase();
+    if (!normalizedRole) {
+      return false;
+    }
+
+    return (
+      normalizedRole.includes('business') ||
+      normalizedRole === 'owner' ||
+      normalizedRole === 'admin' ||
+      normalizedRole === 'manager' ||
+      normalizedRole === 'member' ||
+      normalizedRole === 'viewer'
+    );
+  }
+
+  private readJwtPayload(): Record<string, unknown> | null {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    const token =
+      localStorage.getItem('token') ??
+      localStorage.getItem('access_token') ??
+      localStorage.getItem('directus_token');
+
+    if (!token) {
+      return null;
+    }
+
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  private pickString(value: unknown): string | null {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || null;
+    }
+    if (typeof value === 'number' && !Number.isNaN(value)) {
+      return String(value);
+    }
+    return null;
+  }
+
+  private normalizeRoleLabel(value: string): string {
+    const normalized = value
+      .trim()
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+
+    if (!normalized) {
+      return 'User';
+    }
+
+    return normalized
+      .split(' ')
+      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+      .join(' ');
   }
 }
