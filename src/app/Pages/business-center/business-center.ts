@@ -86,6 +86,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private emptyModulesRetryAttempt = 0;
   private readonly maxEmptyModulesRetryAttempts = 1;
   private businessDataLoadSeq = 0;
+  private readonly teamMembersCachePrefix = 'business_center_team_members_v1';
 
   accessState: BusinessHubAccessState | null = null;
   orgScopeNote = '';
@@ -838,12 +839,15 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
           });
         }
 
-        const team = this.buildVisibleTeamMembers((teamRows as any[]) ?? []);
+        const apiTeam = this.buildVisibleTeamMembers((teamRows as any[]) ?? []);
+        const cachedTeam = this.readCachedTeamMembers(profileId);
+        const team = this.mergeTeamMembers(apiTeam, cachedTeam, this.teamMembers);
         this.teamMembers = team;
+        this.persistTeamMembersCache(profileId, team);
         this.teamMembersLoading = false;
         this.syncExportSelectionWithTeam();
 
-        if (!team.length) {
+        if (!apiTeam.length) {
           this.scheduleTeamMembersRetry(profileId, loadSeq, 1);
         }
 
@@ -1135,7 +1139,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.businessCenter.listTeamMembers(profileId).subscribe({
       next: (rows: any) => {
         this.teamMembersLoading = false;
-        this.teamMembers = this.buildVisibleTeamMembers(rows ?? []);
+        const apiTeam = this.buildVisibleTeamMembers(rows ?? []);
+        const cachedTeam = this.readCachedTeamMembers(profileId);
+        const mergedTeam = this.mergeTeamMembers(this.teamMembers, apiTeam, cachedTeam);
+        this.teamMembers = mergedTeam;
+        this.persistTeamMembersCache(profileId, mergedTeam);
         this.syncExportSelectionWithTeam();
         this.reloadExports();
         this.reloadActivityEvents();
@@ -1227,24 +1235,30 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private buildVisibleTeamMembers(rows: any[]): any[] {
     const source = Array.isArray(rows) ? rows : [];
     const visible: any[] = [];
-    const seenByUserId = new Set<string>();
+    const seenKeys = new Set<string>();
 
     for (const row of source) {
-      const userId = this.pickId(row?.user_id);
-      if (!userId) {
-        visible.push(row);
+      const normalized = this.normalizeTeamMemberForView(row);
+      if (!normalized) {
         continue;
       }
-      if (seenByUserId.has(userId)) {
+
+      const key = this.memberIdentityKey(normalized);
+      if (!key) {
+        visible.push(normalized);
         continue;
       }
-      seenByUserId.add(userId);
-      visible.push(row);
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+      visible.push(normalized);
     }
 
     const fallbackOwner = this.buildFallbackOwnerMember();
-    const fallbackOwnerUserId = this.pickId(fallbackOwner?.user_id);
-    if (fallbackOwnerUserId && !seenByUserId.has(fallbackOwnerUserId)) {
+    const fallbackOwnerKey = this.memberIdentityKey(fallbackOwner);
+    if (fallbackOwner && fallbackOwnerKey && !seenKeys.has(fallbackOwnerKey)) {
+      seenKeys.add(fallbackOwnerKey);
       visible.unshift(fallbackOwner);
     }
 
@@ -1283,7 +1297,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       nextRows.unshift(optimisticRow);
     }
 
-    this.teamMembers = this.buildVisibleTeamMembers(nextRows);
+    const profileId = this.pickId(this.profile?.id);
+    const cachedTeam = this.readCachedTeamMembers(profileId);
+    const mergedTeam = this.mergeTeamMembers(nextRows, cachedTeam);
+    this.teamMembers = mergedTeam;
+    this.persistTeamMembersCache(profileId, mergedTeam);
     this.syncExportSelectionWithTeam();
     this.refreshFilteredActivityEvents();
   }
@@ -1324,9 +1342,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
             return;
           }
 
-          const resolved = this.buildVisibleTeamMembers((rows as any[]) ?? []);
+          const apiTeam = this.buildVisibleTeamMembers((rows as any[]) ?? []);
+          const cachedTeam = this.readCachedTeamMembers(profileId);
+          const resolved = this.mergeTeamMembers(this.teamMembers, apiTeam, cachedTeam);
           if (resolved.length) {
             this.teamMembers = resolved;
+            this.persistTeamMembersCache(profileId, resolved);
             this.syncExportSelectionWithTeam();
             this.refreshFilteredActivityEvents();
             this.reloadExports();
@@ -1352,6 +1373,115 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }
     clearTimeout(this.teamMembersRetryTimer);
     this.teamMembersRetryTimer = null;
+  }
+
+  private mergeTeamMembers(...sources: any[][]): any[] {
+    const merged: any[] = [];
+    const seen = new Set<string>();
+
+    for (const source of sources) {
+      for (const raw of source ?? []) {
+        const row = this.normalizeTeamMemberForView(raw);
+        if (!row) {
+          continue;
+        }
+
+        const key = this.memberIdentityKey(row);
+        if (key) {
+          if (seen.has(key)) {
+            continue;
+          }
+          seen.add(key);
+        }
+
+        merged.push(row);
+      }
+    }
+
+    return this.buildVisibleTeamMembers(merged);
+  }
+
+  private normalizeTeamMemberForView(row: any): any | null {
+    if (!row || typeof row !== 'object') {
+      return null;
+    }
+
+    const userId = this.pickId(row?.user_id);
+    const userLabel = this.pickString(row?.user_label) ?? this.pickString(row?.user_id) ?? null;
+    const memberRole = this.pickString(row?.member_role) ?? 'member';
+    const status = this.pickString(row?.status) ?? 'active';
+    const rowId = this.pickId(row?.id) ?? userId ?? this.normalizeEmail(userLabel ?? '') ?? null;
+
+    return {
+      ...row,
+      id: rowId ?? row?.id ?? null,
+      user_id: userId,
+      user_label: userLabel,
+      member_role: memberRole,
+      status
+    };
+  }
+
+  private memberIdentityKey(row: any): string | null {
+    const userId = this.pickId(row?.user_id);
+    if (userId) {
+      return `user:${userId}`;
+    }
+
+    const normalizedEmail = this.normalizeEmail(row?.user_label ?? '');
+    if (normalizedEmail && this.isValidEmail(normalizedEmail)) {
+      return `email:${normalizedEmail}`;
+    }
+
+    const rowId = this.pickId(row?.id);
+    if (rowId) {
+      return `id:${rowId}`;
+    }
+
+    return null;
+  }
+
+  private persistTeamMembersCache(profileId: string | null, rows: any[]): void {
+    if (!profileId || typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      const payload = this.buildVisibleTeamMembers(rows ?? [])
+        .slice(0, 200)
+        .map((row) => this.normalizeTeamMemberForView(row))
+        .filter((row): row is any => Boolean(row));
+
+      localStorage.setItem(this.teamMembersCacheKey(profileId), JSON.stringify(payload));
+    } catch {
+      // Ignore cache persistence failures.
+    }
+  }
+
+  private readCachedTeamMembers(profileId: string | null): any[] {
+    if (!profileId || typeof localStorage === 'undefined') {
+      return [];
+    }
+
+    try {
+      const raw = localStorage.getItem(this.teamMembersCacheKey(profileId));
+      if (!raw) {
+        return [];
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return this.buildVisibleTeamMembers(parsed);
+    } catch {
+      return [];
+    }
+  }
+
+  private teamMembersCacheKey(profileId: string): string {
+    return `${this.teamMembersCachePrefix}:${profileId}`;
   }
 
   private scheduleEmptyModulesRetryIfNeeded(loadSeq: number): void {

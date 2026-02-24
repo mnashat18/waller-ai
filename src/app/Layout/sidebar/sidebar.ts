@@ -30,10 +30,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   private accessSub?: RxSubscription;
   private navSub?: RxSubscription;
   private refreshSub?: RxSubscription;
-  private accessRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly accessTimeoutMs = 10000;
-  private readonly maxAccessRefreshAttempts = 2;
-  private accessRefreshAttempts = 0;
   private currentUserId: string | null = null;
 
   constructor(
@@ -45,7 +42,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   ngOnInit() {
     this.currentUserId = this.resolveCurrentUserId();
     this.applyFallbackFromSession();
-    this.loadAccessState(true);
+    this.loadAccessState(false);
     this.refreshSub = this.subscriptions.snapshotRefreshEvents().subscribe(() => {
       this.loadAccessState(true);
     });
@@ -60,9 +57,11 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.accessSub?.unsubscribe();
     this.navSub?.unsubscribe();
     this.refreshSub?.unsubscribe();
-    if (this.accessRetryTimer) {
-      clearTimeout(this.accessRetryTimer);
-    }
+  }
+
+  get isUserRole(): boolean {
+    const normalized = this.memberRoleLabel.trim().toLowerCase();
+    return normalized === '' || normalized === '-' || normalized === 'user';
   }
 
   statusText(): string {
@@ -108,16 +107,10 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   private loadAccessState(_forceRefresh = false): void {
-    if (this.accessRetryTimer) {
-      clearTimeout(this.accessRetryTimer);
-      this.accessRetryTimer = null;
-    }
-
     const cachedState = this.businessCenter.getCachedHubAccessState();
     if (cachedState) {
       this.applyHubAccessState(cachedState);
       this.loadingAccessState = false;
-      this.accessRefreshAttempts = 0;
     }
 
     this.accessSub?.unsubscribe();
@@ -126,24 +119,11 @@ export class SidebarComponent implements OnInit, OnDestroy {
       catchError(() => of(null))
     ).subscribe((state) => {
       if (!state) {
-        if (this.hasSessionToken() && this.accessRefreshAttempts < this.maxAccessRefreshAttempts) {
-          this.accessRefreshAttempts += 1;
-          this.accessRetryTimer = setTimeout(() => this.loadAccessState(true), 500 * this.accessRefreshAttempts);
-          return;
-        }
         this.loadingAccessState = false;
         this.applyFallbackFromSession();
         return;
       }
 
-      const looksUnresolved = this.hasSessionToken() && !state.hasPaidAccess && !state.profile?.id;
-      if (looksUnresolved && this.accessRefreshAttempts < this.maxAccessRefreshAttempts) {
-        this.accessRefreshAttempts += 1;
-        this.accessRetryTimer = setTimeout(() => this.loadAccessState(true), 500 * this.accessRefreshAttempts);
-        return;
-      }
-
-      this.accessRefreshAttempts = 0;
       this.applyHubAccessState(state);
       this.loadingAccessState = false;
     });

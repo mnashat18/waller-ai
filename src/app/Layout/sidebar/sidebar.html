@@ -56,7 +56,7 @@
 
     <a routerLink="/business-center"
        routerLinkActive="active"
-       *ngIf="canOpenBusinessCenter"
+       *ngIf="canOpenBusinessCenter && !isUserRole"
        class="sidebar-item">
       <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M4 20V8l8-4 8 4v12"></path>
@@ -91,7 +91,7 @@
 
   </nav>
 
-  <div class="sidebar-plan-card">
+  <div class="sidebar-plan-card" *ngIf="!isUserRole">
     <p class="sidebar-plan-title">Plan Status</p>
     <p class="sidebar-plan-name">{{ planLabel }}</p>
     <p class="sidebar-plan-meta">Role: {{ memberRoleLabel }}</p>

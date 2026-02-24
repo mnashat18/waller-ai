@@ -35,7 +35,7 @@
       </div>
     </div>
 
-    <div class="mt-5 flex gap-3" *ngIf="canCreateRequests || !hasBusinessAccess">
+    <div class="mt-5 flex gap-3" *ngIf="!loadingPlanAccess && canCreateRequests">
       <button
         *ngIf="canCreateRequests"
         type="button"
@@ -43,12 +43,6 @@
         (click)="openCreateModal()">
         Create Scan Request
       </button>
-      <a
-        *ngIf="!canCreateRequests && !hasBusinessAccess"
-        routerLink="/payment"
-        class="flex-1 bg-white/10 text-white py-3 rounded-2xl text-center">
-        Open Billing
-      </a>
     </div>
 
     <p *ngIf="canCreateRequests" class="mt-2 text-xs text-slate-300">
