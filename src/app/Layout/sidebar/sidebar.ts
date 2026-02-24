@@ -370,26 +370,14 @@ export class SidebarComponent implements OnInit, OnDestroy {
       return null;
     }
 
-    const token =
-      localStorage.getItem('token') ??
-      localStorage.getItem('access_token') ??
-      localStorage.getItem('directus_token');
+    const token = this.getSessionToken();
     if (!token) {
       return null;
     }
 
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return null;
-    }
-
-    try {
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const id = payload?.id ?? payload?.user_id ?? payload?.sub;
-      return typeof id === 'string' && id.trim() ? id.trim() : null;
-    } catch {
-      return null;
-    }
+    const payload = this.decodeJwtPayload(token);
+    const id = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
+    return typeof id === 'string' && id.trim() ? id.trim() : null;
   }
 
   private clearSidebarState(): void {
@@ -405,14 +393,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   private hasSessionToken(): boolean {
-    if (typeof localStorage === 'undefined') {
-      return false;
-    }
-    const token =
-      localStorage.getItem('token') ??
-      localStorage.getItem('access_token') ??
-      localStorage.getItem('directus_token');
-    return Boolean(token && token.trim());
+    return Boolean(this.getSessionToken());
   }
 
   private readStoredHubStateFallback(): {
@@ -535,19 +516,35 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   private readJwtPayload(): Record<string, unknown> | null {
-    if (typeof localStorage === 'undefined') {
-      return null;
-    }
-
-    const token =
-      localStorage.getItem('token') ??
-      localStorage.getItem('access_token') ??
-      localStorage.getItem('directus_token');
-
+    const token = this.getSessionToken();
     if (!token) {
       return null;
     }
 
+    return this.decodeJwtPayload(token);
+  }
+
+  private getSessionToken(): string | null {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    const candidates = [
+      localStorage.getItem('token'),
+      localStorage.getItem('access_token'),
+      localStorage.getItem('directus_token')
+    ].filter((value): value is string => Boolean(value && value.trim()));
+
+    for (const token of candidates) {
+      if (!this.isTokenExpired(token)) {
+        return token;
+      }
+    }
+
+    return null;
+  }
+
+  private decodeJwtPayload(token: string): Record<string, unknown> | null {
     const parts = token.split('.');
     if (parts.length !== 3) {
       return null;
@@ -558,6 +555,12 @@ export class SidebarComponent implements OnInit, OnDestroy {
     } catch {
       return null;
     }
+  }
+
+  private isTokenExpired(token: string): boolean {
+    const payload = this.decodeJwtPayload(token);
+    const exp = payload?.['exp'];
+    return typeof exp === 'number' ? Math.floor(Date.now() / 1000) >= exp : false;
   }
 
   private pickString(value: unknown): string | null {

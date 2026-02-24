@@ -460,10 +460,14 @@ export class BusinessCenterService {
     );
   }
 
-  listRequestsForBusinessProfile(profileId: string | null, limit = 60): Observable<RequestRecord[]> {
+  listRequestsForBusinessProfile(
+    profileId: string | null,
+    limit = 60,
+    fallbackUserId?: string | null
+  ): Observable<RequestRecord[]> {
     const access = this.getAccessContext();
     const normalizedProfileId = this.normalizeId(profileId);
-    const userId = this.normalizeId(access.userId);
+    const userId = this.normalizeId(access.userId) ?? this.normalizeId(fallbackUserId ?? null);
 
     const profileRequests$ = normalizedProfileId
       ? this.fetchRequestsByBusinessProfile(normalizedProfileId, limit, access.token)
@@ -2139,16 +2143,19 @@ export class BusinessCenterService {
     }
 
     try {
-      const token =
-        localStorage.getItem('token') ??
-        localStorage.getItem('access_token') ??
-        localStorage.getItem('directus_token');
+      const candidates = [
+        localStorage.getItem('token'),
+        localStorage.getItem('access_token'),
+        localStorage.getItem('directus_token')
+      ].filter((value): value is string => Boolean(value && value.trim()));
 
-      if (!token || this.isTokenExpired(token)) {
-        return null;
+      for (const token of candidates) {
+        if (!this.isTokenExpired(token)) {
+          return token;
+        }
       }
 
-      return token;
+      return null;
     } catch {
       return null;
     }

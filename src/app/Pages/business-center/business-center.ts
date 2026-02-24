@@ -78,7 +78,13 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
   private accessLoadFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
   private businessDataFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
+  private accessResolveRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private accessResolveRetryAttempts = 0;
+  private readonly maxAccessResolveRetryAttempts = 2;
   private teamMembersRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private emptyModulesRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private emptyModulesRetryAttempt = 0;
+  private readonly maxEmptyModulesRetryAttempts = 1;
   private businessDataLoadSeq = 0;
 
   accessState: BusinessHubAccessState | null = null;
@@ -150,15 +156,18 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.assignableMemberRoleOptions = [...this.memberRoleOptions];
-    this.loadAccessState();
+    // Always start with a fresh access snapshot to avoid stale first-render state.
+    this.loadAccessState(true);
   }
 
   ngOnDestroy(): void {
     this.clearFeedbackTimer();
     this.clearMemberSubmitFailSafeTimer();
     this.clearAccessLoadFailSafeTimer();
+    this.clearAccessResolveRetryTimer();
     this.clearBusinessDataFailSafeTimer();
     this.clearTeamMembersRetryTimer();
+    this.clearEmptyModulesRetryTimer();
   }
 
   // ===============================
@@ -659,13 +668,19 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   // Loading
   // ===============================
 
-  private loadAccessState(): void {
+  private loadAccessState(forceRefresh = false): void {
     this.loadingAccess = true;
     this.loadingData = false;
     this.missingBusinessProfile = false;
     this.orgScopeNote = '';
     this.memberRoleLabel = '';
     this.accessReason = '';
+    this.clearAccessResolveRetryTimer();
+    if (!forceRefresh) {
+      this.accessResolveRetryAttempts = 0;
+    }
+    this.emptyModulesRetryAttempt = 0;
+    this.clearEmptyModulesRetryTimer();
 
     this.clearAccessLoadFailSafeTimer();
     this.accessLoadFailSafeTimer = setTimeout(() => {
@@ -679,8 +694,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.showFeedback('error', this.accessReason, true);
     }, this.accessStateTimeoutMs + 1500);
 
-    const cachedState = this.businessCenter.getCachedHubAccessState();
-    const shouldForceRefresh = Boolean(cachedState);
+    const cachedState = forceRefresh ? null : this.businessCenter.getCachedHubAccessState();
+    const shouldForceRefresh = forceRefresh || Boolean(cachedState);
     if (cachedState) {
       this.loadingAccess = false;
       this.clearAccessLoadFailSafeTimer();
@@ -753,6 +768,10 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         this.clearAccessLoadFailSafeTimer();
 
         try {
+          if (this.shouldRetryUnresolvedAccessState(state)) {
+            this.scheduleAccessResolveRetry();
+            return;
+          }
           this.applyResolvedAccessState(state);
         } catch (err) {
           this.loadingAccess = false;
@@ -788,11 +807,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }
 
     this.loadingData = true;
-    this.teamMembersLoading = true;
     this.clearBusinessData();
+    this.teamMembersLoading = true;
     this.clearTeamMembersRetryTimer();
     const loadSeq = ++this.businessDataLoadSeq;
     const businessProfileId = profileId;
+    const ownerUserId = this.pickId(this.profile?.owner_user);
     this.clearBusinessDataFailSafeTimer();
     this.businessDataFailSafeTimer = setTimeout(() => {
       if (loadSeq !== this.businessDataLoadSeq || !this.loadingData) return;
@@ -808,6 +828,15 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       timeout(this.actionTimeoutMs),
       catchError((err) => this.sectionFallback<BusinessProfileMember[]>(err, 'team members', [])),
       switchMap((teamRows) => {
+        if (loadSeq !== this.businessDataLoadSeq) {
+          return of({
+            requests: [] as RequestRecord[],
+            invites: [] as RequestInviteRecord[],
+            exports: [] as ReportExportRecord[],
+            events: [] as ActivityEventRecord[]
+          });
+        }
+
         const team = this.buildVisibleTeamMembers((teamRows as any[]) ?? []);
         this.teamMembers = team;
         this.teamMembersLoading = false;
@@ -820,7 +849,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         const activityOptions = this.activityQueryOptions(this.teamMembers, state);
 
         return forkJoin({
-          requests: this.businessCenter.listRequestsForBusinessProfile(businessProfileId).pipe(
+          requests: this.businessCenter.listRequestsForBusinessProfile(
+            businessProfileId,
+            60,
+            ownerUserId
+          ).pipe(
             take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<RequestRecord[]>(err, 'requests', []))
@@ -882,6 +915,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.inviteMetrics = this.calculateInviteMetrics(this.requests, this.requestInvites);
       this.syncExportSelectionWithTeam();
       this.refreshFilteredActivityEvents();
+      this.scheduleEmptyModulesRetryIfNeeded(loadSeq);
     });
   }
 
@@ -1057,12 +1091,17 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private reloadRequestsAndInvites(): void {
     const businessProfileId = this.pickId(this.profile?.id);
+    const ownerUserId = this.pickId(this.profile?.owner_user);
     if (!businessProfileId) {
       return;
     }
 
     forkJoin({
-      requests: this.businessCenter.listRequestsForBusinessProfile(businessProfileId).pipe(
+      requests: this.businessCenter.listRequestsForBusinessProfile(
+        businessProfileId,
+        60,
+        ownerUserId
+      ).pipe(
         catchError((err) => {
           this.showFeedback('error', this.describeHttpError(err, 'Failed to reload requests.'));
           return of([]);
@@ -1091,6 +1130,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.teamMembersLoading = true;
     this.businessCenter.listTeamMembers(profileId).subscribe({
       next: (rows: any) => {
         this.teamMembersLoading = false;
@@ -1180,6 +1220,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.exportForm.selectedMemberIds = [];
     this.inviteMetrics = { pending: 0, sent: 0, claimed: 0, expired: 0 };
     this.clearTeamMembersRetryTimer();
+    this.clearEmptyModulesRetryTimer();
   }
 
   private buildVisibleTeamMembers(rows: any[]): any[] {
@@ -1275,6 +1316,44 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.teamMembersRetryTimer = null;
   }
 
+  private scheduleEmptyModulesRetryIfNeeded(loadSeq: number): void {
+    if (this.emptyModulesRetryAttempt >= this.maxEmptyModulesRetryAttempts) {
+      return;
+    }
+    if (!this.hasBusinessAccess || !this.profile) {
+      return;
+    }
+
+    const appearsIncomplete =
+      this.teamMembers.length <= 1 &&
+      this.requests.length === 0 &&
+      this.activityEvents.length === 0;
+
+    if (!appearsIncomplete) {
+      return;
+    }
+
+    this.emptyModulesRetryAttempt += 1;
+    this.clearEmptyModulesRetryTimer();
+    this.emptyModulesRetryTimer = setTimeout(() => {
+      if (loadSeq !== this.businessDataLoadSeq) {
+        return;
+      }
+      this.reloadTeamMembers();
+      this.reloadRequestsAndInvites();
+      this.reloadActivityEvents();
+      this.reloadExports();
+    }, 700);
+  }
+
+  private clearEmptyModulesRetryTimer(): void {
+    if (!this.emptyModulesRetryTimer) {
+      return;
+    }
+    clearTimeout(this.emptyModulesRetryTimer);
+    this.emptyModulesRetryTimer = null;
+  }
+
   private sectionFallback<T>(err: any, section: string, fallback: T): Observable<T> {
     this.showFeedback('error', this.describeHttpError(err, `Failed to load ${section}.`));
     return of(fallback);
@@ -1335,6 +1414,41 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     if (!this.accessLoadFailSafeTimer) return;
     clearTimeout(this.accessLoadFailSafeTimer);
     this.accessLoadFailSafeTimer = null;
+  }
+
+  private shouldRetryUnresolvedAccessState(state: BusinessHubAccessState): boolean {
+    if (!this.hasSessionToken()) {
+      return false;
+    }
+    if (this.accessResolveRetryAttempts >= this.maxAccessResolveRetryAttempts) {
+      return false;
+    }
+    if (state?.hasPaidAccess || this.pickId((state as any)?.profile?.id)) {
+      return false;
+    }
+
+    const reason = ((state as any)?.reason ?? '').toString().toLowerCase();
+    if (reason.includes('no business profile')) {
+      return false;
+    }
+    return true;
+  }
+
+  private scheduleAccessResolveRetry(): void {
+    this.accessResolveRetryAttempts += 1;
+    this.loadingAccess = true;
+    this.clearAccessResolveRetryTimer();
+    this.accessResolveRetryTimer = setTimeout(() => {
+      this.loadAccessState(true);
+    }, 450 * this.accessResolveRetryAttempts);
+  }
+
+  private clearAccessResolveRetryTimer(): void {
+    if (!this.accessResolveRetryTimer) {
+      return;
+    }
+    clearTimeout(this.accessResolveRetryTimer);
+    this.accessResolveRetryTimer = null;
   }
 
   private clearBusinessDataFailSafeTimer(): void {
@@ -1409,15 +1523,19 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private activityQueryOptions(teamRows: any[], state: BusinessHubAccessState | null): ActivityQueryOptions {
     const stateUserId = this.pickId((state as any)?.userId);
+    const ownerUserId = this.pickId(this.profile?.owner_user);
     const teamUserIds = this.uniqueIds([
       ...(teamRows ?? []).map((row) => this.pickId(row?.user_id)),
       stateUserId,
-      this.currentUserId()
+      this.currentUserId(),
+      ownerUserId
     ]);
 
+    const ownerEmail = this.pickString(this.profile?.work_email);
     const teamUserEmails = this.uniqueStrings([
       ...(teamRows ?? []).map((row) => this.pickString(row?.user_label)),
-      this.currentUserEmail()
+      this.currentUserEmail(),
+      ownerEmail
     ]).filter((value) => this.isValidEmail(value));
 
     return {
@@ -1858,11 +1976,19 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private getSessionToken(): string | null {
     if (typeof localStorage === 'undefined') return null;
-    return (
-      localStorage.getItem('token') ??
-      localStorage.getItem('access_token') ??
+    const candidates = [
+      localStorage.getItem('token'),
+      localStorage.getItem('access_token'),
       localStorage.getItem('directus_token')
-    );
+    ].filter((value): value is string => Boolean(value && value.trim()));
+
+    for (const token of candidates) {
+      if (!this.isTokenExpired(token)) {
+        return token;
+      }
+    }
+
+    return null;
   }
 
   private decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -1876,9 +2002,19 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }
   }
 
+  private isTokenExpired(token: string): boolean {
+    const payload = this.decodeJwtPayload(token);
+    const exp = payload?.['exp'];
+    return typeof exp === 'number' ? Math.floor(Date.now() / 1000) >= exp : false;
+  }
+
   private pickId(value: unknown): string | null {
     if (typeof value === 'string' && value.trim()) return value.trim();
     if (typeof value === 'number' && !Number.isNaN(value)) return String(value);
     return null;
+  }
+
+  private hasSessionToken(): boolean {
+    return Boolean(this.getSessionToken());
   }
 }
