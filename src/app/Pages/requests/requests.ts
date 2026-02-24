@@ -587,12 +587,14 @@ export class Requests implements OnInit, OnDestroy {
       if (userId && userEmail) {
         params.set('filter[_or][0][requested_for_user][_eq]', userId);
         params.set('filter[_or][1][requested_for_email][_eq]', userEmail);
-        params.set('filter[_or][2][requested_by_user][_eq]', userId);
+        params.set('filter[_or][2][requested_for_email][_icontains]', userEmail);
+        params.set('filter[_or][3][requested_by_user][_eq]', userId);
       } else if (userId) {
         params.set('filter[_or][0][requested_for_user][_eq]', userId);
         params.set('filter[_or][1][requested_by_user][_eq]', userId);
       } else if (userEmail) {
-        params.set('filter[requested_for_email][_eq]', userEmail);
+        params.set('filter[_or][0][requested_for_email][_eq]', userEmail);
+        params.set('filter[_or][1][requested_for_email][_icontains]', userEmail);
       }
     }
 

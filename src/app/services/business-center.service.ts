@@ -499,7 +499,8 @@ export class BusinessCenterService {
     }
 
     const params = this.buildRequestsParams(1);
-    params.set('filter[requested_for_email][_eq]', normalizedEmail);
+    params.set('filter[_or][0][requested_for_email][_eq]', normalizedEmail);
+    params.set('filter[_or][1][requested_for_email][_icontains]', normalizedEmail);
 
     return this.http.get<{ data?: any[] }>(
       `${this.api}/items/requests?${params.toString()}`,
@@ -1065,7 +1066,8 @@ export class BusinessCenterService {
       limit: '60',
       fields: 'id,requested_for_user,requested_for_email'
     });
-    params.set('filter[requested_for_email][_eq]', userEmail);
+    params.set('filter[_or][0][requested_for_email][_eq]', userEmail);
+    params.set('filter[_or][1][requested_for_email][_icontains]', userEmail);
 
     return this.http.get<{ data?: any[] }>(
       `${this.api}/items/requests?${params.toString()}`,

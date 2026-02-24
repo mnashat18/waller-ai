@@ -452,12 +452,14 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     } else if (filters?.requestedForUserId && filters?.requestedForEmail) {
       params.set('filter[_or][0][requested_for_user][_eq]', filters.requestedForUserId);
       params.set('filter[_or][1][requested_for_email][_eq]', filters.requestedForEmail);
-      params.set('filter[_or][2][requested_by_user][_eq]', filters.requestedForUserId);
+      params.set('filter[_or][2][requested_for_email][_icontains]', filters.requestedForEmail);
+      params.set('filter[_or][3][requested_by_user][_eq]', filters.requestedForUserId);
     } else if (filters?.requestedForUserId) {
       params.set('filter[_or][0][requested_for_user][_eq]', filters.requestedForUserId);
       params.set('filter[_or][1][requested_by_user][_eq]', filters.requestedForUserId);
     } else if (filters?.requestedForEmail) {
-      params.set('filter[requested_for_email][_eq]', filters.requestedForEmail);
+      params.set('filter[_or][0][requested_for_email][_eq]', filters.requestedForEmail);
+      params.set('filter[_or][1][requested_for_email][_icontains]', filters.requestedForEmail);
     }
 
     if (
