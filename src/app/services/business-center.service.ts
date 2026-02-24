@@ -184,9 +184,9 @@ export class BusinessCenterService {
 
   constructor(private http: HttpClient) {}
 
-  getHubAccessState(): Observable<BusinessHubAccessState> {
+  getHubAccessState(forceRefresh = false): Observable<BusinessHubAccessState> {
     const access = this.getAccessContext();
-    const cachedState = this.getRecentHubAccessState(access.userId);
+    const cachedState = forceRefresh ? null : this.getRecentHubAccessState(access.userId);
 
     if (cachedState) {
       this.debug('getHubAccessState:cacheHit', {
@@ -196,6 +196,10 @@ export class BusinessCenterService {
         hasPaidAccess: cachedState.hasPaidAccess
       });
       return of(cachedState);
+    }
+
+    if (forceRefresh) {
+      this.hubAccessInFlight$ = null;
     }
 
     if (this.hubAccessInFlight$) {

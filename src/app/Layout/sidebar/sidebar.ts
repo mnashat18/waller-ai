@@ -92,13 +92,13 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   private loadAccessState(_forceRefresh = false): void {
-    const cachedState = this.businessCenter.getCachedHubAccessState();
-    if (cachedState) {
+    const cachedState = _forceRefresh ? null : this.businessCenter.getCachedHubAccessState();
+    if (cachedState && !_forceRefresh) {
       this.applyHubAccessState(cachedState);
     }
 
     this.accessSub?.unsubscribe();
-    this.accessSub = this.businessCenter.getHubAccessState().pipe(
+    this.accessSub = this.businessCenter.getHubAccessState(_forceRefresh).pipe(
       timeout(this.accessTimeoutMs),
       catchError(() => of(null))
     ).subscribe((state) => {

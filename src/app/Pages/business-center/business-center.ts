@@ -676,6 +676,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }, this.accessStateTimeoutMs + 1500);
 
     const cachedState = this.businessCenter.getCachedHubAccessState();
+    const shouldForceRefresh = Boolean(cachedState);
     if (cachedState) {
       this.loadingAccess = false;
       this.clearAccessLoadFailSafeTimer();
@@ -689,12 +690,11 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
           this.describeHttpError(err, 'Unexpected error while preparing Business Center.')
         );
       }
-      return;
     }
 
     let accessState$: Observable<BusinessHubAccessState>;
     try {
-      accessState$ = this.businessCenter.getHubAccessState();
+      accessState$ = this.businessCenter.getHubAccessState(shouldForceRefresh);
     } catch (err) {
       accessState$ = of({
         userId: null,
