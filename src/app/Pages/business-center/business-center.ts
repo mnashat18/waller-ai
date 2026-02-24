@@ -236,7 +236,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   requestStatusLabel(status?: string | null): string {
-    const normalized = (status ?? '').trim().toLowerCase();
+    const normalized = this.normalizeLooseText(status);
     if (normalized.includes('approved') || normalized.includes('accepted')) return 'Approved';
     if (normalized.includes('denied') || normalized.includes('rejected')) return 'Denied';
     return 'Pending';
@@ -256,7 +256,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     const expiresAt = invite?.expires_at ? new Date(invite.expires_at).getTime() : NaN;
     if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) return 'Expired';
 
-    const normalized = (invite?.status ?? '').trim().toLowerCase();
+    const normalized = this.normalizeLooseText(invite?.status);
     if (normalized.includes('claim')) return 'Claimed';
     if (normalized.includes('expire')) return 'Expired';
     if (normalized.includes('send')) return 'Sent';
@@ -797,6 +797,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     }, this.actionTimeoutMs + 3000);
 
     this.businessCenter.listTeamMembers(profileId).pipe(
+      take(1),
       timeout(this.actionTimeoutMs),
       catchError((err) => this.sectionFallback<BusinessProfileMember[]>(err, 'team members', [])),
       switchMap((teamRows) => {
@@ -806,21 +807,35 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         return forkJoin({
           team: of(team) as Observable<BusinessProfileMember[]>,
           requests: this.businessCenter.listRequests(orgId).pipe(
+            take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<RequestRecord[]>(err, 'requests', []))
           ),
           invites: this.businessCenter.listRequestInvites(orgId).pipe(
+            take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<RequestInviteRecord[]>(err, 'request invites', []))
           ),
           exports: this.businessCenter.listReportExports(orgId, 40, activityOptions.teamUserIds).pipe(
+            take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<ReportExportRecord[]>(err, 'export jobs', []))
           ),
           events: this.businessCenter.listActivityEvents(orgId, 80, activityOptions).pipe(
+            take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<ActivityEventRecord[]>(err, 'activity log', []))
           )
+        });
+      }),
+      catchError((err) => {
+        this.showFeedback('error', this.describeHttpError(err, 'Failed to load Business modules.'));
+        return of({
+          team: [] as BusinessProfileMember[],
+          requests: [] as RequestRecord[],
+          invites: [] as RequestInviteRecord[],
+          exports: [] as ReportExportRecord[],
+          events: [] as ActivityEventRecord[]
         });
       }),
       finalize(() => {
@@ -840,6 +855,16 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.syncExportSelectionWithTeam();
       this.refreshFilteredActivityEvents();
     });
+  }
+
+  private normalizeLooseText(value: unknown): string {
+    if (typeof value === 'string') {
+      return value.trim().toLowerCase();
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value).trim().toLowerCase();
+    }
+    return '';
   }
 
   private applyResolvedAccessState(state: BusinessHubAccessState): void {
