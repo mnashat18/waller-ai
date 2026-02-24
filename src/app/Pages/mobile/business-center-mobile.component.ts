@@ -115,16 +115,16 @@ export class BusinessCenterMobileComponent implements OnInit {
       return;
     }
 
-    this.loadSummary(profileId, this.pickId(state.orgId));
+    this.loadSummary(profileId);
   }
 
-  private loadSummary(profileId: string, orgId: string | null): void {
+  private loadSummary(profileId: string): void {
     this.loadingSummary = true;
 
     forkJoin({
       teamMembers: this.businessCenter.listTeamMembers(profileId).pipe(catchError(() => of([]))),
-      requests: this.businessCenter.listRequests(orgId).pipe(catchError(() => of([]))),
-      events: this.businessCenter.listActivityEvents(orgId, 40).pipe(catchError(() => of([])))
+      requests: this.businessCenter.listRequestsForBusinessProfile(profileId).pipe(catchError(() => of([]))),
+      events: this.businessCenter.listActivityEventsForBusinessProfile(profileId, 40).pipe(catchError(() => of([])))
     }).pipe(
       timeout(this.summaryTimeoutMs),
       catchError((err) => {

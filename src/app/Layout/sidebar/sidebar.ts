@@ -92,6 +92,11 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   private loadAccessState(_forceRefresh = false): void {
+    const cachedState = this.businessCenter.getCachedHubAccessState();
+    if (cachedState) {
+      this.applyHubAccessState(cachedState);
+    }
+
     this.accessSub?.unsubscribe();
     this.accessSub = this.businessCenter.getHubAccessState().pipe(
       timeout(this.accessTimeoutMs),
@@ -101,37 +106,48 @@ export class SidebarComponent implements OnInit, OnDestroy {
         this.applyFallbackFromSession();
         return;
       }
-
-      this.currentUserId = state.userId ?? this.currentUserId;
-
-      this.hasBusinessProfile = Boolean(state.profile?.id);
-      this.hasBusinessAccess = Boolean(state.hasPaidAccess);
-      this.canUseBusinessFeatures =
-        this.hasBusinessAccess &&
-        Boolean(state.permissions?.canUseSystem);
-      this.trialExpired = Boolean(state.trialExpired);
-
-      const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
-      this.isBusinessTrial = billingStatus === 'trial' && !this.trialExpired;
-      this.trialDaysRemaining = this.isBusinessTrial
-        ? this.daysUntil(state.trialExpiresAt)
-        : null;
-
-      const planCode = (state.profile?.plan_code ?? '').toString().trim().toLowerCase();
-      this.planLabel = planCode === 'business' || this.hasBusinessProfile
-        ? 'Business'
-        : 'Free';
-
-      const role = (state.memberRole ?? '').toString().trim().toLowerCase();
-      this.memberRoleLabel = role ? this.toTitleCase(role) : (this.hasBusinessProfile ? 'Business' : 'User');
-      const canOpenOwnerViews = this.canOpenOwnerViews(role);
-      this.canOpenAuditLogs = !this.hasBusinessAccess || canOpenOwnerViews;
-      this.canOpenRequestsCenter = !this.hasBusinessAccess || canOpenOwnerViews;
-      this.canOpenBusinessCenter =
-        (this.hasBusinessProfile || this.hasBusinessAccess) &&
-        canOpenOwnerViews;
-      this.persistSidebarState();
+      this.applyHubAccessState(state);
     });
+  }
+
+  private applyHubAccessState(state: {
+    userId: string | null;
+    profile: { id?: string | null; billing_status?: string | null; plan_code?: string | null } | null;
+    hasPaidAccess: boolean;
+    memberRole: string | null;
+    permissions?: { canUseSystem?: boolean };
+    trialExpired: boolean;
+    trialExpiresAt: string | null;
+  }): void {
+    this.currentUserId = state.userId ?? this.currentUserId;
+
+    this.hasBusinessProfile = Boolean(state.profile?.id);
+    this.hasBusinessAccess = Boolean(state.hasPaidAccess);
+    this.canUseBusinessFeatures =
+      this.hasBusinessAccess &&
+      Boolean(state.permissions?.canUseSystem);
+    this.trialExpired = Boolean(state.trialExpired);
+
+    const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
+    this.isBusinessTrial = billingStatus === 'trial' && !this.trialExpired;
+    this.trialDaysRemaining = this.isBusinessTrial
+      ? this.daysUntil(state.trialExpiresAt)
+      : null;
+
+    const planCode = (state.profile?.plan_code ?? '').toString().trim().toLowerCase();
+    this.planLabel = planCode === 'business' || this.hasBusinessProfile
+      ? 'Business'
+      : 'Free';
+
+    const role = (state.memberRole ?? '').toString().trim().toLowerCase();
+    this.memberRoleLabel = role ? this.toTitleCase(role) : (this.hasBusinessProfile ? 'Business' : 'User');
+    const canOpenOwnerViews = this.canOpenOwnerViews(role);
+    this.canOpenAuditLogs = !this.hasBusinessAccess || canOpenOwnerViews;
+    this.canOpenRequestsCenter = !this.hasBusinessAccess || canOpenOwnerViews;
+    this.canOpenBusinessCenter =
+      (this.hasBusinessProfile || this.hasBusinessAccess) &&
+      canOpenOwnerViews;
+    this.persistSidebarState();
   }
 
   private applyFallbackFromSession(): void {

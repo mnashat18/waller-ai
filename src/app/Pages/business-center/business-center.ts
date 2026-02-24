@@ -785,7 +785,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
     this.loadingData = true;
     this.clearBusinessData();
-    const orgId = (state as any)?.orgId ?? null;
+    const businessProfileId = profileId;
     this.clearBusinessDataFailSafeTimer();
     this.businessDataFailSafeTimer = setTimeout(() => {
       if (!this.loadingData) return;
@@ -806,22 +806,30 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
         return forkJoin({
           team: of(team) as Observable<BusinessProfileMember[]>,
-          requests: this.businessCenter.listRequests(orgId).pipe(
+          requests: this.businessCenter.listRequestsForBusinessProfile(businessProfileId).pipe(
             take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<RequestRecord[]>(err, 'requests', []))
           ),
-          invites: this.businessCenter.listRequestInvites(orgId).pipe(
+          invites: this.businessCenter.listRequestInvitesForBusinessProfile(businessProfileId).pipe(
             take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<RequestInviteRecord[]>(err, 'request invites', []))
           ),
-          exports: this.businessCenter.listReportExports(orgId, 40, activityOptions.teamUserIds).pipe(
+          exports: this.businessCenter.listReportExportsForBusinessProfile(
+            businessProfileId,
+            40,
+            activityOptions.teamUserIds
+          ).pipe(
             take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<ReportExportRecord[]>(err, 'export jobs', []))
           ),
-          events: this.businessCenter.listActivityEvents(orgId, 80, activityOptions).pipe(
+          events: this.businessCenter.listActivityEventsForBusinessProfile(
+            businessProfileId,
+            80,
+            activityOptions
+          ).pipe(
             take(1),
             timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<ActivityEventRecord[]>(err, 'activity log', []))
@@ -1028,16 +1036,19 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   private reloadRequestsAndInvites(): void {
-    const orgId = this.accessState?.orgId ?? null;
+    const businessProfileId = this.pickId(this.profile?.id);
+    if (!businessProfileId) {
+      return;
+    }
 
     forkJoin({
-      requests: this.businessCenter.listRequests(orgId).pipe(
+      requests: this.businessCenter.listRequestsForBusinessProfile(businessProfileId).pipe(
         catchError((err) => {
           this.showFeedback('error', this.describeHttpError(err, 'Failed to reload requests.'));
           return of([]);
         })
       ),
-      invites: this.businessCenter.listRequestInvites(orgId).pipe(
+      invites: this.businessCenter.listRequestInvitesForBusinessProfile(businessProfileId).pipe(
         catchError((err) => {
           this.showFeedback('error', this.describeHttpError(err, 'Failed to reload invites.'));
           return of([]);
@@ -1074,8 +1085,14 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   private reloadExports(): void {
-    this.businessCenter.listReportExports(
-      this.accessState?.orgId ?? null,
+    const businessProfileId = this.pickId(this.profile?.id);
+    if (!businessProfileId) {
+      this.reportExports = [];
+      return;
+    }
+
+    this.businessCenter.listReportExportsForBusinessProfile(
+      businessProfileId,
       40,
       this.allTeamUserIds()
     ).subscribe({
@@ -1087,8 +1104,15 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   private reloadActivityEvents(): void {
+    const businessProfileId = this.pickId(this.profile?.id);
+    if (!businessProfileId) {
+      this.activityEvents = [];
+      this.filteredActivityEvents = [];
+      return;
+    }
+
     const options = this.activityQueryOptions(this.teamMembers, this.accessState);
-    this.businessCenter.listActivityEvents(this.accessState?.orgId ?? null, 80, options).subscribe({
+    this.businessCenter.listActivityEventsForBusinessProfile(businessProfileId, 80, options).subscribe({
       next: (rows: any) => {
         this.activityEvents = (rows as ActivityEventRecord[]) ?? [];
         this.refreshFilteredActivityEvents();

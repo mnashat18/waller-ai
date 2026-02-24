@@ -50,7 +50,12 @@ export class App implements OnDestroy {
       const isAuthCallback = window.location.pathname === '/auth-callback';
       if (!isAuthCallback) {
         this.auth.captureAuthFromUrl();
-        this.auth.ensureSessionToken().subscribe();
+        const hasToken = Boolean(this.auth.getStoredAccessToken());
+        const callbackPending = sessionStorage.getItem('auth_callback_pending') === '1';
+
+        if (!hasToken || callbackPending) {
+          this.auth.ensureSessionToken().subscribe();
+        }
       }
     }
   }

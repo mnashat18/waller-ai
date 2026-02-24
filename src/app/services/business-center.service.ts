@@ -456,6 +456,20 @@ export class BusinessCenterService {
     );
   }
 
+  listRequestsForBusinessProfile(profileId: string | null, limit = 60): Observable<RequestRecord[]> {
+    const access = this.getAccessContext();
+    const normalizedProfileId = this.normalizeId(profileId);
+    if (!normalizedProfileId) {
+      return of([]);
+    }
+
+    return this.fetchRequestsByBusinessProfile(normalizedProfileId, limit, access.token).pipe(
+      map((rows) => this.mergeRequestsById(rows)),
+      switchMap((rows) => this.attachRecipientIndustries(rows, access.token)),
+      catchError(() => of([]))
+    );
+  }
+
   countTodayRequests(rows: Array<{ timestamp?: string | null | undefined }>): number {
     const today = this.localDateKey(Date.now());
     if (!today) {
@@ -750,6 +764,44 @@ export class BusinessCenterService {
     );
   }
 
+  listRequestInvitesForBusinessProfile(
+    profileId: string | null,
+    limit = 80
+  ): Observable<RequestInviteRecord[]> {
+    const access = this.getAccessContext();
+    const normalizedProfileId = this.normalizeId(profileId);
+    if (!normalizedProfileId) {
+      return of([]);
+    }
+
+    const params = new URLSearchParams({
+      sort: '-sent_at',
+      limit: String(limit),
+      fields: [
+        'id',
+        'request',
+        'business_profile',
+        'requested_by_user',
+        'email',
+        'phone',
+        'status',
+        'token',
+        'sent_at',
+        'claimed_at',
+        'expires_at'
+      ].join(',')
+    });
+    params.set('filter[business_profile][_eq]', normalizedProfileId);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/request_invites?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeInvite(row))),
+      catchError(() => of([]))
+    );
+  }
+
   createRequestInvite(
     payload: { requestId: string; email?: string; phone?: string },
     _scopeHint: string | null
@@ -851,6 +903,38 @@ export class BusinessCenterService {
           catchError(() => of([]))
         );
       })
+    );
+  }
+
+  listReportExportsForBusinessProfile(
+    profileId: string | null,
+    limit = 40,
+    teamUserIds?: string[] | null
+  ): Observable<ReportExportRecord[]> {
+    const access = this.getAccessContext();
+    const normalizedProfileId = this.normalizeId(profileId);
+    if (!normalizedProfileId) {
+      return of([]);
+    }
+
+    const normalizedTeamUserIds = this.uniqueIds(teamUserIds ?? []);
+    const params = new URLSearchParams({
+      sort: '-date_created',
+      limit: String(limit),
+      fields: 'id,format,status,file,filters,completed_at,business_profile,user,date_created'
+    });
+
+    params.set('filter[business_profile][_eq]', normalizedProfileId);
+    if (!normalizedTeamUserIds.length && access.userId) {
+      params.set('filter[user][_eq]', access.userId);
+    }
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/reports_exports?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).map((row) => this.normalizeExport(row))),
+      catchError(() => of([]))
     );
   }
 
@@ -1002,6 +1086,48 @@ export class BusinessCenterService {
           )
         );
       })
+    );
+  }
+
+  listActivityEventsForBusinessProfile(
+    profileId: string | null,
+    limit = 60,
+    options?: ActivityQueryOptions
+  ): Observable<ActivityEventRecord[]> {
+    const access = this.getAccessContext();
+    const normalizedProfileId = this.normalizeId(profileId);
+    if (!normalizedProfileId) {
+      return of([]);
+    }
+
+    const storedEmail =
+      typeof localStorage !== 'undefined' ? this.pickString(localStorage.getItem('user_email')) : null;
+    const teamUserIds = this.uniqueIds([...(options?.teamUserIds ?? []), access.userId]);
+    const teamUserEmails = this.uniqueNonEmptyStrings([...(options?.teamUserEmails ?? []), storedEmail]);
+
+    return this.fetchActivityEventsByBusinessProfile(normalizedProfileId, limit, access.token).pipe(
+      switchMap((events) => {
+        if (events.length) {
+          return of(events);
+        }
+
+        if (teamUserIds.length) {
+          return this.fetchActivityEventsByUsers(teamUserIds, limit, access.token).pipe(
+            switchMap((fallbackEvents) =>
+              fallbackEvents.length
+                ? of(fallbackEvents)
+                : this.fetchAuditActivityEvents(teamUserIds, teamUserEmails, limit, access.token)
+            )
+          );
+        }
+
+        return this.fetchAuditActivityEvents(teamUserIds, teamUserEmails, limit, access.token);
+      }),
+      catchError(() =>
+        this.fetchAuditActivityEvents(teamUserIds, teamUserEmails, limit, access.token).pipe(
+          catchError(() => of([]))
+        )
+      )
     );
   }
 
