@@ -397,20 +397,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       bustCache: true
     }).subscribe({
       next: (requests) => {
-        if (!requests.length && userEmail) {
-          this.businessCenter.listInvitedRequestsByEmail(userEmail).pipe(
-            take(1),
-            catchError(() => of([]))
-          ).subscribe((inviteRequests) => {
-            const combined = this.mergeRequestRecords(requests, inviteRequests as RequestRecord[]);
-            this.applyRequests(combined);
-            if (this.shouldRetryEmptyResult(combined.length, retryAttempt)) {
-              this.scheduleEmptyResultRetry(retryAttempt + 1);
-            }
-          });
-          return;
-        }
-
         this.applyRequests(requests);
         if (this.shouldRetryEmptyResult(requests.length, retryAttempt)) {
           this.scheduleEmptyResultRetry(retryAttempt + 1);
@@ -566,23 +552,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       this.requests.map((row) => ({ timestamp: row.timestampRaw }))
     );
     this.cdr.detectChanges();
-  }
-
-  private mergeRequestRecords(primary: RequestRecord[], secondary: RequestRecord[]): RequestRecord[] {
-    const byId = new Map<string, RequestRecord>();
-    const push = (row: RequestRecord | null | undefined) => {
-      const id = this.normalizeId(row?.id);
-      if (!id) {
-        return;
-      }
-      if (!byId.has(id)) {
-        byId.set(id, { ...(row ?? {}), id });
-      }
-    };
-
-    for (const row of primary ?? []) push(row);
-    for (const row of secondary ?? []) push(row);
-    return Array.from(byId.values());
   }
 
   private mapToRequestRow(request: RequestRecord): RequestRow {

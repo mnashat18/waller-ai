@@ -99,16 +99,6 @@ export type RequestInviteRecord = {
   date_created?: string | null;
 };
 
-type InviteRequestView = {
-  id?: unknown;
-  request?: unknown;
-  email?: unknown;
-  status?: unknown;
-  sent_at?: unknown;
-  claimed_at?: unknown;
-  date_created?: unknown;
-};
-
 export type ReportExportRecord = {
   id: string;
   format: string;
@@ -886,50 +876,6 @@ export class BusinessCenterService {
     );
   }
 
-  listInvitedRequestsByEmail(email: string, limit = 60): Observable<RequestRecord[]> {
-    const normalizedEmail = this.pickString(email)?.toLowerCase() ?? '';
-    if (!this.isEmailLike(normalizedEmail)) {
-      return of([]);
-    }
-
-    const access = this.getAccessContext();
-    if (!access.token && !access.userId) {
-      return of([]);
-    }
-
-    const params = new URLSearchParams({
-      sort: '-sent_at',
-      limit: String(limit),
-      fields: [
-        'id',
-        'email',
-        'status',
-        'sent_at',
-        'claimed_at',
-        'date_created',
-        'request.id',
-        'request.requested_for_email',
-        'request.requested_by_user',
-        'request.requested_for_user',
-        'request.required_state',
-        'request.response_status',
-        'request.timestamp'
-      ].join(',')
-    });
-    params.set('filter[_or][0][email][_eq]', normalizedEmail);
-    params.set('filter[_or][1][email][_icontains]', normalizedEmail);
-
-    return this.http.get<{ data?: InviteRequestView[] }>(
-      `${this.api}/items/request_invites?${params.toString()}`,
-      this.requestOptions(access.token)
-    ).pipe(
-      timeout(this.requestTimeoutMs),
-      map((res) => (res.data ?? []).map((row) => this.normalizeRequestFromInvite(row, normalizedEmail))),
-      map((rows) => this.mergeRequestsById(rows)),
-      catchError(() => of([]))
-    );
-  }
-
   createRequestInvite(
     payload: { requestId: string; email?: string; phone?: string },
     _scopeHint: string | null
@@ -1004,103 +950,11 @@ export class BusinessCenterService {
     if (!userId || !token) {
       return of(false);
     }
-
-    const linkByEmail$ = this.linkRequestsToUserByEmail(userId, userEmail, token);
-    const inviteToken = this.readPendingInviteToken();
-    if (!inviteToken) {
-      return linkByEmail$;
-    }
-
-    const params = new URLSearchParams({
-      sort: '-sent_at',
-      limit: '1',
-      fields: 'id,request,email,status,claimed_at,expires_at,token'
-    });
-    params.set('filter[token][_eq]', inviteToken);
-
-    const nowIso = new Date().toISOString();
-
-    return this.http.get<{ data?: any[] }>(
-      `${this.api}/items/request_invites?${params.toString()}`,
-      this.requestOptions(token)
-    ).pipe(
-      timeout(this.requestTimeoutMs),
-      map((res) => (Array.isArray(res?.data) ? res.data[0] ?? null : null)),
-      switchMap((invite) => {
-        const inviteId = this.normalizeId(invite?.id);
-        if (!inviteId) {
+    return this.linkRequestsToUserByEmail(userId, userEmail, token).pipe(
+      tap((linked) => {
+        if (linked) {
           this.clearPendingInviteToken();
-          return linkByEmail$;
         }
-
-        const inviteEmail = this.pickString(invite?.email)?.toLowerCase() ?? null;
-        if (inviteEmail && userEmail && inviteEmail !== userEmail) {
-          return linkByEmail$;
-        }
-
-        const expiresAtRaw = this.pickString(invite?.expires_at);
-        const expiresTs = expiresAtRaw ? new Date(expiresAtRaw).getTime() : NaN;
-        if (Number.isFinite(expiresTs) && expiresTs < Date.now()) {
-          this.clearPendingInviteToken();
-          return linkByEmail$;
-        }
-
-        const requestId = this.normalizeId(invite?.request);
-        const statusRaw = this.pickString(invite?.status)?.toLowerCase() ?? '';
-        const inviteAlreadyClaimed = statusRaw.includes('claim') || Boolean(this.pickString(invite?.claimed_at));
-
-        const claimInvite$ = inviteAlreadyClaimed
-          ? of(true)
-          : this.http.patch(
-              `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`,
-              {
-                status: 'claimed',
-                claimed_at: nowIso
-              },
-              this.requestOptions(token)
-            ).pipe(
-              map(() => true),
-              catchError(() => of(false))
-            );
-
-        const requestPatchPayload: Record<string, unknown> = {
-          requested_for_user: userId
-        };
-        if (userEmail) {
-          requestPatchPayload['requested_for_email'] = userEmail;
-        }
-
-        const linkRequest$ = requestId
-          ? this.http.patch(
-              `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
-              requestPatchPayload,
-              this.requestOptions(token)
-            ).pipe(
-              map(() => true),
-              catchError((err) => {
-                if (!this.shouldRetryWithMinimalPayload(err)) {
-                  return of(false);
-                }
-                return this.http.patch(
-                  `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
-                  { requested_for_user: userId },
-                  this.requestOptions(token)
-                ).pipe(
-                  map(() => true),
-                  catchError(() => of(false))
-                );
-              })
-            )
-          : of(false);
-
-        return forkJoin([claimInvite$, linkRequest$, linkByEmail$]).pipe(
-          map(([inviteClaimed, requestLinked, emailLinked]) => inviteClaimed || requestLinked || emailLinked),
-          tap((ok) => {
-            if (ok || inviteAlreadyClaimed) {
-              this.clearPendingInviteToken();
-            }
-          })
-        );
       }),
       catchError(() => of(false))
     );
@@ -1871,42 +1725,6 @@ export class BusinessCenterService {
       required_state: this.pickString(raw?.required_state) ?? 'Unknown',
       response_status: this.pickString(raw?.response_status) ?? 'Pending',
       timestamp: this.pickString(raw?.timestamp)
-    };
-  }
-
-  private normalizeRequestFromInvite(raw: InviteRequestView, fallbackEmail: string): RequestRecord {
-    const linkedRequest = raw?.request as Record<string, unknown> | null | undefined;
-    const linkedRequestId = this.normalizeId(linkedRequest?.['id']);
-    const inviteId = this.normalizeId(raw?.id) ?? '';
-    const statusRaw = this.pickString(raw?.status)?.toLowerCase() ?? '';
-    const claimed = Boolean(this.pickString(raw?.claimed_at)) || statusRaw.includes('claim');
-    const responseStatus =
-      this.pickString(linkedRequest?.['response_status']) ??
-      (claimed ? 'Pending' : 'Pending');
-    const requiredState =
-      this.pickString(linkedRequest?.['required_state']) ??
-      'Pending';
-    const timestamp =
-      this.pickString(linkedRequest?.['timestamp']) ??
-      this.pickString(raw?.sent_at) ??
-      this.pickString(raw?.date_created);
-    const requestedForEmail =
-      this.pickString(linkedRequest?.['requested_for_email']) ??
-      this.pickString(raw?.email) ??
-      fallbackEmail;
-
-    return {
-      id: linkedRequestId ?? `invite-${inviteId}`,
-      target: 'scan',
-      recipient: requestedForEmail ?? fallbackEmail,
-      requested_for_email: requestedForEmail ?? fallbackEmail,
-      requested_by_user: this.normalizeId(linkedRequest?.['requested_by_user']),
-      requested_for_user: this.normalizeId(linkedRequest?.['requested_for_user']),
-      business_profile: null,
-      recipient_industry: null,
-      required_state: requiredState,
-      response_status: responseStatus,
-      timestamp
     };
   }
 
