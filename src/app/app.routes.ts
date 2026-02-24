@@ -17,10 +17,25 @@ import { BusinessCenterMobileComponent } from './Pages/mobile/business-center-mo
 import { BusinessCenterService } from './services/business-center.service';
 import { SubscriptionService } from './services/subscription.service';
 
-const isMobileViewport = () =>
-  typeof window !== 'undefined' &&
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia('(max-width: 768px)').matches;
+const isMobileViewport = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const supportsMatchMedia = typeof window.matchMedia === 'function';
+  const isNarrow = supportsMatchMedia
+    ? window.matchMedia('(max-width: 768px)').matches
+    : window.innerWidth <= 768;
+
+  const hasTouch =
+    typeof navigator !== 'undefined' &&
+    ((typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 0) ||
+      (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches));
+
+  // Prevent desktop browsers (for example when DevTools shrinks viewport)
+  // from being routed into mobile-only pages.
+  return isNarrow && hasTouch;
+};
 
 const mobileDashboardMatch: CanMatchFn = () => isMobileViewport();
 const mobileRequestsMatch: CanMatchFn = () => isMobileViewport();

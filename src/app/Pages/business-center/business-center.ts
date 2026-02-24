@@ -76,6 +76,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   feedback: Feedback | null = null;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
+  private accessLoadFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
 
   accessState: BusinessHubAccessState | null = null;
   orgScopeNote = '';
@@ -151,6 +152,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.clearFeedbackTimer();
     this.clearMemberSubmitFailSafeTimer();
+    this.clearAccessLoadFailSafeTimer();
   }
 
   // ===============================
@@ -657,6 +659,19 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.missingBusinessProfile = false;
     this.orgScopeNote = '';
     this.memberRoleLabel = '';
+    this.accessReason = '';
+
+    this.clearAccessLoadFailSafeTimer();
+    this.accessLoadFailSafeTimer = setTimeout(() => {
+      if (!this.loadingAccess) return;
+      this.loadingAccess = false;
+      this.hasBusinessAccess = false;
+      this.missingBusinessProfile = false;
+      if (!this.accessReason) {
+        this.accessReason = 'Loading Business access took too long. Please refresh and try again.';
+      }
+      this.showFeedback('error', this.accessReason, true);
+    }, this.accessStateTimeoutMs + 1500);
 
     let accessState$: Observable<BusinessHubAccessState>;
     try {
@@ -706,48 +721,68 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         } as BusinessHubAccessState)
       ),
       finalize(() => {
-        // ✅ مهما حصل: اقفل loadingAccess
         this.loadingAccess = false;
+        this.clearAccessLoadFailSafeTimer();
       })
-    ).subscribe((state) => {
-      this.accessState = state;
-      this.hydrateDailyRequestCount();
+    ).subscribe({
+      next: (state) => {
+        this.loadingAccess = false;
+        this.clearAccessLoadFailSafeTimer();
 
-      // profile any عشان template
-      this.profile = (state as any)?.profile ?? null;
+        try {
+          this.accessState = state;
+          this.hydrateDailyRequestCount();
 
-      this.hasBusinessAccess = Boolean((state as any)?.hasPaidAccess);
-      this.accessReason = (state as any)?.reason || '';
+          this.profile = (state as any)?.profile ?? null;
 
-      const role = ((state as any)?.memberRole ?? '').toString();
-      this.memberRoleLabel = this.toTitleCase(role) || (this.profile ? 'Unknown' : '-');
-      this.currentMemberRole = this.normalizeBusinessRole((state as any)?.memberRole);
-      this.syncAssignableMemberRoleOptions();
-      this.orgScopeNote = this.hasOrgScope()
-        ? ''
-        : 'org_id is missing. Request invites are not available; exports and activity use team/user fallback scope.';
+          this.hasBusinessAccess = Boolean((state as any)?.hasPaidAccess);
+          this.accessReason = (state as any)?.reason || '';
 
-      const perms = (state as any)?.permissions ?? {};
-      this.canInvite = Boolean(perms.canInvite);
-      this.canUpgrade = Boolean(perms.canUpgrade);
-      this.canManageMembers = Boolean(perms.canManageMembers);
-      this.canUseSystem = Boolean(perms.canUseSystem);
-      this.isReadOnly = Boolean(perms.isReadOnly);
+          const role = ((state as any)?.memberRole ?? '').toString();
+          this.memberRoleLabel = this.toTitleCase(role) || (this.profile ? 'Unknown' : '-');
+          this.currentMemberRole = this.normalizeBusinessRole((state as any)?.memberRole);
+          this.syncAssignableMemberRoleOptions();
+          this.orgScopeNote = this.hasOrgScope()
+            ? ''
+            : 'org_id is missing. Request invites are not available; exports and activity use team/user fallback scope.';
 
-      this.trialDaysRemaining = (state as any)?.trialExpiresAt
-        ? this.daysUntil((state as any).trialExpiresAt)
-        : null;
+          const perms = (state as any)?.permissions ?? {};
+          this.canInvite = Boolean(perms.canInvite);
+          this.canUpgrade = Boolean(perms.canUpgrade);
+          this.canManageMembers = Boolean(perms.canManageMembers);
+          this.canUseSystem = Boolean(perms.canUseSystem);
+          this.isReadOnly = Boolean(perms.isReadOnly);
 
-      const reasonLower = (this.accessReason || '').toLowerCase();
-      this.missingBusinessProfile = !this.profile && reasonLower.includes('no business profile');
+          this.trialDaysRemaining = (state as any)?.trialExpiresAt
+            ? this.daysUntil((state as any).trialExpiresAt)
+            : null;
 
-      if (!this.hasBusinessAccess) {
+          const reasonLower = (this.accessReason || '').toLowerCase();
+          this.missingBusinessProfile = !this.profile && reasonLower.includes('no business profile');
+
+          if (!this.hasBusinessAccess) {
+            this.clearBusinessData();
+            if (this.accessReason) this.showFeedback('info', this.accessReason, true);
+            return;
+          }
+
+          this.loadBusinessData(state);
+        } catch (err) {
+          this.loadingAccess = false;
+          this.hasBusinessAccess = false;
+          this.clearBusinessData();
+          this.showFeedback(
+            'error',
+            this.describeHttpError(err, 'Unexpected error while preparing Business Center.')
+          );
+        }
+      },
+      error: (err) => {
+        this.loadingAccess = false;
+        this.hasBusinessAccess = false;
         this.clearBusinessData();
-        if (this.accessReason) this.showFeedback('info', this.accessReason, true);
-        return;
+        this.showFeedback('error', this.describeHttpError(err, 'Failed to load Business Center.'));
       }
-
-      this.loadBusinessData(state);
     });
   }
 
@@ -1088,6 +1123,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     if (!this.memberSubmitFailSafeTimer) return;
     clearTimeout(this.memberSubmitFailSafeTimer);
     this.memberSubmitFailSafeTimer = null;
+  }
+
+  private clearAccessLoadFailSafeTimer(): void {
+    if (!this.accessLoadFailSafeTimer) return;
+    clearTimeout(this.accessLoadFailSafeTimer);
+    this.accessLoadFailSafeTimer = null;
   }
 
   private daysUntil(value: string): number | null {
