@@ -606,6 +606,28 @@ export class Requests implements OnInit, OnDestroy {
     ).subscribe({
       next: data => {
         const remoteRows = data.map(r => this.mapToRow(r));
+        if (!useBusinessScope && remoteRows.length === 0) {
+          const userEmail = this.getUserEmailFromToken(token);
+          if (userEmail) {
+            this.businessCenter.listInvitedRequestsByEmail(userEmail).pipe(
+              take(1),
+              catchError(() => of([]))
+            ).subscribe((inviteRequests) => {
+              const inviteRows = (inviteRequests ?? []).map((row) => this.mapToRow(row as RequestRecord));
+              const combinedRemoteRows = this.mergeRequestRows(remoteRows, inviteRows);
+              this.reconcileOptimisticRequests(combinedRemoteRows);
+              this.requests = this.mergeRequestRows(combinedRemoteRows, Array.from(this.optimisticRequests.values()));
+              this.updateStats();
+              this.cdr.detectChanges();
+
+              if (this.shouldRetryEmptyResult(combinedRemoteRows.length, retryAttempt)) {
+                this.scheduleEmptyResultRetry(retryAttempt + 1);
+              }
+            });
+            return;
+          }
+        }
+
         this.reconcileOptimisticRequests(remoteRows);
         this.requests = this.mergeRequestRows(remoteRows, Array.from(this.optimisticRequests.values()));
         this.updateStats();
