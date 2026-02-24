@@ -67,6 +67,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   private readonly accessTimeoutMs = 15000;
   private readonly postAuthRetryDelaysMs = [900, 1800, 3000];
   private recoveringSession = false;
+  private currentAccessUserId: string | null = null;
   private currentMemberRole: BusinessMemberRole | null = null;
   private currentBusinessProfileId: string | null = null;
   private optimisticRequests = new Map<string, RequestRow>();
@@ -278,12 +279,14 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       })
     ).subscribe((state) => {
       if (!state) {
+        this.tryRecoverSessionAndReload();
         this.hasBusinessAccess = false;
         this.canViewRequestCenter = true;
         this.canViewAllBusinessRequests = false;
         this.canCreateRequests = false;
         this.canOpenBusinessCenter = false;
         this.canAssignMemberRole = false;
+        this.currentAccessUserId = null;
         this.currentPlanName = 'Free';
         this.currentPlanCode = 'free';
         this.isBusinessTrial = false;
@@ -300,6 +303,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       }
 
       this.hasBusinessAccess = Boolean(state.hasPaidAccess);
+      this.currentAccessUserId = this.normalizeId(state.userId);
       this.currentPlanName = this.hasBusinessAccess ? 'Business' : 'Free';
       this.currentPlanCode = (state.profile?.plan_code ?? (this.hasBusinessAccess ? 'business' : 'free')).toString().toLowerCase();
 
@@ -379,15 +383,17 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   private loadOwnRequests(retryAttempt = 0) {
     const token = this.getUserToken();
     const userId = this.resolveCurrentUserId(token);
+    const userEmail = this.getUserEmailFromToken(token);
 
-    if (!token || !userId) {
+    if (!token || (!userId && !userEmail)) {
       this.tryRecoverSessionAndReload();
       this.applyRequests([]);
       return;
     }
 
     this.fetchRequests(token, {
-      requestedForUserId: userId,
+      requestedForUserId: userId ?? undefined,
+      requestedForEmail: userEmail ?? undefined,
       bustCache: true
     }).subscribe({
       next: (requests) => {
@@ -410,6 +416,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     token: string | null,
     filters: {
       requestedForUserId?: string;
+      requestedForEmail?: string;
       businessProfileId?: string;
       bustCache?: boolean;
     } | null
@@ -442,7 +449,26 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     if (filters?.businessProfileId) {
       params.set('filter[business_profile][_eq]', filters.businessProfileId);
+    } else if (filters?.requestedForUserId && filters?.requestedForEmail) {
+      params.set('filter[_or][0][requested_for_user][_eq]', filters.requestedForUserId);
+      params.set('filter[_or][1][requested_for_email][_eq]', filters.requestedForEmail);
+      params.set('filter[_or][2][requested_by_user][_eq]', filters.requestedForUserId);
     } else if (filters?.requestedForUserId) {
+      params.set('filter[_or][0][requested_for_user][_eq]', filters.requestedForUserId);
+      params.set('filter[_or][1][requested_by_user][_eq]', filters.requestedForUserId);
+    } else if (filters?.requestedForEmail) {
+      params.set('filter[requested_for_email][_eq]', filters.requestedForEmail);
+    }
+
+    if (
+      !filters?.businessProfileId &&
+      !filters?.requestedForUserId &&
+      !filters?.requestedForEmail
+    ) {
+      return of([] as RequestRecord[]);
+    }
+
+    if (filters?.requestedForUserId && !filters?.requestedForEmail && filters?.businessProfileId) {
       params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
     }
 
@@ -578,6 +604,10 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   }
 
   private resolveCurrentUserId(token: string | null): string | null {
+    if (this.currentAccessUserId) {
+      return this.currentAccessUserId;
+    }
+
     const tokenUserId = this.getUserIdFromToken(token);
     if (tokenUserId) {
       return tokenUserId;

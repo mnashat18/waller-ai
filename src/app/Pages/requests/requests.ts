@@ -72,6 +72,7 @@ export class Requests implements OnInit, OnDestroy {
   private readonly accessTimeoutMs = 15000;
   private readonly postAuthRetryDelaysMs = [900, 1800, 3000];
   private recoveringSession = false;
+  private currentAccessUserId: string | null = null;
   private currentMemberRole: BusinessMemberRole | null = null;
   private currentBusinessProfileId: string | null = null;
   private optimisticRequests = new Map<string, RequestRow>();
@@ -473,6 +474,7 @@ export class Requests implements OnInit, OnDestroy {
         this.canCreateRequests = false;
         this.canOpenBusinessCenter = false;
         this.canAssignMemberRole = false;
+        this.currentAccessUserId = null;
         this.currentMemberRole = null;
         this.currentBusinessProfileId = null;
         this.businessTrialNotice = '';
@@ -484,6 +486,7 @@ export class Requests implements OnInit, OnDestroy {
       }
 
       this.hasBusinessAccess = Boolean(state.hasPaidAccess);
+      this.currentAccessUserId = this.normalizeId(state.userId);
       this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
       this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
       this.canViewAllBusinessRequests = this.hasBusinessAccess && this.currentMemberRole === 'owner';
@@ -571,14 +574,26 @@ export class Requests implements OnInit, OnDestroy {
       params.set('filter[business_profile][_eq]', this.currentBusinessProfileId);
     } else {
       const userId = this.resolveCurrentUserId(token);
-      if (!userId) {
+      const userEmail = this.getUserEmailFromToken(token);
+
+      if (!userId && !userEmail) {
         this.tryRecoverSessionAndReload();
         this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
         this.updateStats();
         this.cdr.detectChanges();
         return;
       }
-      params.set('filter[requested_for_user][_eq]', userId);
+
+      if (userId && userEmail) {
+        params.set('filter[_or][0][requested_for_user][_eq]', userId);
+        params.set('filter[_or][1][requested_for_email][_eq]', userEmail);
+        params.set('filter[_or][2][requested_by_user][_eq]', userId);
+      } else if (userId) {
+        params.set('filter[_or][0][requested_for_user][_eq]', userId);
+        params.set('filter[_or][1][requested_by_user][_eq]', userId);
+      } else if (userEmail) {
+        params.set('filter[requested_for_email][_eq]', userEmail);
+      }
     }
 
     this.http.get<{ data?: RequestRecord[] }>(
@@ -754,6 +769,10 @@ export class Requests implements OnInit, OnDestroy {
   }
 
   private resolveCurrentUserId(token: string | null): string | null {
+    if (this.currentAccessUserId) {
+      return this.currentAccessUserId;
+    }
+
     const tokenUserId = this.getUserIdFromToken(token);
     if (tokenUserId) {
       return tokenUserId;
