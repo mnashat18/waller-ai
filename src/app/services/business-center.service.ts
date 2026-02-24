@@ -1718,6 +1718,15 @@ export class BusinessCenterService {
       );
     }
 
+    // Fast path: when token already carries user id, avoid an extra /users/me call.
+    // This removes unnecessary latency/race during first navigation.
+    if (fallback.userId) {
+      this.debug('resolveAccessContext:tokenUserIdFastPath', {
+        userId: fallback.userId
+      });
+      return of(fallback);
+    }
+
     return this.resolveCurrentUserFromSession(access.token).pipe(
       map((resolved) => ({
         token: fallback.token,
