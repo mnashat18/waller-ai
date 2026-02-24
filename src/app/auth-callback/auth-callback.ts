@@ -1,5 +1,4 @@
 import { CommonModule } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
 import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, map, of, switchMap, take, timeout } from 'rxjs';
@@ -20,13 +19,9 @@ export class AuthCallbackComponent implements OnInit {
   status: 'loading' | 'error' = 'loading';
   message = '';
 
-  // Fallback refresh origin when callback opens without a stored token.
-  private readonly DIRECTUS_URL = 'https://dash.conntinuity.com';
-
   constructor(
     private router: Router,
-    private auth: AuthService,
-    private http: HttpClient
+    private auth: AuthService
   ) {}
 
   ngOnInit(): void {
@@ -72,12 +67,10 @@ export class AuthCallbackComponent implements OnInit {
   }
 
   private refreshAccessTokenFromCookie() {
-    return this.http
-      .post<any>(`${this.DIRECTUS_URL}/auth/refresh`, {}, { withCredentials: true })
-      .pipe(
-        map((res) => res?.data?.access_token ?? res?.access_token ?? null),
-        catchError(() => of(null))
-      );
+    return this.auth.refreshFromCookie().pipe(
+      map((token) => token ?? null),
+      catchError(() => of(null))
+    );
   }
 
   private fail(msg: string) {

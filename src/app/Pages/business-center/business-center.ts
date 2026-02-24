@@ -77,6 +77,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private memberSubmitFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
   private accessLoadFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
+  private businessDataFailSafeTimer: ReturnType<typeof setTimeout> | null = null;
 
   accessState: BusinessHubAccessState | null = null;
   orgScopeNote = '';
@@ -153,6 +154,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.clearFeedbackTimer();
     this.clearMemberSubmitFailSafeTimer();
     this.clearAccessLoadFailSafeTimer();
+    this.clearBusinessDataFailSafeTimer();
   }
 
   // ===============================
@@ -784,8 +786,18 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     this.loadingData = true;
     this.clearBusinessData();
     const orgId = (state as any)?.orgId ?? null;
+    this.clearBusinessDataFailSafeTimer();
+    this.businessDataFailSafeTimer = setTimeout(() => {
+      if (!this.loadingData) return;
+      this.loadingData = false;
+      this.showFeedback(
+        'error',
+        'Loading Business Ops modules took too long. Some sections were skipped. Please refresh and try again.'
+      );
+    }, this.actionTimeoutMs + 3000);
 
     this.businessCenter.listTeamMembers(profileId).pipe(
+      timeout(this.actionTimeoutMs),
       catchError((err) => this.sectionFallback<BusinessProfileMember[]>(err, 'team members', [])),
       switchMap((teamRows) => {
         const team = (teamRows as any[]) ?? [];
@@ -794,20 +806,27 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         return forkJoin({
           team: of(team) as Observable<BusinessProfileMember[]>,
           requests: this.businessCenter.listRequests(orgId).pipe(
+            timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<RequestRecord[]>(err, 'requests', []))
           ),
           invites: this.businessCenter.listRequestInvites(orgId).pipe(
+            timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<RequestInviteRecord[]>(err, 'request invites', []))
           ),
           exports: this.businessCenter.listReportExports(orgId, 40, activityOptions.teamUserIds).pipe(
+            timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<ReportExportRecord[]>(err, 'export jobs', []))
           ),
           events: this.businessCenter.listActivityEvents(orgId, 80, activityOptions).pipe(
+            timeout(this.actionTimeoutMs),
             catchError((err) => this.sectionFallback<ActivityEventRecord[]>(err, 'activity log', []))
           )
         });
       }),
-      finalize(() => (this.loadingData = false))
+      finalize(() => {
+        this.loadingData = false;
+        this.clearBusinessDataFailSafeTimer();
+      })
     ).subscribe(({ team, requests, invites, exports, events }) => {
       this.teamMembers = (team as any[]) ?? [];
       const requestRows = (requests as RequestRecord[]) ?? [];
@@ -1150,6 +1169,12 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     if (!this.accessLoadFailSafeTimer) return;
     clearTimeout(this.accessLoadFailSafeTimer);
     this.accessLoadFailSafeTimer = null;
+  }
+
+  private clearBusinessDataFailSafeTimer(): void {
+    if (!this.businessDataFailSafeTimer) return;
+    clearTimeout(this.businessDataFailSafeTimer);
+    this.businessDataFailSafeTimer = null;
   }
 
   private daysUntil(value: string): number | null {

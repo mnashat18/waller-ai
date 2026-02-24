@@ -594,7 +594,8 @@ export class BusinessCenterService {
     hasBusinessAccess: boolean;
     businessProfileId: string | null;
   }> {
-    const cachedState = this.lastHubAccessState;
+    const access = this.getAccessContext();
+    const cachedState = this.getRecentHubAccessState(access.userId);
     if (cachedState) {
       return of({
         userId: this.normalizeId(cachedState.userId),
@@ -603,7 +604,6 @@ export class BusinessCenterService {
       });
     }
 
-    const access = this.getAccessContext();
     return this.getHubAccessState().pipe(
       timeout(this.requestTimeoutMs),
       map((state) => ({

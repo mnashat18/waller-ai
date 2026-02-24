@@ -23,6 +23,7 @@ type StoredTokens = {
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly api = environment.API_URL;
+  private readonly refreshEndpointMissingSessionKey = 'auth_refresh_endpoint_missing';
 
   constructor(
     private http: HttpClient,
@@ -402,6 +403,7 @@ export class AuthService {
     sessionStorage.removeItem('auth_callback_pending');
     sessionStorage.removeItem('auth_refresh_attempted');
     sessionStorage.removeItem('auth_callback_raw_url');
+    sessionStorage.removeItem(this.refreshEndpointMissingSessionKey);
     this.subscriptions.notifyAuthStateChanged();
   }
 
@@ -467,6 +469,13 @@ export class AuthService {
   }
 
   private async refreshFromCookieInternal(): Promise<string | null> {
+    if (
+      typeof sessionStorage !== 'undefined' &&
+      sessionStorage.getItem(this.refreshEndpointMissingSessionKey) === '1'
+    ) {
+      return null;
+    }
+
     const storedRefreshToken = this.getStoredRefreshToken();
     const attempts: Array<Record<string, string>> = [];
 
@@ -493,12 +502,21 @@ export class AuthService {
         );
         const tokens = this.storeTokensFromAuthResponse(res);
         if (tokens.accessToken) {
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.removeItem(this.refreshEndpointMissingSessionKey);
+          }
           sessionStorage.removeItem('auth_callback_pending');
           sessionStorage.removeItem('auth_refresh_attempted');
           return tokens.accessToken;
         }
       } catch (err) {
         lastErr = err;
+        if (this.isRefreshRouteMissing(err)) {
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem(this.refreshEndpointMissingSessionKey, '1');
+          }
+          break;
+        }
       }
     }
 
@@ -616,6 +634,32 @@ export class AuthService {
     if (localStorage.getItem('directus_refresh_token') !== token) {
       localStorage.setItem('directus_refresh_token', token);
     }
+  }
+
+  private isRefreshRouteMissing(err: any): boolean {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const message = (
+      err?.error?.errors?.[0]?.message ||
+      err?.error?.errors?.[0]?.extensions?.reason ||
+      err?.error?.message ||
+      err?.message ||
+      ''
+    ).toString().toLowerCase();
+    const code = (
+      err?.error?.errors?.[0]?.extensions?.code ||
+      err?.error?.code ||
+      ''
+    ).toString().toUpperCase();
+
+    if (code === 'ROUTE_NOT_FOUND') {
+      return true;
+    }
+
+    if ((status === 400 || status === 404) && message.includes('/auth/refresh') && message.includes('doesn')) {
+      return true;
+    }
+
+    return false;
   }
 }
 
