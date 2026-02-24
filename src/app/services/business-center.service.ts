@@ -2,7 +2,7 @@ import { take } from 'rxjs/operators';
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, forkJoin, of } from 'rxjs';
-import { catchError, map, switchMap, tap, timeout } from 'rxjs/operators';
+import { catchError, finalize, map, shareReplay, switchMap, tap, timeout } from 'rxjs/operators';
 import { environment } from 'src/environments/environment';
 
 export type ActionResult = {
@@ -177,18 +177,40 @@ export class BusinessCenterService {
   private readonly requestTimeoutMs = 15000;
   readonly dailyRequestLimit = 5;
   private lastHubAccessState: BusinessHubAccessState | null = null;
+  private lastHubAccessStateAt = 0;
+  private readonly hubAccessCacheTtlMs = 30000;
+  private readonly hubAccessStateStorageKey = 'wellar_business_hub_access_state_v1';
+  private hubAccessInFlight$: Observable<BusinessHubAccessState> | null = null;
 
   constructor(private http: HttpClient) {}
 
   getHubAccessState(): Observable<BusinessHubAccessState> {
     const access = this.getAccessContext();
+    const cachedState = this.getRecentHubAccessState(access.userId);
+
+    if (cachedState) {
+      this.debug('getHubAccessState:cacheHit', {
+        userId: cachedState.userId,
+        profileId: cachedState.profile?.id ?? null,
+        memberRole: cachedState.memberRole,
+        hasPaidAccess: cachedState.hasPaidAccess
+      });
+      return of(cachedState);
+    }
+
+    if (this.hubAccessInFlight$) {
+      this.debug('getHubAccessState:reuseInFlight', {
+        userId: access.userId
+      });
+      return this.hubAccessInFlight$;
+    }
 
     this.debug('getHubAccessState:start', {
       hasToken: Boolean(access.token),
       userId: access.userId
     });
 
-    return this.resolveAccessContext(access).pipe(
+    const request$ = this.resolveAccessContext(access).pipe(
       take(1),
       tap((resolved) =>
         this.debug('getHubAccessState:resolvedAccess', {
@@ -270,6 +292,8 @@ export class BusinessCenterService {
       ),
       tap((state) => {
         this.lastHubAccessState = state;
+        this.lastHubAccessStateAt = Date.now();
+        this.persistHubAccessState(state, this.lastHubAccessStateAt);
 
         this.debug('getHubAccessState:result', {
           userId: state.userId,
@@ -279,8 +303,19 @@ export class BusinessCenterService {
           permissions: state.permissions,
           reason: state.reason
         });
-      })
+      }),
+      finalize(() => {
+        this.hubAccessInFlight$ = null;
+      }),
+      shareReplay(1)
     );
+
+    this.hubAccessInFlight$ = request$;
+    return request$;
+  }
+
+  getCachedHubAccessState(): BusinessHubAccessState | null {
+    return this.getRecentHubAccessState(this.getAccessContext().userId);
   }
 
   ensureBusinessProfileForUser(
@@ -1985,6 +2020,86 @@ export class BusinessCenterService {
       return 'Session expired or unauthorized. Please sign in again.';
     }
     return this.toFriendlyError(err, fallback);
+  }
+
+  private getRecentHubAccessState(currentUserId: string | null): BusinessHubAccessState | null {
+    if (!currentUserId) {
+      return null;
+    }
+
+    const memoryState = this.lastHubAccessState;
+    if (memoryState && this.isHubAccessStateUsable(memoryState, this.lastHubAccessStateAt, currentUserId)) {
+      return memoryState;
+    }
+
+    const stored = this.readStoredHubAccessState();
+    if (!stored) {
+      return null;
+    }
+
+    if (!this.isHubAccessStateUsable(stored.state, stored.updatedAt, currentUserId)) {
+      return null;
+    }
+
+    this.lastHubAccessState = stored.state;
+    this.lastHubAccessStateAt = stored.updatedAt;
+    return stored.state;
+  }
+
+  private isHubAccessStateUsable(
+    state: BusinessHubAccessState | null,
+    updatedAt: number,
+    currentUserId: string | null
+  ): boolean {
+    if (!state || !currentUserId) {
+      return false;
+    }
+    if (updatedAt <= 0 || Date.now() - updatedAt > this.hubAccessCacheTtlMs) {
+      return false;
+    }
+
+    const cachedUserId = this.normalizeId(state.userId);
+    return Boolean(cachedUserId && cachedUserId === currentUserId);
+  }
+
+  private persistHubAccessState(state: BusinessHubAccessState, updatedAt: number): void {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorage.setItem(
+        this.hubAccessStateStorageKey,
+        JSON.stringify({
+          updatedAt,
+          state
+        })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private readStoredHubAccessState(): { state: BusinessHubAccessState; updatedAt: number } | null {
+    if (typeof localStorage === 'undefined') {
+      return null;
+    }
+
+    try {
+      const raw = localStorage.getItem(this.hubAccessStateStorageKey);
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const updatedAt = typeof parsed['updatedAt'] === 'number' ? parsed['updatedAt'] : 0;
+      const state = (parsed['state'] ?? null) as BusinessHubAccessState | null;
+      if (!state || typeof state !== 'object') {
+        return null;
+      }
+      return { state, updatedAt };
+    } catch {
+      return null;
+    }
   }
 
   private toFriendlyError(err: any, fallback: string): string {

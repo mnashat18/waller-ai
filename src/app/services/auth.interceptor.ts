@@ -127,6 +127,7 @@ export class AuthInterceptor implements HttpInterceptor {
     localStorage.removeItem('directus_token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('directus_refresh_token');
+    localStorage.removeItem('wellar_business_hub_access_state_v1');
   }
 
   private isApiRequest(url: string): boolean {

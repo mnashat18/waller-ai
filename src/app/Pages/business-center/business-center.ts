@@ -673,6 +673,23 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.showFeedback('error', this.accessReason, true);
     }, this.accessStateTimeoutMs + 1500);
 
+    const cachedState = this.businessCenter.getCachedHubAccessState();
+    if (cachedState) {
+      this.loadingAccess = false;
+      this.clearAccessLoadFailSafeTimer();
+      try {
+        this.applyResolvedAccessState(cachedState);
+      } catch (err) {
+        this.hasBusinessAccess = false;
+        this.clearBusinessData();
+        this.showFeedback(
+          'error',
+          this.describeHttpError(err, 'Unexpected error while preparing Business Center.')
+        );
+      }
+      return;
+    }
+
     let accessState$: Observable<BusinessHubAccessState>;
     try {
       accessState$ = this.businessCenter.getHubAccessState();
@@ -730,43 +747,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         this.clearAccessLoadFailSafeTimer();
 
         try {
-          this.accessState = state;
-          this.hydrateDailyRequestCount();
-
-          this.profile = (state as any)?.profile ?? null;
-
-          this.hasBusinessAccess = Boolean((state as any)?.hasPaidAccess);
-          this.accessReason = (state as any)?.reason || '';
-
-          const role = ((state as any)?.memberRole ?? '').toString();
-          this.memberRoleLabel = this.toTitleCase(role) || (this.profile ? 'Unknown' : '-');
-          this.currentMemberRole = this.normalizeBusinessRole((state as any)?.memberRole);
-          this.syncAssignableMemberRoleOptions();
-          this.orgScopeNote = this.hasOrgScope()
-            ? ''
-            : 'org_id is missing. Request invites are not available; exports and activity use team/user fallback scope.';
-
-          const perms = (state as any)?.permissions ?? {};
-          this.canInvite = Boolean(perms.canInvite);
-          this.canUpgrade = Boolean(perms.canUpgrade);
-          this.canManageMembers = Boolean(perms.canManageMembers);
-          this.canUseSystem = Boolean(perms.canUseSystem);
-          this.isReadOnly = Boolean(perms.isReadOnly);
-
-          this.trialDaysRemaining = (state as any)?.trialExpiresAt
-            ? this.daysUntil((state as any).trialExpiresAt)
-            : null;
-
-          const reasonLower = (this.accessReason || '').toLowerCase();
-          this.missingBusinessProfile = !this.profile && reasonLower.includes('no business profile');
-
-          if (!this.hasBusinessAccess) {
-            this.clearBusinessData();
-            if (this.accessReason) this.showFeedback('info', this.accessReason, true);
-            return;
-          }
-
-          this.loadBusinessData(state);
+          this.applyResolvedAccessState(state);
         } catch (err) {
           this.loadingAccess = false;
           this.hasBusinessAccess = false;
@@ -840,6 +821,46 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       this.syncExportSelectionWithTeam();
       this.refreshFilteredActivityEvents();
     });
+  }
+
+  private applyResolvedAccessState(state: BusinessHubAccessState): void {
+    this.accessState = state;
+    this.hydrateDailyRequestCount();
+
+    this.profile = (state as any)?.profile ?? null;
+
+    this.hasBusinessAccess = Boolean((state as any)?.hasPaidAccess);
+    this.accessReason = (state as any)?.reason || '';
+
+    const role = ((state as any)?.memberRole ?? '').toString();
+    this.memberRoleLabel = this.toTitleCase(role) || (this.profile ? 'Unknown' : '-');
+    this.currentMemberRole = this.normalizeBusinessRole((state as any)?.memberRole);
+    this.syncAssignableMemberRoleOptions();
+    this.orgScopeNote = this.hasOrgScope()
+      ? ''
+      : 'org_id is missing. Request invites are not available; exports and activity use team/user fallback scope.';
+
+    const perms = (state as any)?.permissions ?? {};
+    this.canInvite = Boolean(perms.canInvite);
+    this.canUpgrade = Boolean(perms.canUpgrade);
+    this.canManageMembers = Boolean(perms.canManageMembers);
+    this.canUseSystem = Boolean(perms.canUseSystem);
+    this.isReadOnly = Boolean(perms.isReadOnly);
+
+    this.trialDaysRemaining = (state as any)?.trialExpiresAt
+      ? this.daysUntil((state as any).trialExpiresAt)
+      : null;
+
+    const reasonLower = (this.accessReason || '').toLowerCase();
+    this.missingBusinessProfile = !this.profile && reasonLower.includes('no business profile');
+
+    if (!this.hasBusinessAccess) {
+      this.clearBusinessData();
+      if (this.accessReason) this.showFeedback('info', this.accessReason, true);
+      return;
+    }
+
+    this.loadBusinessData(state);
   }
 
   private createOptimisticRequestRow(email: string, requiredState: RequiredState): RequestRecord {

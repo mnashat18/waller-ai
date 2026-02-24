@@ -396,6 +396,7 @@ export class AuthService {
     localStorage.removeItem('user_role_id');
     localStorage.removeItem('user_role_name');
     localStorage.removeItem('wellar_sidebar_business_state_v1');
+    localStorage.removeItem('wellar_business_hub_access_state_v1');
 
     sessionStorage.removeItem('is_logged_in');
     sessionStorage.removeItem('auth_callback_pending');
@@ -592,6 +593,7 @@ export class AuthService {
     localStorage.removeItem('token');
     localStorage.removeItem('access_token');
     localStorage.removeItem('directus_token');
+    localStorage.removeItem('wellar_business_hub_access_state_v1');
     sessionStorage.removeItem('is_logged_in');
   }
 
