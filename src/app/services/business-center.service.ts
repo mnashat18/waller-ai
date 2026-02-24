@@ -487,6 +487,29 @@ export class BusinessCenterService {
     );
   }
 
+  hasRequestForEmail(email: string): Observable<boolean> {
+    const normalizedEmail = this.pickString(email)?.toLowerCase() ?? '';
+    if (!this.isEmailLike(normalizedEmail)) {
+      return of(false);
+    }
+
+    const access = this.getAccessContext();
+    if (!access.token && !access.userId) {
+      return of(false);
+    }
+
+    const params = this.buildRequestsParams(1);
+    params.set('filter[requested_for_email][_eq]', normalizedEmail);
+
+    return this.http.get<{ data?: any[] }>(
+      `${this.api}/items/requests?${params.toString()}`,
+      this.requestOptions(access.token)
+    ).pipe(
+      map((res) => (res.data ?? []).length > 0),
+      catchError(() => of(false))
+    );
+  }
+
   countTodayRequests(rows: Array<{ timestamp?: string | null | undefined }>): number {
     const today = this.localDateKey(Date.now());
     if (!today) {

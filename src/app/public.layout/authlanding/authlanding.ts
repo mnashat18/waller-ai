@@ -4,7 +4,8 @@ import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/ro
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../services/auth';
 import { of, Subscription } from 'rxjs';
-import { catchError, filter, switchMap, timeout } from 'rxjs/operators';
+import { catchError, filter, map, switchMap, timeout } from 'rxjs/operators';
+import { BusinessCenterService } from '../../services/business-center.service';
 
 @Component({
   selector: 'app-authlanding',
@@ -58,6 +59,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   constructor(
     private auth: AuthService,
+    private businessCenter: BusinessCenterService,
     private router: Router,
     private route: ActivatedRoute
   ) {}
@@ -103,11 +105,11 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.feedback = '';
   }
 
-  closeAuth() {
+  closeAuth(navigateHome = true) {
     this.showAuthModal = false;
     this.feedback = '';
     this.submitting = false;
-    if (this.isAuthRoute()) {
+    if (navigateHome && this.isAuthRoute()) {
       this.router.navigateByUrl('/');
     }
   }
@@ -138,6 +140,14 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         this.feedback = 'Account created. Signing you in...';
         return this.auth.login(email, password).pipe(
           timeout(this.authTimeoutMs),
+          switchMap((loginResult) =>
+            this.businessCenter.hasRequestForEmail(email).pipe(
+              map((hasRequest) => ({
+                loginResult,
+                hasRequest
+              }))
+            )
+          ),
           catchError((err) => {
             this.authMode = 'login';
             this.login.email = email;
@@ -153,13 +163,20 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         return of(null);
       })
     ).subscribe((result) => {
-      if (!result) {
+      if (!result?.loginResult) {
         return;
       }
 
+      const postAuthRedirect = this.auth.consumePostAuthRedirect('/dashboard');
       this.submitting = false;
-      this.closeAuth();
-      this.router.navigateByUrl(this.auth.consumePostAuthRedirect('/dashboard'));
+      this.closeAuth(false);
+      this.router.navigate(['/request-welcome'], {
+        queryParams: {
+          hasRequest: result.hasRequest ? '1' : '0',
+          email,
+          next: postAuthRedirect
+        }
+      });
     });
   }
 

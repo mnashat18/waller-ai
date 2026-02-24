@@ -196,6 +196,12 @@ export const routes: Routes = [
       { path: 'signup', component: Authlanding, data: { authMode: 'signup' } },
       { path: 'download-app', component: DownloadAppLanding },
       {
+        path: 'request-welcome',
+        loadComponent: () =>
+          import('./public.layout/request-welcome/request-welcome')
+            .then(m => m.RequestWelcomeComponent)
+      },
+      {
         path: 'about',
         loadComponent: () =>
           import('./public.layout/about/about')

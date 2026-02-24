@@ -1,0 +1,32 @@
+<section class="request-welcome">
+  <div class="background-shape shape-one" aria-hidden="true"></div>
+  <div class="background-shape shape-two" aria-hidden="true"></div>
+
+  <article class="welcome-card">
+    <span class="status-pill" [class.has-request]="hasRequest">
+      {{ hasRequest ? 'Request Found' : 'Request Needed' }}
+    </span>
+
+    <h1>{{ heading }}</h1>
+    <p class="lead">{{ message }}</p>
+
+    <p class="email-chip" *ngIf="email">Email: {{ email }}</p>
+
+    <div class="steps">
+      <h2>Next step</h2>
+      <p>
+        Use the button below to go to Request Center and submit your request.
+      </p>
+    </div>
+
+    <div class="actions">
+      <a class="btn-primary" routerLink="/requests">{{ primaryActionLabel }}</a>
+      <a
+        *ngIf="showSecondaryAction"
+        class="btn-secondary"
+        [routerLink]="nextPath">
+        Continue to app
+      </a>
+    </div>
+  </article>
+</section>
