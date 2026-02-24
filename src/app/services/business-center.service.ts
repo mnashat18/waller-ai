@@ -181,86 +181,24 @@ export class BusinessCenterService {
   constructor(private http: HttpClient) {}
 
   getHubAccessState(): Observable<BusinessHubAccessState> {
-  const access = this.getAccessContext();
+    const access = this.getAccessContext();
 
-  this.debug('getHubAccessState:start', {
-    hasToken: Boolean(access.token),
-    userId: access.userId
-  });
+    this.debug('getHubAccessState:start', {
+      hasToken: Boolean(access.token),
+      userId: access.userId
+    });
 
-  return this.resolveAccessContext(access).pipe(
-    take(1),
-
-    tap((resolved) =>
-      this.debug('getHubAccessState:resolvedAccess', {
-        userId: resolved.userId
-      })
-    ),
-
-    switchMap((resolved) => {
-
-      // ✅ لو مفيش user
-      if (!resolved?.userId) {
-        return of({
-          userId: null,
-          profile: null,
-          membership: null,
-          hasPaidAccess: false,
-          memberRole: null,
-          permissions: this.resolvePermissions(null),
-          trialExpired: false,
-          trialExpiresAt: null,
-          reason: 'Please sign in first.'
-        } as BusinessHubAccessState);
-      }
-
-      const userId = resolved.userId;
-      const token = resolved.token;
-
-      // ✅ نشوف لو Owner
-      return this.fetchOwnedProfile(userId, token).pipe(
-        take(1),
-
-        switchMap((ownedProfile) => {
-
-          this.debug('getHubAccessState:ownedProfileLookup', {
-            userId,
-            found: Boolean(ownedProfile?.id),
-            profileId: ownedProfile?.id ?? null
-          });
-
-          // 👇 لو Owner
-          if (ownedProfile?.id) {
-            return of({
-              profile: ownedProfile,
-              membership: null
-            });
-          }
-
-          // 👇 لو مش Owner نشوف Member
-          return this.fetchMemberProfile(userId, token).pipe(
-            take(1),
-            map((result) => ({
-              profile: result?.profile ?? null,
-              membership: result?.membership ?? null
-            })),
-            catchError(() =>
-              of({
-                profile: null,
-                membership: null
-              })
-            )
-          );
-        }),
-
-        // ✅ دايمًا نبني access state هنا
-        map(({ profile, membership }) =>
-          this.buildAccessState(resolved, profile, membership)
-        ),
-
-        catchError((err) =>
-          of({
-            userId,
+    return this.resolveAccessContext(access).pipe(
+      take(1),
+      tap((resolved) =>
+        this.debug('getHubAccessState:resolvedAccess', {
+          userId: resolved.userId
+        })
+      ),
+      switchMap((resolved) => {
+        if (!resolved?.userId) {
+          return of({
+            userId: null,
             profile: null,
             membership: null,
             hasPaidAccess: false,
@@ -268,40 +206,82 @@ export class BusinessCenterService {
             permissions: this.resolvePermissions(null),
             trialExpired: false,
             trialExpiresAt: null,
-            reason: this.toFriendlyError(err, 'Failed to verify Business access.')
-          } as BusinessHubAccessState)
-        )
-      );
-    }),
+            reason: 'Please sign in first.'
+          } as BusinessHubAccessState);
+        }
 
-    catchError((err) =>
-      of({
-        userId: access.userId ?? null,
-        profile: null,
-        membership: null,
-        hasPaidAccess: false,
-        memberRole: null,
-        permissions: this.resolvePermissions(null),
-        trialExpired: false,
-        trialExpiresAt: null,
-        reason: this.toFriendlyError(err, 'Failed to verify Business access.')
-      } as BusinessHubAccessState)
-    ),
+        const userId = resolved.userId;
+        const token = resolved.token;
 
-    tap((state) => {
-      this.lastHubAccessState = state;
+        return this.fetchOwnedProfile(userId, token).pipe(
+          take(1),
+          switchMap((ownedProfile) => {
+            this.debug('getHubAccessState:ownedProfileLookup', {
+              userId,
+              found: Boolean(ownedProfile?.id),
+              profileId: ownedProfile?.id ?? null
+            });
 
-      this.debug('getHubAccessState:result', {
-        userId: state.userId,
-        profileId: state.profile?.id ?? null,
-        memberRole: state.memberRole,
-        hasPaidAccess: state.hasPaidAccess,
-        permissions: state.permissions,
-        reason: state.reason
-      });
-    })
-  );
-}
+            if (ownedProfile?.id) {
+              return of({
+                profile: ownedProfile,
+                membership: null
+              });
+            }
+
+            return this.fetchMemberProfile(userId, token).pipe(
+              take(1),
+              map((result) => ({
+                profile: result?.profile ?? null,
+                membership: result?.membership ?? null
+              }))
+            );
+          }),
+          map(({ profile, membership }) =>
+            this.buildAccessState(resolved, profile, membership)
+          ),
+          catchError((err) =>
+            of({
+              userId,
+              profile: null,
+              membership: null,
+              hasPaidAccess: false,
+              memberRole: null,
+              permissions: this.resolvePermissions(null),
+              trialExpired: false,
+              trialExpiresAt: null,
+              reason: this.resolveAccessErrorReason(err, 'Failed to verify Business access.')
+            } as BusinessHubAccessState)
+          )
+        );
+      }),
+      catchError((err) =>
+        of({
+          userId: access.userId ?? null,
+          profile: null,
+          membership: null,
+          hasPaidAccess: false,
+          memberRole: null,
+          permissions: this.resolvePermissions(null),
+          trialExpired: false,
+          trialExpiresAt: null,
+          reason: this.resolveAccessErrorReason(err, 'Failed to verify Business access.')
+        } as BusinessHubAccessState)
+      ),
+      tap((state) => {
+        this.lastHubAccessState = state;
+
+        this.debug('getHubAccessState:result', {
+          userId: state.userId,
+          profileId: state.profile?.id ?? null,
+          memberRole: state.memberRole,
+          hasPaidAccess: state.hasPaidAccess,
+          permissions: state.permissions,
+          reason: state.reason
+        });
+      })
+    );
+  }
 
   ensureBusinessProfileForUser(
     user: Record<string, unknown> | null | undefined,
@@ -1218,8 +1198,7 @@ export class BusinessCenterService {
       `${this.api}/items/business_profiles?${params.toString()}`,
       this.requestOptions(token)
     ).pipe(
-      map((res) => this.pickBestOwnedProfile(res.data ?? [])),
-      catchError(() => of(null))
+      map((res) => this.pickBestOwnedProfile(res.data ?? []))
     );
   }
 
@@ -1285,8 +1264,7 @@ export class BusinessCenterService {
           return { profile: null, membership: null };
         }
         return active;
-      }),
-      catchError(() => of({ profile: null, membership: null }))
+      })
     );
   }
 
@@ -1702,13 +1680,16 @@ export class BusinessCenterService {
     const token = this.getToken();
     const stored = this.readStoredAccessContext();
     const payload = token ? this.decodeJwtPayload(token) : null;
-    const userIdValue =
-      payload?.['id'] ??
-      payload?.['user_id'] ??
-      payload?.['sub'] ??
-      payload?.['user'] ??
-      payload?.['userId'] ??
-      stored.userId;
+    const userIdValue = token
+      ? (
+        payload?.['id'] ??
+        payload?.['user_id'] ??
+        payload?.['sub'] ??
+        payload?.['user'] ??
+        payload?.['userId'] ??
+        stored.userId
+      )
+      : null;
     return {
       token,
       userId: this.normalizeId(userIdValue)
@@ -1719,11 +1700,22 @@ export class BusinessCenterService {
     const stored = this.readStoredAccessContext();
     const fallback: AccessContext = {
       token: access.token,
-      userId: access.userId ?? stored.userId
+      userId: access.token ? (access.userId ?? stored.userId) : null
     };
 
     if (!access.token) {
-      return of(fallback);
+      return this.resolveCurrentUserFromSession(null).pipe(
+        map((resolved) => ({
+          token: null,
+          userId: resolved.userId ?? null
+        })),
+        catchError(() =>
+          of({
+            token: null,
+            userId: null
+          })
+        )
+      );
     }
 
     return this.resolveCurrentUserFromSession(access.token).pipe(
@@ -1766,12 +1758,20 @@ export class BusinessCenterService {
         return { userId };
       }),
       catchError((err) => {
+        const status = typeof err?.status === 'number' ? err.status : 0;
+        const unauthorized = status === 401 || status === 403;
+        const fallbackUserId = unauthorized ? null : stored.userId;
+
+        if (unauthorized && typeof localStorage !== 'undefined') {
+          localStorage.removeItem('current_user_id');
+        }
+
         this.debug('resolveCurrentUserFromSession:fallback', {
           status: err?.status ?? null,
           reason: this.readError(err, ''),
-          userId: stored.userId
+          userId: fallbackUserId
         });
-        return of({ userId: stored.userId });
+        return of({ userId: fallbackUserId });
       })
     );
   }
@@ -1968,6 +1968,14 @@ export class BusinessCenterService {
       return false;
     }
     return Math.floor(Date.now() / 1000) >= exp;
+  }
+
+  private resolveAccessErrorReason(err: any, fallback: string): string {
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    if (status === 401 || status === 403) {
+      return 'Session expired or unauthorized. Please sign in again.';
+    }
+    return this.toFriendlyError(err, fallback);
   }
 
   private toFriendlyError(err: any, fallback: string): string {
@@ -2359,3 +2367,4 @@ export class BusinessCenterService {
     return '';
   }
 }
+

@@ -137,7 +137,12 @@ export class SidebarComponent implements OnInit, OnDestroy {
   private applyFallbackFromSession(): void {
     const cached = this.readSidebarState();
     if (cached) {
-      if (this.currentUserId && cached.userId && cached.userId !== this.currentUserId) {
+      const maxAgeMs = 5 * 60 * 1000;
+      const isFresh = cached.updatedAt > 0 && Date.now() - cached.updatedAt <= maxAgeMs;
+
+      if (!isFresh) {
+        this.clearSidebarState();
+      } else if (this.currentUserId && cached.userId && cached.userId !== this.currentUserId) {
         this.clearSidebarState();
       } else {
         this.planLabel = cached.planLabel;
@@ -201,6 +206,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
     try {
       localStorage.setItem(this.sidebarStateStorageKey, JSON.stringify({
+        updatedAt: Date.now(),
         userId: this.currentUserId,
         planLabel: this.planLabel,
         memberRoleLabel: this.memberRoleLabel,
@@ -232,6 +238,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     isBusinessTrial: boolean;
     trialExpired: boolean;
     trialDaysRemaining: number | null;
+    updatedAt: number;
   } | null {
     if (typeof localStorage === 'undefined') {
       return null;
@@ -244,6 +251,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
       }
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       return {
+        updatedAt: typeof parsed['updatedAt'] === 'number' ? parsed['updatedAt'] : 0,
         userId: typeof parsed['userId'] === 'string' ? parsed['userId'] : null,
         planLabel: typeof parsed['planLabel'] === 'string' ? parsed['planLabel'] : 'Free',
         memberRoleLabel: typeof parsed['memberRoleLabel'] === 'string' ? parsed['memberRoleLabel'] : 'User',

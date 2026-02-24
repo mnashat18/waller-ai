@@ -3,7 +3,7 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { forkJoin, Observable, of } from 'rxjs';
-import { catchError, finalize, switchMap, timeout } from 'rxjs/operators';
+import { catchError, finalize, switchMap, take, timeout } from 'rxjs/operators';
 import {
   ActivityQueryOptions,
   ActivityEventRecord,
@@ -653,6 +653,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private loadAccessState(): void {
     this.loadingAccess = true;
+    this.loadingData = false;
     this.missingBusinessProfile = false;
     this.orgScopeNote = '';
     this.memberRoleLabel = '';
@@ -683,6 +684,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
     accessState$.pipe(
       timeout(this.accessStateTimeoutMs),
+      take(1),
       catchError((err) =>
         of({
           userId: null,

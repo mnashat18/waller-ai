@@ -467,16 +467,13 @@ export class AuthService {
 
   private async refreshFromCookieInternal(): Promise<string | null> {
     const storedRefreshToken = this.getStoredRefreshToken();
-    const sameOriginApi = this.isSameOriginApi();
     const attempts: Array<Record<string, string>> = [];
 
     if (storedRefreshToken) {
       attempts.push({ mode: 'json', refresh_token: storedRefreshToken });
     }
-    if (sameOriginApi) {
-      attempts.push({ mode: 'json' });
-      attempts.push({});
-    }
+    attempts.push({ mode: 'json' });
+    attempts.push({});
 
     if (!attempts.length) {
       return null;
