@@ -694,8 +694,9 @@ export class Requests implements OnInit, OnDestroy {
 
   private mapToRow(r: RequestRecord): RequestRow {
     const timestampRaw = r.timestamp ?? '';
+    const id = this.normalizeId(r.id) ?? this.syntheticRequestId(r);
     return {
-      id: this.normalizeId(r.id) ?? '',
+      id,
       target: this.formatTarget(r),
       required_state: r.required_state ?? 'Unknown',
       response_status: r.response_status ?? 'Pending',
@@ -979,6 +980,19 @@ export class Requests implements OnInit, OnDestroy {
       return String(value).trim().toLowerCase();
     }
     return '';
+  }
+
+  private syntheticRequestId(r: RequestRecord): string {
+    const target =
+      this.normalizeLooseText(r.requested_for_email) ||
+      this.normalizeLooseText(r.requested_for_phone) ||
+      this.normalizeLooseText(r.target) ||
+      this.normalizeLooseText(r.Target) ||
+      'scan';
+    const state = this.normalizeLooseText(r.required_state);
+    const status = this.normalizeLooseText(r.response_status);
+    const timestamp = this.normalizeLooseText(r.timestamp);
+    return `virtual_${target}|${state}|${status}|${timestamp}`;
   }
 
   private isTempRequestId(id: string): boolean {
