@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { Observable, forkJoin, of } from 'rxjs';
-import { catchError, timeout } from 'rxjs/operators';
+import { catchError, finalize, timeout } from 'rxjs/operators';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import {
   BusinessCenterService,
@@ -71,6 +71,11 @@ export class BusinessCenterMobileComponent implements OnInit {
       catchError((err) => {
         this.errorMessage = this.describeHttpError(err, 'Failed to load Business access.');
         return of(null);
+      }),
+      finalize(() => {
+        console.log('business-center-mobile loading', this.loading);
+        console.log('business-center-mobile summary loading', this.loadingSummary);
+        console.log('business-center-mobile stats', this.stats);
       })
     ).subscribe((state) => {
       if (!state) {
@@ -130,6 +135,13 @@ export class BusinessCenterMobileComponent implements OnInit {
       catchError((err) => {
         this.errorMessage = this.describeHttpError(err, 'Failed to load Business metrics.');
         return of({ teamMembers: [], requests: [], events: [] });
+      }),
+      finalize(() => {
+        this.loadingSummary = false;
+        this.loading = false;
+        console.log('business-center-mobile loading', this.loading);
+        console.log('business-center-mobile summary loading', this.loadingSummary);
+        console.log('business-center-mobile stats', this.stats);
       })
     ).subscribe(({ teamMembers, requests, events }) => {
       const rows = (requests as RequestRecord[]) ?? [];
@@ -137,12 +149,10 @@ export class BusinessCenterMobileComponent implements OnInit {
       this.stats = {
         teamMembers: (teamMembers as any[])?.length ?? 0,
         requests: rows.length,
-        pending: rows.filter((row) => this.isPendingStatus(row?.response_status)).length,
+        pending: rows.filter((row) => this.isPendingStatus(row?.['status'] as string | null | undefined)).length,
         events: (events as any[])?.length ?? 0
       };
 
-      this.loadingSummary = false;
-      this.loading = false;
     });
   }
 
