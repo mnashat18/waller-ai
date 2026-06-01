@@ -7,8 +7,8 @@ import { catchError, map, take, timeout } from 'rxjs/operators';
 import {
   type CreateRequestForm,
   CreateRequestModalComponent,
-  REQUIRED_STATE_OPTIONS,
-  type RequiredState,
+  REQUEST_TYPE_OPTIONS,
+  type RequestType,
   type SubmitFeedback,
   type TeamMemberRoleOption
 } from '../../components/create-request-modal/create-request-modal';
@@ -21,7 +21,7 @@ import {
 } from '../../services/business-center.service';
 import { AuthService } from '../../services/auth';
 import { NotificationsComponent } from '../../components/notifications/notifications';
-import { environment } from 'src/environments/environment';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-requests-mobile',
@@ -60,7 +60,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   trialDaysRemaining: number | null = null;
   businessTrialNotice = '';
   businessInviteTrialNotice = '';
-  readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
+  readonly requestTypeOptions = REQUEST_TYPE_OPTIONS;
 
   private successToastTimer: ReturnType<typeof setTimeout> | null = null;
   private emptyResultRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -133,7 +133,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     const { uniqueEmails, invalidEntries } = this.normalizeRecipientEmails(form.requestedForEmails);
     const selectedMemberRole = this.resolveSelectedMemberRole(form.memberRole);
-    const requiredState = this.normalizeRequiredState(form.requiredState);
+    const requestType = this.normalizeRequestType(form.requestType);
 
     if (invalidEntries.length > 0) {
       this.submitFeedback = { type: 'error', message: `Invalid email: ${invalidEntries[0]}` };
@@ -156,8 +156,8 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (!requiredState) {
-      this.submitFeedback = { type: 'error', message: 'Select a required state.' };
+    if (!requestType) {
+      this.submitFeedback = { type: 'error', message: 'Select a request type.' };
       this.cdr.detectChanges();
       return;
     }
@@ -198,7 +198,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     this.submitFeedback = { type: 'info', message: 'Sending requests...' };
 
     const optimisticRows = uniqueEmails.map((email) =>
-      this.buildOptimisticRow(email, requiredState)
+      this.buildOptimisticRow(email, requestType)
     );
     for (const row of optimisticRows) {
       this.optimisticRequests.set(row.id, row);
@@ -206,11 +206,11 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     this.requests = this.mergeRequestRows(this.requests, optimisticRows);
     this.requestStats = this.calculateStats(this.requests);
     this.todayRequestCount = this.businessCenter.countTodayRequests(
-      this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+      this.requests.map((row) => ({ requested_at: row.requestedAtRaw }))
     );
     this.cdr.detectChanges();
 
-    this.submitRequestBatch(uniqueEmails, requiredState, selectedMemberRole, optimisticRows);
+    this.submitRequestBatch(uniqueEmails, requestType, selectedMemberRole, optimisticRows);
   }
 
   dismissPermissionNotice() {
@@ -305,21 +305,19 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       this.hasBusinessAccess = Boolean(state.hasPaidAccess);
       this.currentAccessUserId = this.normalizeId(state.userId);
       this.currentPlanName = this.hasBusinessAccess ? 'Business' : 'Free';
-      this.currentPlanCode = (state.profile?.plan_code ?? (this.hasBusinessAccess ? 'business' : 'free')).toString().toLowerCase();
+      this.currentPlanCode = this.hasBusinessAccess ? 'business' : 'free';
 
       this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
       this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
-      this.canViewAllBusinessRequests = this.hasBusinessAccess && this.currentMemberRole === 'owner';
+      this.canViewAllBusinessRequests =
+        this.hasBusinessAccess &&
+        (this.currentMemberRole === 'owner' || this.currentMemberRole === 'admin' || this.currentMemberRole === 'manager');
       this.canViewRequestCenter = true;
 
-      const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
-      this.isBusinessTrial = billingStatus === 'trial' && !state.trialExpired;
-      this.trialDaysRemaining = this.isBusinessTrial
-        ? this.daysUntil(state.trialExpiresAt)
-        : null;
-
-      this.businessTrialNotice = this.businessPaidFeatureNotice('Create requests');
-      this.businessInviteTrialNotice = this.businessPaidFeatureNotice('Email invites');
+      this.isBusinessTrial = false;
+      this.trialDaysRemaining = null;
+      this.businessTrialNotice = '';
+      this.businessInviteTrialNotice = '';
 
       const hasWritableRequestAccess =
         this.canViewAllBusinessRequests &&
@@ -383,9 +381,8 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   private loadOwnRequests(retryAttempt = 0) {
     const token = this.getUserToken();
     const userId = this.resolveCurrentUserId(token);
-    const userEmail = this.getUserEmailFromToken(token);
 
-    if (!token || (!userId && !userEmail)) {
+    if (!token || !userId) {
       this.tryRecoverSessionAndReload();
       this.applyRequests([]);
       return;
@@ -393,7 +390,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     this.fetchRequests(token, {
       requestedForUserId: userId ?? undefined,
-      requestedForEmail: userEmail ?? undefined,
       bustCache: true
     }).subscribe({
       next: (requests) => {
@@ -416,7 +412,6 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     token: string | null,
     filters: {
       requestedForUserId?: string;
-      requestedForEmail?: string;
       businessProfileId?: string;
       bustCache?: boolean;
     } | null
@@ -430,15 +425,15 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       'id',
       'business_profile',
       'requested_by_user',
-      'requested_for_user',
-      'requested_for_email',
-      'requested_for_phone',
-      'required_state',
-      'response_status',
-      'timestamp'
+      'target_member',
+      'requested_by_user',
+      'request_type',
+      'status',
+      'cancelled',
+      'requested_at'
     ].join(',');
     const params = new URLSearchParams({
-      sort: '-timestamp',
+      sort: '-requested_at',
       limit: '50',
       fields
     });
@@ -449,33 +444,28 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
     if (filters?.businessProfileId) {
       params.set('filter[business_profile][_eq]', filters.businessProfileId);
-    } else if (filters?.requestedForUserId && filters?.requestedForEmail) {
-      params.set('filter[_or][0][requested_for_user][_eq]', filters.requestedForUserId);
-      params.set('filter[_or][1][requested_for_email][_eq]', filters.requestedForEmail);
-      params.set('filter[_or][2][requested_for_email][_icontains]', filters.requestedForEmail);
-      params.set('filter[_or][3][requested_by_user][_eq]', filters.requestedForUserId);
+      if (filters?.requestedForUserId) {
+        params.set('filter[_and][1][_or][0][target_member][_eq]', filters.requestedForUserId);
+        params.set('filter[_and][1][_or][1][requested_by_user][_eq]', filters.requestedForUserId);
+      }
     } else if (filters?.requestedForUserId) {
-      params.set('filter[_or][0][requested_for_user][_eq]', filters.requestedForUserId);
+      params.set('filter[_or][0][target_member][_eq]', filters.requestedForUserId);
       params.set('filter[_or][1][requested_by_user][_eq]', filters.requestedForUserId);
-    } else if (filters?.requestedForEmail) {
-      params.set('filter[_or][0][requested_for_email][_eq]', filters.requestedForEmail);
-      params.set('filter[_or][1][requested_for_email][_icontains]', filters.requestedForEmail);
     }
 
     if (
       !filters?.businessProfileId &&
-      !filters?.requestedForUserId &&
-      !filters?.requestedForEmail
+      !filters?.requestedForUserId
     ) {
       return of([] as RequestRecord[]);
     }
 
-    if (filters?.requestedForUserId && !filters?.requestedForEmail && filters?.businessProfileId) {
-      params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
+    if (filters?.requestedForUserId && filters?.businessProfileId) {
+      params.set('filter[target_member][_eq]', filters.requestedForUserId);
     }
 
     return this.http.get<{ data?: RequestRecord[] }>(
-      `${environment.API_URL}/items/requests?${params.toString()}`,
+      `${environment.API_URL}/items/scan_requests?${params.toString()}`,
       { headers, withCredentials: true }
     ).pipe(
       map(res => res.data ?? [])
@@ -549,20 +539,20 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     this.requests = this.mergeRequestRows(remoteRows, Array.from(this.optimisticRequests.values()));
     this.requestStats = this.calculateStats(this.requests);
     this.todayRequestCount = this.businessCenter.countTodayRequests(
-      this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+      this.requests.map((row) => ({ requested_at: row.requestedAtRaw }))
     );
     this.cdr.detectChanges();
   }
 
   private mapToRequestRow(request: RequestRecord): RequestRow {
-    const timestampRaw = request.timestamp ?? '';
+    const requestedAtRaw = request.requested_at ?? '';
     return {
       id: this.normalizeId(request.id) ?? this.newTempRequestId(),
       target: this.formatRequestTarget(request),
-      required_state: request.required_state ?? 'Unknown',
-      status: this.normalizeStatus(request.response_status),
-      timestamp: this.formatTimestamp(timestampRaw),
-      timestampRaw
+      request_type: request.request_type ?? 'unknown',
+      status: this.normalizeStatus(request.status),
+      requestedAtLabel: this.formatTimestamp(requestedAtRaw),
+      requestedAtRaw
     };
   }
 
@@ -643,14 +633,14 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
   private submitRequestBatch(
     recipientEmails: string[],
-    requiredState: RequiredState,
+    requestType: RequestType,
     selectedMemberRole: ManageTeamMemberRole,
     optimisticRows: RequestRow[]
   ) {
     const createCalls = recipientEmails.map((email) =>
       this.businessCenter.createScanRequest({
-        requested_for_email: email,
-        required_state: requiredState
+        recipient_email: email,
+        request_type: requestType
       }, this.currentBusinessProfileId).pipe(
         catchError((err) =>
           of({
@@ -694,7 +684,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
         this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
         this.requestStats = this.calculateStats(this.requests);
         this.todayRequestCount = this.businessCenter.countTodayRequests(
-          this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+          this.requests.map((row) => ({ requested_at: row.requestedAtRaw }))
         );
 
         if (!successCount) {
@@ -723,7 +713,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
         this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
         this.requestStats = this.calculateStats(this.requests);
         this.todayRequestCount = this.businessCenter.countTodayRequests(
-          this.requests.map((row) => ({ timestamp: row.timestampRaw }))
+          this.requests.map((row) => ({ requested_at: row.requestedAtRaw }))
         );
         this.submittingRequest = false;
         this.submitFeedback = {
@@ -827,8 +817,9 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   }
 
   private formatRequestTarget(request: RequestRecord): string {
-    if (request.requested_for_email) return request.requested_for_email;
-    if (request.requested_for_phone) return request.requested_for_phone;
+    if (request['target_member'] && typeof request['target_member'] === 'string') return request['target_member'] as string;
+    if (typeof request.target === 'string' && request.target.trim()) return request.target.trim();
+    if (typeof request.Target === 'string' && request.Target.trim()) return request.Target.trim();
     return 'scan';
   }
 
@@ -908,13 +899,13 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     };
   }
 
-  private normalizeRequiredState(value: unknown): RequiredState | null {
+  private normalizeRequestType(value: unknown): RequestType | null {
     if (typeof value !== 'string') {
       return null;
     }
     const normalized = value.trim();
-    return (REQUIRED_STATE_OPTIONS as readonly string[]).includes(normalized)
-      ? normalized as RequiredState
+    return (REQUEST_TYPE_OPTIONS as readonly string[]).includes(normalized)
+      ? normalized as RequestType
       : null;
   }
 
@@ -959,15 +950,15 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     );
   }
 
-  private buildOptimisticRow(email: string, requiredState: RequiredState): RequestRow {
-    const timestampRaw = new Date().toISOString();
+  private buildOptimisticRow(email: string, requestType: RequestType): RequestRow {
+    const requestedAtRaw = new Date().toISOString();
     return {
       id: this.newTempRequestId(),
       target: email,
-      required_state: requiredState,
+      request_type: requestType,
       status: 'Pending',
-      timestamp: this.formatTimestamp(timestampRaw),
-      timestampRaw
+      requestedAtLabel: this.formatTimestamp(requestedAtRaw),
+      requestedAtRaw
     };
   }
 
@@ -1021,16 +1012,16 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
       }
 
       const optimisticTarget = this.normalizeEmail(optimistic.target) ?? this.normalizeLooseText(optimistic.target);
-      const optimisticState = this.normalizeLooseText(optimistic.required_state);
-      const optimisticTs = this.timestampMs(optimistic.timestampRaw);
+      const optimisticState = this.normalizeLooseText(optimistic.request_type);
+      const optimisticTs = this.timestampMs(optimistic.requestedAtRaw);
 
       const matched = (remoteRows ?? []).some((row) => {
         const remoteTarget = this.normalizeEmail(row?.target) ?? this.normalizeLooseText(row?.target);
-        const remoteState = this.normalizeLooseText(row?.required_state);
+        const remoteState = this.normalizeLooseText(row?.request_type);
         if (!optimisticTarget || optimisticTarget !== remoteTarget || optimisticState !== remoteState) {
           return false;
         }
-        const remoteTs = this.timestampMs(row?.timestampRaw);
+        const remoteTs = this.timestampMs(row?.requestedAtRaw);
         return Math.abs(remoteTs - optimisticTs) <= 2 * 60 * 1000;
       });
 
@@ -1052,10 +1043,10 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
         ...row,
         id,
         target: row?.target ?? '-',
-        required_state: row?.required_state ?? 'Unknown',
+        request_type: row?.request_type ?? 'unknown',
         status: row?.status ?? 'Pending',
-        timestampRaw: row?.timestampRaw ?? '',
-        timestamp: row?.timestamp ?? this.formatTimestamp(row?.timestampRaw ?? '')
+        requestedAtRaw: row?.requestedAtRaw ?? '',
+        requestedAtLabel: row?.requestedAtLabel ?? this.formatTimestamp(row?.requestedAtRaw ?? '')
       } as RequestRow;
 
       const existing = byId.get(id);
@@ -1064,8 +1055,8 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
         return;
       }
 
-      const existingTs = this.timestampMs(existing.timestampRaw);
-      const nextTs = this.timestampMs(normalized.timestampRaw);
+      const existingTs = this.timestampMs(existing.requestedAtRaw);
+      const nextTs = this.timestampMs(normalized.requestedAtRaw);
       if (nextTs >= existingTs) {
         byId.set(id, { ...existing, ...normalized, id });
       }
@@ -1075,7 +1066,7 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     for (const row of extraRows ?? []) push(row);
 
     return Array.from(byId.values()).sort((a, b) =>
-      this.timestampMs(b.timestampRaw) - this.timestampMs(a.timestampRaw)
+      this.timestampMs(b.requestedAtRaw) - this.timestampMs(a.requestedAtRaw)
     );
   }
 
@@ -1171,21 +1162,21 @@ type RequestRecord = {
   id?: unknown;
   target?: unknown;
   Target?: unknown;
-  requested_for_user?: unknown;
-  requested_for_email?: string;
-  requested_for_phone?: string;
-  required_state?: string;
-  response_status?: string;
-  timestamp?: string;
+  business_profile?: unknown;
+  requested_by_user?: unknown;
+  target_member?: unknown;
+  request_type?: string;
+  status?: string;
+  requested_at?: string;
 };
 
 type RequestRow = {
   id: string;
   target: string;
-  required_state: string;
+  request_type: string;
   status: 'Approved' | 'Pending' | 'Denied';
-  timestamp: string;
-  timestampRaw: string;
+  requestedAtLabel: string;
+  requestedAtRaw: string;
 };
 
 type RoleAssignmentSummary = {
