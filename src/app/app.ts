@@ -2,13 +2,11 @@ import { Component, OnDestroy, signal } from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from './services/auth';
-import { NewUserGuideComponent } from './components/new-user-guide/new-user-guide';
-import { SubscriptionExpiryAdsComponent } from './components/subscription-expiry-ads/subscription-expiry-ads';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, NewUserGuideComponent, SubscriptionExpiryAdsComponent],
+  imports: [RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -108,11 +106,11 @@ export class App implements OnDestroy {
       // ignore storage errors
     }
 
-    this.auth.setPostAuthRedirect('/requests');
+    this.auth.setPostAuthRedirect(`/invites/claim?token=${encodeURIComponent(inviteToken)}`);
 
     const next = this.auth.isLoggedIn()
-      ? '/requests'
-      : `/login?auth=signup&invite=${encodeURIComponent(inviteToken)}`;
+      ? `/invites/claim?token=${encodeURIComponent(inviteToken)}`
+      : `/?invite=1&token=${encodeURIComponent(inviteToken)}&auth=signup`;
 
     const current = window.location.pathname + window.location.search;
     if (current !== next) {
