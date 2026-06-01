@@ -1,0 +1,524 @@
+<div class="workforce-page space-y-6">
+  <section class="app-dashboard-panel workforce-hero animate-dashboard-rise">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div>
+        <h1 class="text-3xl font-semibold tracking-[-0.04em] text-slate-50">Workforce</h1>
+        <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+          Manage active members and pending invites with clear lifecycle states.
+        </p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          class="dashboard-action-button dashboard-action-button--primary"
+          [disabled]="!canInviteMember"
+          [class.workforce-disabled]="!canInviteMember"
+          [attr.title]="canInviteMember ? null : 'Your role cannot invite members from this page.'"
+          (click)="openInviteModal()">
+          Invite Member
+        </button>
+        <button
+          type="button"
+          class="dashboard-action-button"
+          [disabled]="viewState === 'loading'"
+          (click)="refresh()">
+          Refresh
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section
+    *ngIf="feedback"
+    class="workforce-feedback"
+    [class.workforce-feedback--success]="feedback.type === 'success'"
+    [class.workforce-feedback--error]="feedback.type === 'error'"
+    [class.workforce-feedback--info]="feedback.type === 'info'">
+    {{ feedback.text }}
+  </section>
+
+  <ng-container *ngIf="viewState === 'loading'">
+    <app-card-skeleton-loader [count]="5"></app-card-skeleton-loader>
+  </ng-container>
+
+  <ng-container *ngIf="viewState === 'ready' || viewState === 'empty' || viewState === 'error'">
+    <section class="workforce-summary-grid grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+      <app-kpi-card
+        label="Active Members"
+        [value]="summary.activeMembers.toString()"
+        helper="Active members in this workspace."
+        tone="success"
+        toneLabel="Active"></app-kpi-card>
+      <app-kpi-card
+        label="Pending Invites"
+        [value]="summary.pendingInvites.toString()"
+        helper="Invites waiting for signup."
+        [tone]="summary.pendingInvites > 0 ? 'warning' : 'neutral'"
+        toneLabel="Pending"></app-kpi-card>
+      <app-kpi-card
+        label="Owners"
+        [value]="summary.ownerCount.toString()"
+        helper="Active owner members."
+        tone="neutral"
+        toneLabel="Owner"></app-kpi-card>
+      <app-kpi-card
+        label="Scan Eligible"
+        [value]="summary.scanEligible.toString()"
+        helper="Active members eligible for scan requests."
+        tone="neutral"
+        toneLabel="Eligible"></app-kpi-card>
+      <app-kpi-card
+        label="Scan Requested"
+        [value]="summary.scanRequested.toString()"
+        helper="Members with active scan requests."
+        [tone]="summary.scanRequested > 0 ? 'warning' : 'neutral'"
+        toneLabel="Requested"></app-kpi-card>
+      <app-kpi-card
+        label="HR Members"
+        [value]="summary.hrCount.toString()"
+        helper="Active HR members."
+        tone="neutral"
+        toneLabel="HR"></app-kpi-card>
+      <app-kpi-card
+        label="Managers"
+        [value]="summary.managerCount.toString()"
+        helper="Active manager members."
+        tone="neutral"
+        toneLabel="Managers"></app-kpi-card>
+      <app-kpi-card
+        label="Employees"
+        [value]="summary.employeeCount.toString()"
+        helper="Active employee members."
+        tone="neutral"
+        toneLabel="Employees"></app-kpi-card>
+    </section>
+  </ng-container>
+
+  <section
+    *ngIf="relationWarning && viewState !== 'loading' && relationWarning !== 'Workforce data access is not configured for this role.'"
+    class="workforce-empty-card">
+    <p class="text-sm text-slate-300">{{ relationWarning }}</p>
+  </section>
+
+  <app-dashboard-section
+    eyebrow="Roster"
+    title="Workforce Management"
+    description="Active members and pending invites are shown separately with role-specific actions.">
+    <section *ngIf="viewState === 'error'" class="workforce-error-card">
+      <p class="text-sm font-semibold text-rose-200">Workforce could not be loaded</p>
+      <p class="mt-2 text-sm leading-6 text-rose-100/90">
+        {{ errorMessage || 'We could not load workforce records for the active workspace.' }}
+      </p>
+      <p *ngIf="errorDetails" class="mt-2 text-xs text-rose-100/70">{{ errorDetails }}</p>
+      <div class="mt-4">
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="refresh()">
+          Retry
+        </button>
+      </div>
+    </section>
+
+    <section *ngIf="viewState === 'empty'" class="workforce-empty-card">
+      <p class="text-lg font-semibold text-slate-50">No members or pending invites yet</p>
+      <p class="mt-2 text-sm leading-6 text-slate-300">
+        Invite your first team member to start building your workspace roster.
+      </p>
+      <div class="mt-5">
+        <button
+          type="button"
+          class="dashboard-action-button dashboard-action-button--primary"
+          [disabled]="!canInviteMember"
+          [class.workforce-disabled]="!canInviteMember"
+          (click)="openInviteModal()">
+          Invite Member
+        </button>
+      </div>
+    </section>
+
+    <ng-container *ngIf="viewState === 'ready'">
+      <section class="app-dashboard-panel workforce-filter-panel">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p class="dashboard-section-title text-lg">Filters</p>
+            <p class="mt-1 text-sm text-slate-300">
+              Search and segment by status, role, department, and scan state.
+            </p>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="workforce-result-count">{{ resultCountLabel }}</span>
+            <button type="button" class="dashboard-action-button" (click)="clearFilters()">Clear Filters</button>
+          </div>
+        </div>
+
+        <div class="mt-4 workforce-filter-grid">
+          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 workforce-filter-search">
+            Search
+            <input
+              [(ngModel)]="filters.search"
+              name="workforceSearch"
+              placeholder="Search by name or email"
+              class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20" />
+          </label>
+
+          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Role
+            <select
+              [(ngModel)]="filters.role"
+              name="workforceRole"
+              class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+              <option value="">All roles</option>
+              <option *ngFor="let role of roleOptions" [value]="role">{{ roleLabel(role) }}</option>
+            </select>
+          </label>
+
+          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Department
+            <select
+              [(ngModel)]="filters.department"
+              name="workforceDepartment"
+              class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+              <option value="">All departments</option>
+              <option *ngFor="let department of departmentOptions" [value]="department.id">{{ department.name }}</option>
+            </select>
+          </label>
+
+          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Status
+            <select
+              [(ngModel)]="filters.status"
+              name="workforceStatus"
+              class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+              <option *ngFor="let option of statusFilterOptions" [value]="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+
+          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            Scan State
+            <select
+              [(ngModel)]="filters.todayScan"
+              name="workforceTodayScan"
+              class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+              <option *ngFor="let option of todayScanFilterOptions" [value]="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section *ngIf="filteredRows.length === 0" class="workforce-empty-card">
+        <p class="text-lg font-semibold text-slate-50">No records match these filters</p>
+        <p class="mt-2 text-sm leading-6 text-slate-300">Try changing or clearing your filters.</p>
+        <div class="mt-5">
+          <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="clearFilters()">Clear Filters</button>
+        </div>
+      </section>
+
+      <ng-container *ngIf="filteredRows.length > 0">
+        <section *ngIf="filteredMemberRows.length > 0" class="workforce-group">
+          <div class="workforce-group__header">
+            <h3 class="workforce-group__title">Active Members</h3>
+            <p class="workforce-group__subtitle">Active members in this workspace.</p>
+          </div>
+
+          <div class="workforce-compact-list">
+            <ng-container *ngFor="let row of filteredMemberRows; trackBy: trackByMember">
+              <article class="workforce-card workforce-card--member workforce-card--compact">
+                <div class="workforce-compact-main">
+                  <div class="flex min-w-0 items-center gap-3">
+                    <div class="workforce-avatar">{{ memberInitials(row) }}</div>
+                    <div class="min-w-0">
+                      <p class="workforce-identity-name text-base font-semibold text-slate-50">{{ memberName(row) }}</p>
+                      <p class="workforce-identity-email text-sm text-slate-300">{{ memberEmail(row) }}</p>
+                    </div>
+                  </div>
+
+                  <div class="workforce-badge-stack workforce-badge-stack--compact">
+                    <span [class]="rowBadgeClass(row)">{{ rowBadgeLabel(row) }}</span>
+                    <span class="workforce-badge workforce-badge--neutral">{{ roleLabel(row.member_role) }}</span>
+                    <span [class]="presenceBadgeClass(row)">{{ row.presence_label || 'Presence unavailable' }}</span>
+                  </div>
+
+                  <div class="workforce-compact-actions">
+                    <button
+                      type="button"
+                      class="workforce-row-action workforce-row-action--view"
+                      (click)="openMemberView(row)">
+                      View
+                    </button>
+                    <button type="button" class="workforce-row-action" (click)="copyInviteLink(row)">Copy</button>
+                    <button
+                      type="button"
+                      class="workforce-row-action workforce-row-action--danger"
+                      *ngIf="canRevokeInvite(row)"
+                      (click)="requestCancelInvite(row)">
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </ng-container>
+          </div>
+        </section>
+
+        <section class="workforce-group">
+          <div class="workforce-group__header">
+            <h3 class="workforce-group__title">Pending Invites</h3>
+            <p class="workforce-group__subtitle">Invites waiting for signup.</p>
+          </div>
+
+          <div *ngIf="filteredInviteRows.length === 0" class="workforce-empty-card">
+            <p class="text-sm text-slate-300">No pending invites.</p>
+          </div>
+
+          <div *ngIf="filteredInviteRows.length > 0" class="workforce-compact-list">
+            <ng-container *ngFor="let row of filteredInviteRows; trackBy: trackByMember">
+              <article class="workforce-card workforce-card--invite workforce-card--compact">
+                <div class="workforce-compact-main">
+                  <div class="min-w-0">
+                    <p class="workforce-identity-email text-base font-semibold text-slate-50">{{ inviteContact(row) }}</p>
+                  </div>
+
+                  <div class="workforce-badge-stack workforce-badge-stack--compact">
+                    <span [class]="rowBadgeClass(row)">{{ rowBadgeLabel(row) }}</span>
+                    <span class="workforce-badge workforce-badge--neutral">{{ roleLabel(row.member_role) }}</span>
+                  </div>
+
+                  <div class="workforce-compact-actions">
+                    <button
+                      type="button"
+                      class="workforce-row-action workforce-row-action--view"
+                      (click)="openMemberView(row)">
+                      View
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </ng-container>
+          </div>
+        </section>
+
+        <section class="workforce-group">
+          <div class="workforce-group__header">
+            <h3 class="workforce-group__title">Open Scan Requests</h3>
+            <p class="workforce-group__subtitle">Recent active scan requests for members in this workspace.</p>
+          </div>
+
+          <div *ngIf="!hasOpenScanRequests" class="workforce-empty-card">
+            <p class="text-sm text-slate-300">No open scan requests for this workforce.</p>
+          </div>
+
+          <div *ngIf="hasOpenScanRequests" class="workforce-compact-list">
+            <article class="workforce-card workforce-card--member workforce-card--detail" *ngFor="let request of openScanRequestRows; trackBy: trackByScanRequest">
+              <header class="workforce-card__header">
+                <div class="min-w-0">
+                  <p class="workforce-identity-name text-base font-semibold text-slate-50">{{ request.target_member_name }}</p>
+                  <p class="workforce-identity-email text-sm text-slate-300">{{ request.target_user_email || 'No email' }}</p>
+                </div>
+                <div class="workforce-badge-stack">
+                  <span class="workforce-badge workforce-badge--scan-requested">{{ requestStatusLabel(request.status) }}</span>
+                  <span class="workforce-badge workforce-badge--neutral">{{ request.request_type || 'General' }}</span>
+                </div>
+              </header>
+
+                <div class="workforce-card__facts">
+                  <div class="workforce-fact"><span>Department</span><strong>{{ request.department_name || 'Unassigned' }}</strong></div>
+                  <div class="workforce-fact"><span>Requested At</span><strong>{{ dateOrDash(request.requested_at) }}</strong></div>
+                  <div class="workforce-fact"><span>Due At</span><strong>{{ dateOrDash(request.due_at) }}</strong></div>
+                  <div class="workforce-fact"><span>Requested By</span><strong>{{ request.requested_by_name || 'Requester' }}</strong></div>
+                </div>
+
+                <div class="workforce-card__actions">
+                  <button type="button" class="workforce-row-action" (click)="openInScanRequests(request)">Open in Scan Requests</button>
+                </div>
+            </article>
+          </div>
+        </section>
+      </ng-container>
+    </ng-container>
+  </app-dashboard-section>
+
+  <div *ngIf="showDetailsModal && selectedMember" class="workforce-modal">
+    <div class="workforce-modal__scrim" (click)="closeMemberView()"></div>
+    <div class="workforce-modal__panel app-dashboard-panel">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="dashboard-eyebrow">{{ selectedMember.type === 'invite' ? 'Invite' : 'Member' }}</p>
+          <h3 class="mt-2 text-2xl font-semibold text-slate-50">{{ detailsTitle(selectedMember) }}</h3>
+        </div>
+        <button type="button" class="dashboard-action-button" (click)="closeMemberView()" aria-label="Close details">×</button>
+      </div>
+
+      <div class="mt-5 workforce-card__facts">
+        <div class="workforce-fact"><span>Name</span><strong>{{ memberName(selectedMember) }}</strong></div>
+        <div class="workforce-fact"><span>Email</span><strong>{{ selectedMember.type === 'invite' ? inviteContact(selectedMember) : memberEmail(selectedMember) }}</strong></div>
+        <div class="workforce-fact"><span>Role</span><strong>{{ roleLabel(selectedMember.member_role) }}</strong></div>
+        <div class="workforce-fact"><span>Department</span><strong>{{ selectedMember.department_name || 'Unassigned' }}</strong></div>
+        <div class="workforce-fact"><span>Status</span><strong>{{ statusLabel(selectedMember.status) }}</strong></div>
+        <div class="workforce-fact"><span>Workspace</span><strong>{{ selectedMember.business_profile_name || 'Workspace' }}</strong></div>
+
+        <ng-container *ngIf="selectedMember.type === 'member'">
+          <div class="workforce-fact"><span>Joined</span><strong>{{ dateOrDash(selectedMember.joined_at) }}</strong></div>
+          <div class="workforce-fact"><span>Last Seen</span><strong>{{ dateOrDash(selectedMember.last_seen_at) }}</strong></div>
+          <div class="workforce-fact"><span>Last Active</span><strong>{{ dateOrDash(selectedMember.last_active_at) }}</strong></div>
+          <div class="workforce-fact"><span>Presence</span><strong>{{ selectedMember.presence_label || 'Presence unavailable' }}</strong></div>
+          <div class="workforce-fact"><span>Linked Invite Email</span><strong>{{ selectedMember.linked_invite_email || '-' }}</strong></div>
+          <div class="workforce-fact"><span>Linked Invite Status</span><strong>{{ selectedMember.linked_invite_status ? statusLabel(selectedMember.linked_invite_status) : '-' }}</strong></div>
+          <div class="workforce-fact"><span>Invited By</span><strong>{{ selectedMember.linked_invite_requested_by || selectedMember.invited_by_name || 'System / unavailable' }}</strong></div>
+          <div class="workforce-fact"><span>Invite Sent</span><strong>{{ dateOrDash(selectedMember.linked_invite_sent_at) }}</strong></div>
+          <div class="workforce-fact"><span>Claimed At</span><strong>{{ dateOrDash(selectedMember.claimed_at) }}</strong></div>
+        </ng-container>
+
+        <ng-container *ngIf="selectedMember.type === 'invite'">
+          <div class="workforce-fact"><span>Sent</span><strong>{{ dateOrDash(selectedMember.sent_at) }}</strong></div>
+          <div class="workforce-fact"><span>Expires</span><strong>{{ dateOrDash(selectedMember.expires_at) }}</strong></div>
+          <div class="workforce-fact"><span>Requested By</span><strong>{{ selectedMember.invited_by_name || 'System / unavailable' }}</strong></div>
+          <div class="workforce-fact"><span>Invite Token</span><strong>{{ maskInviteToken(selectedMember.invite_token) }}</strong></div>
+        </ng-container>
+      </div>
+
+      <details class="mt-5">
+        <summary class="cursor-pointer text-sm text-slate-300">Technical details</summary>
+        <div class="mt-3 grid gap-2 text-xs text-slate-400">
+          <div>Member ID: {{ selectedMember.member_id || '-' }}</div>
+          <div>Invite ID: {{ selectedMember.invite_id || '-' }}</div>
+          <div>User ID: {{ selectedMember.user_id || '-' }}</div>
+          <div>Business Profile ID: {{ selectedMember.business_profile_id || '-' }}</div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div *ngIf="showInviteModal" class="workforce-modal">
+    <div class="workforce-modal__scrim" (click)="closeInviteModal()"></div>
+    <div class="workforce-modal__panel app-dashboard-panel">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="dashboard-eyebrow">Invite Member</p>
+          <h3 class="mt-2 text-2xl font-semibold text-slate-50">Invite a team member</h3>
+          <p class="mt-2 text-sm text-slate-300">Creates a pending request_invites record first. Membership is created only after claim.</p>
+        </div>
+        <button type="button" class="dashboard-action-button" (click)="closeInviteModal()">Close</button>
+      </div>
+
+      <div class="mt-5 grid gap-4 md:grid-cols-2">
+        <label class="grid gap-2 text-sm font-medium text-slate-200 md:col-span-2">
+          Email
+          <input
+            [(ngModel)]="inviteForm.email"
+            name="inviteEmail"
+            type="email"
+            placeholder="name@company.com"
+            class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20" />
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-200">
+          Role
+          <select
+            [(ngModel)]="inviteForm.role"
+            name="inviteRole"
+            class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+            <option value="employee">Employee</option>
+            <option value="manager">Manager</option>
+            <option value="hr">HR</option>
+          </select>
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-200">
+          Department
+          <select
+            [(ngModel)]="inviteForm.department"
+            name="inviteDepartment"
+            class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+            <option value="">No department / Unassigned</option>
+            <option *ngFor="let department of departmentOptions" [value]="department.id">{{ department.name }}</option>
+          </select>
+          <p *ngIf="!hasDepartments" class="text-xs text-slate-400">No departments yet. You can still invite as Unassigned.</p>
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-200 md:col-span-2">
+          Optional Note
+          <textarea
+            [(ngModel)]="inviteForm.note"
+            name="inviteNote"
+            rows="3"
+            placeholder="Add context for your team"
+            class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20"></textarea>
+        </label>
+      </div>
+
+      <p *ngIf="inviteFormError" class="mt-3 text-sm text-rose-300">{{ inviteFormError }}</p>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button type="button" class="dashboard-action-button" (click)="closeInviteModal()">Cancel</button>
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" [disabled]="savingInvite" (click)="sendInvite()">
+          {{ savingInvite ? 'Sending...' : 'Send Invite' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showRoleModal" class="workforce-modal">
+    <div class="workforce-modal__scrim" (click)="closeRoleModal()"></div>
+    <div class="workforce-modal__panel app-dashboard-panel">
+      <h3 class="text-xl font-semibold text-slate-50">Edit Role</h3>
+      <p class="mt-2 text-sm text-slate-300">Update role for {{ roleModalMember ? memberName(roleModalMember) : 'member' }}.</p>
+
+      <label class="mt-5 grid gap-2 text-sm font-medium text-slate-200">
+        Role
+        <select
+          [(ngModel)]="roleModalValue"
+          name="roleModalValue"
+          class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+          <option *ngFor="let role of roleEditOptions(roleModalMember)" [value]="role">{{ roleLabel(role) }}</option>
+        </select>
+      </label>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button type="button" class="dashboard-action-button" (click)="closeRoleModal()">Cancel</button>
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" [disabled]="savingRole" (click)="saveRole()">{{ savingRole ? 'Saving...' : 'Save Role' }}</button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showDepartmentModal" class="workforce-modal">
+    <div class="workforce-modal__scrim" (click)="closeDepartmentModal()"></div>
+    <div class="workforce-modal__panel app-dashboard-panel">
+      <h3 class="text-xl font-semibold text-slate-50">Assign Department</h3>
+      <p class="mt-2 text-sm text-slate-300">Update department for {{ departmentModalMember ? memberName(departmentModalMember) : 'member' }}.</p>
+
+      <label class="mt-5 grid gap-2 text-sm font-medium text-slate-200">
+        Department
+        <select
+          [(ngModel)]="departmentModalValue"
+          name="departmentModalValue"
+          class="rounded-2xl border border-slate-700/70 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20">
+          <option value="">Unassigned</option>
+          <option *ngFor="let department of departmentOptions" [value]="department.id">{{ department.name }}</option>
+        </select>
+      </label>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button type="button" class="dashboard-action-button" (click)="closeDepartmentModal()">Cancel</button>
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" [disabled]="savingDepartment" (click)="saveDepartment()">{{ savingDepartment ? 'Saving...' : 'Save Department' }}</button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showDestructiveModal && destructiveAction" class="workforce-modal">
+    <div class="workforce-modal__scrim" (click)="closeDestructiveModal()"></div>
+    <div class="workforce-modal__panel app-dashboard-panel workforce-modal__panel--compact">
+      <h3 class="text-xl font-semibold text-slate-50">{{ destructiveAction.title }}</h3>
+      <p class="mt-3 text-sm leading-6 text-slate-300">{{ destructiveAction.description }}</p>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button type="button" class="dashboard-action-button" [disabled]="destructiveLoading" (click)="closeDestructiveModal()">Back</button>
+        <button
+          type="button"
+          class="dashboard-action-button dashboard-action-button--danger"
+          [disabled]="destructiveLoading"
+          (click)="confirmDestructiveAction()">
+          {{ destructiveLoading ? 'Working...' : destructiveAction.confirmLabel }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
