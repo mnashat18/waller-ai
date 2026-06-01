@@ -8,10 +8,10 @@ import { catchError, concatMap, finalize, map, timeout, toArray } from 'rxjs/ope
 import { Organization, OrganizationService } from '../../services/organization.service';
 import { BusinessCenterService, BusinessHubAccessState } from '../../services/business-center.service';
 import {
-  REQUIRED_STATE_OPTIONS,
-  type RequiredState
+  REQUEST_TYPE_OPTIONS,
+  type RequestType
 } from '../../components/create-request-modal/create-request-modal';
-import { environment } from 'src/environments/environment';
+import { environment } from '../../../environments/environment';
 
 type Feedback = {
   type: 'success' | 'error' | 'info';
@@ -59,9 +59,9 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   private lastSubmitError = '';
   private readonly submitTimeoutMs = 30000;
   private readonly businessProfileTimeoutMs = 15000;
-  readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
+  readonly requestTypeOptions = REQUEST_TYPE_OPTIONS;
   form = {
-    requiredState: '' as RequiredState | ''
+    requestType: 'manual' as RequestType
   };
 
   constructor(
@@ -174,11 +174,6 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const requiredState = this.normalizeRequiredState(this.form.requiredState);
-    if (!requiredState) {
-      this.submitFeedback = { type: 'error', message: 'Select a required state first.' };
-      return;
-    }
     if (!this.consumePendingRecipientInput()) {
       this.submitFeedback = { type: 'error', message: this.recipientError || 'Please fix recipient entry first.' };
       return;
@@ -226,10 +221,10 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     this.lastSubmitError = '';
 
     const recipientsSnapshot = [...this.recipients];
-    from(recipientsSnapshot).pipe(
+      from(recipientsSnapshot).pipe(
       concatMap((recipient) =>
         this.submitRecipientWorkflow(
-          requiredState,
+          this.form.requestType,
           recipient,
           token,
           authenticatedUser
@@ -275,7 +270,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
 
         this.recipients = [];
         this.recipientInput = '';
-        this.form.requiredState = '';
+        this.form.requestType = 'manual';
       },
       error: (err) => {
         this.submitFeedback = {
@@ -287,13 +282,13 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private submitRecipientWorkflow(
-    requiredState: RequiredState,
+    requestType: RequestType,
     recipient: RequestRecipient,
     token: string,
     currentUser: { id: string; email: string | null }
   ): Observable<boolean> {
     return this.submitRequestPayload(
-      requiredState,
+      requestType,
       recipient.value,
       token,
       currentUser
@@ -384,8 +379,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       }
 
       this.businessProfileMissing = false;
-      const rawPlanCode = (profile.plan_code ?? '').toString().trim().toLowerCase();
-      this.currentPlanCode = rawPlanCode || 'business';
+      this.currentPlanCode = state.hasPaidAccess ? 'business' : 'free';
       this.currentPlanName = this.currentPlanCode === 'business'
         ? 'Business'
         : this.toTitleCase(this.currentPlanCode);
@@ -416,7 +410,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       }
 
       if (!this.org?.id && state.orgId) {
-        const orgName = profile.business_name || profile.company_name || 'Business Profile';
+        const orgName = profile.company_name || 'Business Profile';
         this.org = {
           id: state.orgId,
           name: orgName
@@ -432,7 +426,7 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
   }
 
   private submitRequestPayload(
-    requiredState: RequiredState,
+    requestType: RequestType,
     requestedForEmail: string,
     token: string | null,
     currentUserContext?: { id: string; email: string | null }
@@ -454,61 +448,21 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
       return of(false);
     }
 
-    const payload: CreateRequestPayload = {
-      requested_for_email: email,
-      required_state: requiredState
-    };
-
-    return this.createRequest(payload, token).pipe(
-      concatMap((res) => {
-        const createdId = this.normalizeId(res?.data?.id);
-        if (!createdId) {
-          return of(true);
+    return this.businessCenterService.createScanRequest({
+      recipient_email: email,
+      request_type: requestType
+    }).pipe(
+      map((result) => {
+        if (result?.ok) {
+          return true;
         }
-
-        return this.fetchCreatedRequestById(createdId, token).pipe(
-          map(() => true),
-          catchError((err) => {
-            this.lastSubmitError = this.toFriendlyHttpError(err, 'Request created, but refresh failed.');
-            return of(false);
-          })
-        );
+        this.lastSubmitError = result?.message || 'Failed to create request.';
+        return false;
       }),
       catchError((err) => {
         this.lastSubmitError = this.toFriendlyHttpError(err, 'Failed to create request.');
         return of(false);
       })
-    );
-  }
-
-  private createRequest(payload: CreateRequestPayload, token: string | null) {
-    const headers = this.buildAuthHeaders(token);
-    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
-    return this.http.post<{ data?: { id?: string } }>(
-      `${environment.API_URL}/items/requests`,
-      payload,
-      requestOptions
-    );
-  }
-
-  private fetchCreatedRequestById(requestId: string, token: string | null) {
-    const headers = this.buildAuthHeaders(token);
-    const requestOptions = headers ? { headers, withCredentials: true } : { withCredentials: true };
-    const params = new URLSearchParams({
-      fields: [
-        'id',
-        'target',
-        'Target',
-        'requested_for_email',
-        'requested_for_user.id',
-        'requested_by_user.id',
-        'response_status',
-        'timestamp'
-      ].join(',')
-    });
-    return this.http.get<{ data?: Record<string, unknown> }>(
-      `${environment.API_URL}/items/requests/${encodeURIComponent(requestId)}?${params.toString()}`,
-      requestOptions
     );
   }
 
@@ -668,16 +622,6 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
     return this.isValidEmail(email) ? email : null;
   }
 
-  private normalizeRequiredState(value: unknown): RequiredState | null {
-    if (typeof value !== 'string') {
-      return null;
-    }
-    const normalized = value.trim();
-    return (this.requiredStateOptions as readonly string[]).includes(normalized)
-      ? (normalized as RequiredState)
-      : null;
-  }
-
   private loadTodayRequestCount(): void {
     const orgId = this.accessState?.orgId ?? null;
     this.businessCenterService.listRequests(orgId, 120).pipe(
@@ -691,8 +635,8 @@ export class CreateRequestComponent implements OnInit, OnDestroy {
 }
 
 type CreateRequestPayload = {
-  requested_for_email?: string;
-  required_state: RequiredState;
+  recipient_email?: string;
+  request_type: RequestType;
 };
 
 
