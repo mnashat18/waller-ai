@@ -1,1109 +1,1187 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { RouterModule } from '@angular/router';
-import { forkJoin, of } from 'rxjs';
-import { catchError, map, take, timeout } from 'rxjs/operators';
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { Observable, firstValueFrom, finalize } from 'rxjs';
+
+import { CompanyContextService } from '../../core/context/company-context.service';
 import {
-  CreateRequestModalComponent,
-  type CreateRequestForm,
-  REQUIRED_STATE_OPTIONS,
-  type RequiredState,
-  type SubmitFeedback,
-  type TeamMemberRoleOption
-} from '../../components/create-request-modal/create-request-modal';
+  OperationsWorkflowsService,
+  type CreateScanRequestInput,
+  type RequestModalOptions,
+  type RequestActionResult,
+  type RequestRow,
+  type RequestsPageData,
+  type WorkflowMemberOption
+} from '../../services/operations-workflows.service';
 import {
-  type ActionResult,
-  BusinessCenterService,
-  type BusinessMemberRole,
-  type CreateScanRequestResult,
-  type ManageTeamMemberRole
-} from '../../services/business-center.service';
-import { AuthService } from '../../services/auth';
-import { environment } from 'src/environments/environment';
+  OperationsAdminService,
+  type WorkforceRosterPageData
+} from '../../services/operations-admin.service';
+import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
+import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
+import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
+import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
+import {
+  formatBusinessProfile,
+  formatDepartment,
+  formatMember,
+  formatUserName,
+  isUuid,
+  sanitizeDisplayValue
+} from '../../shared/utils/display-formatters';
+
+type PageState = 'loading' | 'ready' | 'error';
+
+type ScanRequestStatus = 'pending' | 'completed' | 'overdue' | 'expired' | 'cancelled';
+
+type RequestFilters = {
+  search: string;
+  status: 'all' | ScanRequestStatus;
+  department: string;
+  dateRange: 'all' | 'today' | 'last7' | 'custom';
+  customStart: string;
+  customEnd: string;
+  sort: 'newest' | 'dueSoon' | 'overdueFirst';
+};
+
+type NewRequestForm = {
+  targetType: '' | 'individual' | 'department' | 'workspace';
+  memberId: string;
+  departmentId: string;
+  dueTime: '' | 'endOfToday' | 'in1Hour' | 'in2Hours' | 'custom';
+  customDueAt: string;
+};
+
+type NewRequestFormErrors = {
+  targetType: string;
+  memberId: string;
+  departmentId: string;
+  dueTime: string;
+  customDueAt: string;
+};
+
+type FeedbackType = 'success' | 'error' | 'info';
+
+type FeedbackMessage = {
+  type: FeedbackType;
+  text: string;
+};
+
+type ScanRequestRow = {
+  source: RequestRow;
+  status: ScanRequestStatus;
+  statusLabel: string;
+  statusClass: string;
+  memberName: string;
+  memberEmail: string;
+  memberSecondary: string | null;
+  departmentName: string;
+  businessProfileName: string;
+  requestedBy: string;
+  completedScanLabel: string;
+  requestedAtTs: number;
+  dueAtTs: number;
+  completedAtTs: number;
+  requestedAtLabel: string;
+  dueAtLabel: string;
+  completedAtLabel: string;
+};
+
+type SummaryCards = {
+  pendingRequests: number;
+  completedToday: number;
+  overdueRequests: number;
+  expiredOrCancelled: number;
+  completionRate: number;
+  totalSentToday: number;
+};
 
 @Component({
-  selector: 'app-requests',
+  selector: 'app-requests-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, CreateRequestModalComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    RouterModule,
+    KpiCardComponent,
+    TableShellComponent,
+    CardSkeletonLoaderComponent,
+    TableSkeletonLoaderComponent
+  ],
   templateUrl: './requests.html',
-  styleUrl: './requests.css',
+  styleUrls: ['./requests.css']
 })
-export class Requests implements OnInit, OnDestroy {
-  readonly maxRecipientEmails = 5;
-  readonly dailyRequestLimit: number;
-  readonly memberRoleOptions: TeamMemberRoleOption[] = [
-    { value: 'member', label: 'Member' },
-    { value: 'manager', label: 'Manager' },
-    { value: 'admin', label: 'Admin' }
-  ];
-  assignableMemberRoleOptions: TeamMemberRoleOption[] = [...this.memberRoleOptions];
-  defaultInviteMemberRole: ManageTeamMemberRole = 'member';
+export class RequestsPageComponent implements OnInit, OnDestroy {
+  pageState: PageState = 'loading';
+  loading = false;
+  rows: ScanRequestRow[] = [];
+  visibleRows: ScanRequestRow[] = [];
+  pageData: RequestsPageData | null = null;
+  errorMessage = '';
+  resultCountLabel = '0 of 0 shown';
+  showNoMatchingState = false;
+  hasActiveFilters = false;
+  summary: SummaryCards = {
+    pendingRequests: 0,
+    completedToday: 0,
+    overdueRequests: 0,
+    expiredOrCancelled: 0,
+    completionRate: 0,
+    totalSentToday: 0
+  };
+
+  feedback: FeedbackMessage | null = null;
+  private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+  selectedRequest: ScanRequestRow | null = null;
+  private requestedMemberId: string | null = null;
+  private autoOpenHandledMemberId: string | null = null;
 
   showCreateModal = false;
-  loadingPlanAccess = true;
-
-  requests: RequestRow[] = [];
-
-  submitFeedback: SubmitFeedback | null = null;
   submittingRequest = false;
+  modalOptionsLoading = false;
+  modalOptionsLoaded = false;
+  modalOptionsError = '';
+  memberSearch = '';
+  availableMembers: WorkflowMemberOption[] = [];
+  filteredMemberOptions: WorkflowMemberOption[] = [];
+  hasMembers = false;
+  availableDepartments: Array<{ id: string; name: string }> = [];
+  hasDepartments = false;
+  modalMembers: WorkflowMemberOption[] = [];
+  modalDepartments: Array<{ id: string; name: string }> = [];
+  requestForm: NewRequestForm = this.defaultRequestForm();
+  formErrors: NewRequestFormErrors = this.emptyFormErrors();
+  private loadRunId = 0;
 
-  hasBusinessAccess = false;
-  canViewRequestCenter = true;
-  canViewAllBusinessRequests = false;
-  canCreateRequests = false;
-  canOpenBusinessCenter = false;
-  canAssignMemberRole = false;
-
-  businessTrialNotice = '';
-  businessInviteTrialNotice = '';
-  readonly requiredStateOptions = REQUIRED_STATE_OPTIONS;
-
-  requestStats = {
-    total: 0,
-    pending: 0,
-    approved: 0,
-    denied: 0
+  filters: RequestFilters = {
+    search: '',
+    status: 'all',
+    department: '',
+    dateRange: 'all',
+    customStart: '',
+    customEnd: '',
+    sort: 'newest'
   };
-  todayRequestCount = 0;
-
-  private successToastTimer: ReturnType<typeof setTimeout> | null = null;
-  private emptyResultRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly accessTimeoutMs = 15000;
-  private readonly postAuthRetryDelaysMs = [900, 1800, 3000];
-  private recoveringSession = false;
-  private currentAccessUserId: string | null = null;
-  private currentMemberRole: BusinessMemberRole | null = null;
-  private currentBusinessProfileId: string | null = null;
-  private optimisticRequests = new Map<string, RequestRow>();
 
   constructor(
-    private http: HttpClient,
-    private businessCenter: BusinessCenterService,
-    private auth: AuthService,
+    private workflows: OperationsWorkflowsService,
+    private operationsAdmin: OperationsAdminService,
+    private companyContext: CompanyContextService,
+    private route: ActivatedRoute,
+    private router: Router,
+    private ngZone: NgZone,
     private cdr: ChangeDetectorRef
-  ) {
-    this.dailyRequestLimit = this.businessCenter.dailyRequestLimit;
+  ) {}
+
+  ngOnInit(): void {
+    console.log('[ScanRequests] route loaded');
+    void this.loadPage();
+
+    this.route.queryParamMap.subscribe((params) => {
+      const requestId = params.get('request');
+      if (!requestId) {
+        this.selectedRequest = null;
+      } else {
+        this.selectedRequest = this.rows.find((row) => row.source.id === requestId) ?? null;
+      }
+
+      const memberId = params.get('member');
+      this.requestedMemberId = memberId;
+      if (memberId && this.pageData && this.autoOpenHandledMemberId !== memberId) {
+        this.autoOpenHandledMemberId = memberId;
+        this.openCreateModal(memberId);
+      }
+    });
   }
 
-  ngOnInit() {
-    this.loadPlanAccess();
+  ngOnDestroy(): void {
+    this.togglePageScrollLock(false);
   }
 
-  ngOnDestroy() {
-    if (this.successToastTimer) {
-      clearTimeout(this.successToastTimer);
-      this.successToastTimer = null;
+  get canSubmitScanRequest(): boolean {
+    if (this.submittingRequest || !this.canCreateRequests) {
+      return false;
     }
-    if (this.emptyResultRetryTimer) {
-      clearTimeout(this.emptyResultRetryTimer);
-      this.emptyResultRetryTimer = null;
+
+    if (!this.requestForm.targetType || !this.requestForm.dueTime) {
+      return false;
     }
+
+    if (this.requestForm.targetType === 'individual' && !this.requestForm.memberId) {
+      return false;
+    }
+
+    if (this.requestForm.targetType === 'department' && !this.requestForm.departmentId) {
+      return false;
+    }
+
+    if (this.requestForm.dueTime === 'custom') {
+      return this.toTimestamp(this.requestForm.customDueAt) > 0;
+    }
+
+    return true;
   }
 
-  // ===============================
-  // UI Helpers
-  // ===============================
+  get hasActiveWorkspaceContext(): boolean {
+    const context = this.companyContext.snapshot().context;
+    const membership = this.companyContext.getActiveMembership();
+    return Boolean(context.activeBusinessProfileId && membership?.id);
+  }
 
-  badgeClass(state: string): string {
-    const s = (state ?? '').toLowerCase();
-    if (s.includes('stable')) return 'badge-stable';
-    if (s.includes('focus')) return 'badge-low';
-    if (s.includes('fatigue')) return 'badge-fatigue';
-    if (s.includes('risk')) return 'badge-risk';
+  get activeMembershipStatus(): string {
+    return this.normalizeText(this.companyContext.getActiveMembership()?.status);
+  }
+
+  get currentRole(): string {
+    return this.normalizeText(this.companyContext.snapshot().context.activeMemberRole);
+  }
+
+  get canCreateRequests(): boolean {
+    const role = this.currentRole;
+    const allowedRole = role === 'owner' || role === 'hr';
+    return this.hasActiveWorkspaceContext && this.activeMembershipStatus === 'active' && allowedRole;
+  }
+
+  get canManageRequestActions(): boolean {
+    return this.canCreateRequests;
+  }
+
+  canRemindRequest(row: ScanRequestRow): boolean {
+    return this.canManageRequestActions && (row.status === 'pending' || row.status === 'overdue');
+  }
+
+  canCancelRequest(row: ScanRequestRow): boolean {
+    return this.canManageRequestActions && (row.status === 'pending' || row.status === 'overdue');
+  }
+
+  actionDisabledReason(action: 'remind' | 'cancel', row: ScanRequestRow): string {
+    if (!this.canManageRequestActions) {
+      return 'Only owner/hr can perform this action.';
+    }
+    if (action === 'remind' || action === 'cancel') {
+      if (!(row.status === 'pending' || row.status === 'overdue')) {
+        return 'Available only for pending or overdue requests.';
+      }
+    }
     return '';
   }
 
-  dailyRequestsRemaining(): number {
-    return Math.max(0, this.dailyRequestLimit - this.todayRequestCount);
+  get isEmployeeView(): boolean {
+    return this.currentRole === 'employee';
   }
 
-  maxRecipientsForCurrentDay(): number {
-    const remaining = this.dailyRequestsRemaining();
-    if (remaining <= 0) {
-      return 1;
+  get scopeChipLabel(): string {
+    const context = this.companyContext.snapshot().context;
+    if (context.activeDepartmentName) {
+      return `${context.activeDepartmentName} scope`;
     }
-    return Math.min(this.maxRecipientEmails, remaining);
+    return 'Company-wide scope';
   }
 
-  openCreateModal() {
-    if (!this.canCreateRequests) return;
-    const remaining = this.dailyRequestsRemaining();
-    if (remaining <= 0) {
-      this.submitFeedback = {
-        type: 'error',
-        message: `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`
-      };
-      this.cdr.detectChanges();
-      return;
+  get roleChipLabel(): string {
+    const role = this.companyContext.snapshot().context.activeMemberRole;
+    if (!role) {
+      return 'Role unavailable';
     }
-    this.submitFeedback = null;
-    this.showCreateModal = true;
-    this.cdr.detectChanges();
+
+    if (role === 'owner') return 'Owner';
+    if (role === 'hr') return 'HR';
+    if (role === 'manager') return 'Manager';
+    if (role === 'employee') return 'Employee';
+
+    return role;
   }
 
-  // ===============================
-  // Create Request (Optimistic)
-  // ===============================
+  refresh(): void {
+    void this.loadPage();
+  }
 
-  handleCreateRequest(form: CreateRequestForm) {
+  clearFilters(): void {
+    this.filters = {
+      search: '',
+      status: 'all',
+      department: '',
+      dateRange: 'all',
+      customStart: '',
+      customEnd: '',
+      sort: 'newest'
+    };
+    this.recomputeVisibleRows();
+  }
+
+  trackByRequest(index: number, row: ScanRequestRow): string {
+    return row.source.id || String(index);
+  }
+
+  private formatDateTimeLabel(value: string | null | undefined): string {
+    if (!value) {
+      return '-';
+    }
+
+    const timestamp = this.toTimestamp(value);
+    if (!timestamp) {
+      return '-';
+    }
+
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(new Date(timestamp));
+  }
+
+  openCreateModal(memberId: string | null = null): void {
     if (!this.canCreateRequests) {
-      this.submitFeedback = {
-        type: 'error',
-        message: 'You do not have permission to create requests.'
+      this.pushFeedback('error', 'Your workspace role cannot create scan requests.');
+      return;
+    }
+
+    const form = this.defaultRequestForm();
+
+    if (memberId) {
+      const matchedMember = this.availableMembers.find(
+        (member) => member.member_id === memberId || member.user_id === memberId
+      );
+
+      if (matchedMember) {
+        form.targetType = 'individual';
+        form.memberId = matchedMember.member_id;
+      }
+    }
+
+    this.requestForm = form;
+    this.formErrors = this.emptyFormErrors();
+    this.memberSearch = '';
+    this.modalOptionsError = '';
+    this.showCreateModal = true;
+    this.togglePageScrollLock(true);
+    void this.loadModalOptions(memberId);
+  }
+
+  closeCreateModal(): void {
+    if (this.submittingRequest) {
+      return;
+    }
+
+    this.showCreateModal = false;
+    this.modalOptionsLoading = false;
+    this.formErrors = this.emptyFormErrors();
+    this.togglePageScrollLock(Boolean(this.selectedRequest));
+  }
+
+  onTargetTypeChange(): void {
+    this.formErrors = this.emptyFormErrors();
+    this.requestForm.memberId = '';
+    this.requestForm.departmentId = '';
+    this.memberSearch = '';
+    this.recomputeMemberOptions();
+  }
+
+  onMemberSearchChanged(): void {
+    this.recomputeMemberOptions();
+  }
+
+  onFiltersChanged(): void {
+    this.recomputeVisibleRows();
+  }
+
+  sendRequest(): void {
+    if (!this.canCreateRequests) {
+      this.pushFeedback('error', 'Your workspace role cannot create scan requests.');
+      return;
+    }
+
+    this.formErrors = this.validateForm();
+    if (this.hasFormErrors(this.formErrors)) {
+      return;
+    }
+
+    const dueAt = this.resolveDueAtIso();
+    if (!dueAt) {
+      this.formErrors = {
+        ...this.formErrors,
+        dueTime: 'Due time is required.'
       };
-      this.cdr.detectChanges();
       return;
     }
 
-    const { uniqueEmails, invalidEntries } = this.normalizeRecipientEmails(form.requestedForEmails);
-    const selectedMemberRole = this.resolveSelectedMemberRole(form.memberRole);
-    const requiredState = this.normalizeRequiredState(form.requiredState);
+    const payload: CreateScanRequestInput = {
+      request_type: this.requestForm.targetType === 'individual' ? 'manual' : 'bulk',
+      status: 'pending',
+      due_at: dueAt,
+      requested_by_user: this.companyContext.snapshot().context.userId
+    };
 
-    if (invalidEntries.length > 0) {
-      this.submitFeedback = { type: 'error', message: `Invalid email: ${invalidEntries[0]}` };
-      this.cdr.detectChanges();
-      return;
+    if (this.requestForm.targetType === 'individual') {
+      const member = this.availableMembers.find((item) => {
+        return item.member_id === this.requestForm.memberId;
+      });
+
+      payload.target_member = member?.member_id ?? null;
+      payload.department = member?.department_id ?? null;
     }
 
-    if (!uniqueEmails.length) {
-      this.submitFeedback = { type: 'error', message: 'Enter at least one recipient email.' };
-      this.cdr.detectChanges();
-      return;
+    if (this.requestForm.targetType === 'department') {
+      payload.department = this.requestForm.departmentId;
+      payload.target_member = null;
     }
 
-    if (uniqueEmails.length > this.maxRecipientEmails) {
-      this.submitFeedback = {
-        type: 'error',
-        message: `You can add up to ${this.maxRecipientEmails} recipient emails per submit.`
-      };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    if (!requiredState) {
-      this.submitFeedback = { type: 'error', message: 'Select a required state.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    const remaining = this.dailyRequestsRemaining();
-    if (remaining <= 0) {
-      this.submitFeedback = {
-        type: 'error',
-        message: `Daily limit reached. You can send up to ${this.dailyRequestLimit} requests per day.`
-      };
-      this.cdr.detectChanges();
-      return;
-    }
-    if (uniqueEmails.length > remaining) {
-      this.submitFeedback = {
-        type: 'error',
-        message: `You can send ${remaining} more request(s) today. Reduce recipients and try again.`
-      };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    const token = this.getUserToken();
-    if (!token) {
-      this.submitFeedback = { type: 'error', message: 'Your session expired. Log in again.' };
-      this.cdr.detectChanges();
-      return;
-    }
-
-    const currentUserEmail = this.getUserEmailFromToken(token);
-    if (currentUserEmail && uniqueEmails.some((email) => email === currentUserEmail)) {
-      this.submitFeedback = { type: 'error', message: 'You cannot send a request to yourself.' };
-      this.cdr.detectChanges();
-      return;
+    if (this.requestForm.targetType === 'workspace') {
+      payload.department = null;
+      payload.target_member = null;
     }
 
     this.submittingRequest = true;
-    this.submitFeedback = { type: 'info', message: 'Sending requests...' };
-    this.cdr.detectChanges();
 
-    const optimisticRows = uniqueEmails.map((email) =>
-      this.buildOptimisticRow(email, requiredState)
-    );
+    const submit$: Observable<unknown> =
+      this.requestForm.targetType === 'workspace'
+        ? this.workflows.createWorkspaceScanRequests(payload)
+        : this.requestForm.targetType === 'department'
+          ? this.workflows.createDepartmentScanRequests(payload)
+        : this.workflows.createScanRequest(payload);
 
-    for (const row of optimisticRows) {
-      this.optimisticRequests.set(row.id, row);
-    }
-    this.requests = this.mergeRequestRows(this.requests, optimisticRows);
-    this.updateStats();
-    this.showCreateModal = false;
-    this.cdr.detectChanges();
-
-    const createCalls = uniqueEmails.map((email) =>
-      this.businessCenter.createScanRequest({
-        requested_for_email: email,
-        required_state: requiredState
-      }, this.currentBusinessProfileId).pipe(
-        catchError((err) =>
-          of({
-            ok: false,
-            message: this.describeHttpError(err, 'Failed to send request.')
-          } as CreateScanRequestResult)
-        )
-      )
-    );
-
-    forkJoin(createCalls).subscribe({
-      next: (results) => {
-        const summary = this.processCreateResults(results, uniqueEmails, optimisticRows);
-        if (!summary.successEmails.length) {
+    submit$
+      .pipe(
+        finalize(() => {
           this.submittingRequest = false;
-          this.submitFeedback = {
-            type: 'error',
-            message: summary.firstError || 'Failed to send request.'
-          };
-          this.cdr.detectChanges();
-          return;
-        }
-
-        if (this.canAssignMemberRole && this.currentBusinessProfileId) {
-          this.assignRoleToRecipients(summary.successEmails, selectedMemberRole).subscribe((roleResult) => {
-            this.completeRequestSubmit(summary.successCount, summary.failedCount, summary.firstError, roleResult);
-          });
-          return;
-        }
-
-        this.completeRequestSubmit(summary.successCount, summary.failedCount, summary.firstError);
-      },
-      error: (err: unknown) => {
-        this.rollbackOptimisticRows(optimisticRows);
-        this.submittingRequest = false;
-        this.submitFeedback = {
-          type: 'error',
-          message: this.describeHttpError(err, 'Failed to send request.')
-        };
-        this.cdr.detectChanges();
-      }
-    });
-  }
-
-  private completeRequestSubmit(
-    successCount: number,
-    failedCount: number,
-    firstError: string,
-    roleResult?: RoleAssignmentSummary
-  ): void {
-    const roleSummary = roleResult
-      ? this.buildRoleSummaryMessage(roleResult)
-      : '';
-
-    const baseMessage =
-      failedCount === 0
-        ? `Sent ${successCount} request(s) successfully.`
-        : `Sent ${successCount} request(s). ${failedCount} failed.`;
-
-    const errorHint = failedCount > 0 && firstError ? ` ${firstError}` : '';
-    const fullMessage = `${baseMessage}${roleSummary}${errorHint}`.trim();
-
-    this.submittingRequest = false;
-
-    const hasRoleFailure = Boolean(roleResult && roleResult.failedCount > 0);
-    if (failedCount === 0 && !hasRoleFailure) {
-      this.showSuccessToast(fullMessage);
-    } else {
-      this.submitFeedback = { type: 'info', message: fullMessage };
-    }
-
-    this.cdr.detectChanges();
-    setTimeout(() => this.loadRequests(true), 1200);
-  }
-
-  private buildRoleSummaryMessage(summary: RoleAssignmentSummary): string {
-    if (summary.successCount > 0 && summary.failedCount === 0) {
-      return ` Team role updated for ${summary.successCount} recipient(s).`;
-    }
-    if (summary.successCount > 0 && summary.failedCount > 0) {
-      return ` Role updated for ${summary.successCount} recipient(s), ${summary.failedCount} failed.`;
-    }
-    if (summary.failedCount > 0) {
-      return ` Failed to update member role. ${summary.errorMessage}`;
-    }
-    return '';
-  }
-
-  private assignRoleToRecipients(
-    recipientEmails: string[],
-    role: ManageTeamMemberRole
-  ) {
-    const profileId = this.currentBusinessProfileId;
-    if (!profileId || !recipientEmails.length) {
-      return of({ successCount: 0, failedCount: 0, errorMessage: '' } as RoleAssignmentSummary);
-    }
-
-    const memberCalls = recipientEmails.map((email) =>
-      this.businessCenter.upsertTeamMember(profileId, email, role, this.currentMemberRole).pipe(
-        catchError((err) =>
-          of({
-            ok: false,
-            message: this.describeHttpError(err, 'Failed to update team member role.')
-          } as ActionResult)
-        )
+        })
       )
-    );
-
-    return forkJoin(memberCalls).pipe(
-      map((results) => {
-        let successCount = 0;
-        let failedCount = 0;
-        let errorMessage = '';
-
-        for (const item of results) {
-          if (item?.ok) {
-            successCount += 1;
-            continue;
+      .subscribe({
+        next: (createdCount: unknown) => {
+          const createdTotal = typeof createdCount === 'number' ? createdCount : 0;
+          if (this.requestForm.targetType === 'workspace' && createdTotal === 0) {
+            this.pushFeedback('info', 'No active members were found for this workspace target.');
+            this.showCreateModal = false;
+            this.togglePageScrollLock(Boolean(this.selectedRequest));
+            void this.loadPage();
+            return;
           }
-          failedCount += 1;
-          if (!errorMessage) {
-            errorMessage = item?.message || 'Permission denied while updating member role.';
-          }
+
+          const message = this.requestForm.targetType === 'workspace'
+            ? `Scan requests sent to ${createdTotal} members.`
+            : 'Scan request sent successfully.';
+          this.pushFeedback('success', message);
+          this.showCreateModal = false;
+          this.togglePageScrollLock(Boolean(this.selectedRequest));
+          void this.loadPage();
+        },
+        error: (error: unknown) => {
+          const message = error instanceof Error && error.message ? error.message : 'Failed to send scan request.';
+          this.pushFeedback('error', message);
         }
-
-        return {
-          successCount,
-          failedCount,
-          errorMessage
-        } as RoleAssignmentSummary;
-      })
-    );
+      });
   }
 
-  private processCreateResults(
-    results: CreateScanRequestResult[],
-    recipientEmails: string[],
-    optimisticRows: RequestRow[]
-  ): CreateRequestSummary {
-    let successCount = 0;
-    let failedCount = 0;
-    let firstError = '';
-    const successEmails: string[] = [];
-
-    results.forEach((result, index) => {
-      const optimistic = optimisticRows[index];
-      if (!optimistic) {
-        return;
-      }
-
-      if (result?.ok) {
-        successCount += 1;
-        successEmails.push(recipientEmails[index]);
-
-        const createdId = this.normalizeId(result?.id);
-        if (createdId) {
-          this.promoteOptimisticRequestId(optimistic.id, createdId);
-        }
-        return;
-      }
-
-      failedCount += 1;
-      if (!firstError) {
-        firstError = result?.message || 'Failed to send request.';
-      }
-      this.dropOptimisticRequest(optimistic.id);
-    });
-
-    this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
-    this.updateStats();
-
-    return {
-      successCount,
-      failedCount,
-      firstError,
-      successEmails
-    };
-  }
-
-  private rollbackOptimisticRows(rows: RequestRow[]): void {
-    for (const row of rows) {
-      this.dropOptimisticRequest(row.id);
-    }
-    this.requests = this.mergeRequestRows(this.requests, Array.from(this.optimisticRequests.values()));
-    this.updateStats();
-  }
-
-  private buildOptimisticRow(email: string, requiredState: RequiredState): RequestRow {
-    const optimisticId =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? `tmp_${crypto.randomUUID()}`
-        : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const timestampRaw = new Date().toISOString();
-
-    return {
-      id: optimisticId,
-      target: email,
-      required_state: requiredState,
-      response_status: 'Pending',
-      timestamp: this.formatTimestamp(timestampRaw),
-      timestampRaw
-    };
-  }
-
-  private showSuccessToast(message: string) {
-    this.submitFeedback = { type: 'success', message };
-
-    if (this.successToastTimer) clearTimeout(this.successToastTimer);
-
-    this.successToastTimer = setTimeout(() => {
-      if (this.submitFeedback?.type === 'success') {
-        this.submitFeedback = null;
-        this.cdr.detectChanges();
-      }
-    }, 2500);
-  }
-
-  // ===============================
-  // Loading
-  // ===============================
-
-  private loadPlanAccess() {
-    this.loadingPlanAccess = true;
-
-    this.businessCenter.getHubAccessState().pipe(
-      timeout(this.accessTimeoutMs),
-      catchError(() => of(null))
-    ).subscribe((state) => {
-      if (!state) {
-        this.hasBusinessAccess = false;
-        this.canViewRequestCenter = true;
-        this.canViewAllBusinessRequests = false;
-        this.canCreateRequests = false;
-        this.canOpenBusinessCenter = false;
-        this.canAssignMemberRole = false;
-        this.currentAccessUserId = null;
-        this.currentMemberRole = null;
-        this.currentBusinessProfileId = null;
-        this.businessTrialNotice = '';
-        this.businessInviteTrialNotice = '';
-        this.syncAssignableMemberRoleOptions();
-        this.loadingPlanAccess = false;
-        this.loadRequests(true);
-        return;
-      }
-
-      this.hasBusinessAccess = Boolean(state.hasPaidAccess);
-      this.currentAccessUserId = this.normalizeId(state.userId);
-      this.currentMemberRole = this.normalizeBusinessRole(state.memberRole);
-      this.currentBusinessProfileId = this.normalizeId(state.profile?.id);
-      this.canViewAllBusinessRequests = this.hasBusinessAccess && this.currentMemberRole === 'owner';
-      this.canViewRequestCenter = true;
-
-      const hasWritableRequestAccess =
-        this.canViewAllBusinessRequests &&
-        Boolean(state.permissions?.canUseSystem) &&
-        !Boolean(state.permissions?.isReadOnly) &&
-        !Boolean(state.trialExpired);
-
-      this.canCreateRequests = hasWritableRequestAccess;
-      this.canOpenBusinessCenter =
-        this.canViewAllBusinessRequests;
-      this.canAssignMemberRole =
-        hasWritableRequestAccess &&
-        Boolean(state.permissions?.canManageMembers) &&
-        Boolean(this.currentBusinessProfileId);
-
-      this.syncAssignableMemberRoleOptions();
-
-      const billingStatus = (state.profile?.billing_status ?? '').toString().trim().toLowerCase();
-      const trialDaysRemaining = this.daysUntil(state.trialExpiresAt);
-      const trialActive = billingStatus === 'trial' && !state.trialExpired;
-
-      if (trialActive && trialDaysRemaining !== null && trialDaysRemaining > 0) {
-        this.businessTrialNotice = `Create requests is a paid Business feature, free for ${trialDaysRemaining} day(s) left.`;
-        this.businessInviteTrialNotice = `Email invites are a paid Business feature, free for ${trialDaysRemaining} day(s) left.`;
-      } else if (trialActive) {
-        this.businessTrialNotice = 'Create requests is a paid Business feature, currently unlocked in your trial.';
-        this.businessInviteTrialNotice = 'Email invites are a paid Business feature, currently unlocked in your trial.';
-      } else {
-        this.businessTrialNotice = '';
-        this.businessInviteTrialNotice = '';
-      }
-
-      this.loadingPlanAccess = false;
-      this.loadRequests(true);
+  openRequest(row: ScanRequestRow): void {
+    this.selectedRequest = row;
+    this.togglePageScrollLock(true);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { request: row.source.id },
+      queryParamsHandling: 'merge'
     });
   }
 
-  private loadRequests(bustCache = false, retryAttempt = 0) {
-    const token = this.getUserToken();
-    const headers = this.buildAuthHeaders(token);
+  closeRequestDetails(): void {
+    this.selectedRequest = null;
+    this.togglePageScrollLock(this.showCreateModal);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { request: null },
+      queryParamsHandling: 'merge'
+    });
+  }
 
-    if (!headers) {
-      this.tryRecoverSessionAndReload();
-      this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
-      this.updateStats();
-      this.cdr.detectChanges();
+  remindRequest(row: ScanRequestRow): void {
+    if (!this.canManageRequestActions) {
+      this.pushFeedback('error', 'Your workspace role cannot send reminders.');
       return;
     }
 
-    const params = new URLSearchParams({
-      sort: '-timestamp',
-      limit: '50',
-      fields: [
-        'id',
-        'requested_for_email',
-        'requested_for_phone',
-        'requested_for_user',
-        'requested_by_user',
-        'business_profile',
-        'required_state',
-        'response_status',
-        'timestamp'
-      ].join(',')
-    });
-
-    if (bustCache) params.set('_', Date.now().toString());
-
-    const useBusinessScope = this.hasBusinessAccess && this.canViewAllBusinessRequests;
-
-    if (useBusinessScope) {
-      if (!this.currentBusinessProfileId) {
-        this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
-        this.updateStats();
-        this.submitFeedback = {
-          type: 'error',
-          message: 'Business profile is missing. Refresh Business access and try again.'
-        };
-        this.cdr.detectChanges();
-        return;
-      }
-      params.set('filter[business_profile][_eq]', this.currentBusinessProfileId);
-    } else {
-      const userId = this.resolveCurrentUserId(token);
-      const userEmail = this.getUserEmailFromToken(token);
-
-      if (!userId && !userEmail) {
-        this.tryRecoverSessionAndReload();
-        this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
-        this.updateStats();
-        this.cdr.detectChanges();
-        return;
-      }
-
-      if (userId && userEmail) {
-        params.set('filter[_or][0][requested_for_user][_eq]', userId);
-        params.set('filter[_or][1][requested_for_email][_eq]', userEmail);
-        params.set('filter[_or][2][requested_for_email][_icontains]', userEmail);
-        params.set('filter[_or][3][requested_by_user][_eq]', userId);
-      } else if (userId) {
-        params.set('filter[_or][0][requested_for_user][_eq]', userId);
-        params.set('filter[_or][1][requested_by_user][_eq]', userId);
-      } else if (userEmail) {
-        params.set('filter[_or][0][requested_for_email][_eq]', userEmail);
-        params.set('filter[_or][1][requested_for_email][_icontains]', userEmail);
-      }
-    }
-
-    this.http.get<{ data?: RequestRecord[] }>(
-      `${environment.API_URL}/items/requests?${params.toString()}`,
-      { headers, withCredentials: true }
-    ).pipe(
-      map(res => res.data ?? [])
-    ).subscribe({
-      next: data => {
-        const remoteRows = data.map(r => this.mapToRow(r));
-        this.reconcileOptimisticRequests(remoteRows);
-        this.requests = this.mergeRequestRows(remoteRows, Array.from(this.optimisticRequests.values()));
-        this.updateStats();
-        this.cdr.detectChanges();
-
-        if (!useBusinessScope && this.shouldRetryEmptyResult(remoteRows.length, retryAttempt)) {
-          this.scheduleEmptyResultRetry(retryAttempt + 1);
+    this.workflows.remindScanRequest(row.source.id, row.source.notification_count).subscribe({
+      next: (result: RequestActionResult) => {
+        this.pushFeedback(result.ok ? 'success' : 'info', result.message);
+        if (result.ok) {
+          void this.loadPage();
         }
       },
-      error: err => {
-        console.error('Load requests error:', err);
-        if (err?.status === 401 || err?.status === 403) {
-          this.tryRecoverSessionAndReload();
-        }
-        this.requests = this.mergeRequestRows([], Array.from(this.optimisticRequests.values()));
-        this.updateStats();
-        this.cdr.detectChanges();
+      error: (error: unknown) => {
+        const message = error instanceof Error && error.message ? error.message : 'Failed to send reminder.';
+        this.pushFeedback('error', message);
       }
     });
   }
 
-  private scheduleEmptyResultRetry(nextAttempt: number): void {
-    if (this.emptyResultRetryTimer) {
-      clearTimeout(this.emptyResultRetryTimer);
-      this.emptyResultRetryTimer = null;
-    }
-
-    const delayIndex = Math.max(0, Math.min(nextAttempt - 1, this.postAuthRetryDelaysMs.length - 1));
-    const delayMs = this.postAuthRetryDelaysMs[delayIndex];
-    this.emptyResultRetryTimer = setTimeout(() => {
-      this.emptyResultRetryTimer = null;
-      this.loadRequests(true, nextAttempt);
-    }, delayMs);
-  }
-
-  private shouldRetryEmptyResult(totalRows: number, retryAttempt: number): boolean {
-    if (totalRows > 0) {
-      return false;
-    }
-    if (retryAttempt >= this.postAuthRetryDelaysMs.length) {
-      return false;
-    }
-    return this.isRecentAuthWindow();
-  }
-
-  private isRecentAuthWindow(windowMs = 60000): boolean {
-    if (typeof sessionStorage === 'undefined') {
-      return false;
-    }
-
-    if (sessionStorage.getItem('auth_callback_pending') === '1') {
-      return true;
-    }
-
-    const raw = sessionStorage.getItem('auth_session_established_at');
-    const ts = raw ? Number(raw) : NaN;
-    if (!Number.isFinite(ts)) {
-      return false;
-    }
-
-    const delta = Date.now() - ts;
-    return delta >= 0 && delta <= windowMs;
-  }
-
-  private tryRecoverSessionAndReload(): void {
-    if (this.recoveringSession) {
+  cancelRequest(row: ScanRequestRow): void {
+    if (!this.canManageRequestActions) {
+      this.pushFeedback('error', 'Your workspace role cannot cancel requests.');
       return;
     }
 
-    this.recoveringSession = true;
-    this.auth.ensureSessionToken().pipe(
-      take(1),
-      catchError(() => of(false))
-    ).subscribe((ok) => {
-      this.recoveringSession = false;
-      if (!ok) {
-        return;
+    this.workflows.cancelScanRequest(row.source.id).subscribe({
+      next: (result: RequestActionResult) => {
+        this.pushFeedback(result.ok ? 'success' : 'info', result.message);
+        if (result.ok) {
+          void this.loadPage();
+        }
+      },
+      error: (error: unknown) => {
+        const message = error instanceof Error && error.message ? error.message : 'Failed to cancel request.';
+        this.pushFeedback('error', message);
       }
-      this.loadPlanAccess();
     });
   }
 
-  // ===============================
-  // Mapping + Stats
-  // ===============================
+  viewResult(row: ScanRequestRow): void {
+    if (row.source.completed_scan_id) {
+      void this.router.navigate(['/app/compliance'], {
+        queryParams: { scan: row.source.completed_scan_id, request: row.source.id }
+      });
+      return;
+    }
 
-  private mapToRow(r: RequestRecord): RequestRow {
-    const timestampRaw = r.timestamp ?? '';
-    const id = this.normalizeId(r.id) ?? this.syntheticRequestId(r);
-    return {
-      id,
-      target: this.formatTarget(r),
-      required_state: r.required_state ?? 'Unknown',
-      response_status: r.response_status ?? 'Pending',
-      timestamp: this.formatTimestamp(timestampRaw),
-      timestampRaw
-    };
+    this.pushFeedback('info', 'The completed scan result is not available in this view yet.');
   }
 
-  private formatTarget(r: RequestRecord): string {
-    if (r.requested_for_email) return r.requested_for_email;
-    if (r.requested_for_phone) return r.requested_for_phone;
-    if (typeof r.target === 'string') return r.target;
-    if (typeof r.Target === 'string') return r.Target;
-    return 'scan';
-  }
+  private async loadPage(): Promise<void> {
+    const runId = ++this.loadRunId;
+    this.commitViewMutation(() => {
+      this.pageState = 'loading';
+      this.loading = true;
+      this.errorMessage = '';
+    });
+    console.log('[ScanRequests] loading started');
 
-  private formatTimestamp(value?: string): string {
-    if (!value) return '';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    return date.toLocaleString();
-  }
+    const safetyTimeout = setTimeout(() => {
+      if (runId !== this.loadRunId || this.pageState !== 'loading') {
+        return;
+      }
 
-  private updateStats() {
-    const normalize = (s?: string) => (s ?? '').toLowerCase();
-
-    this.requestStats = {
-      total: this.requests.length,
-      pending: this.requests.filter(r => normalize(r.response_status).includes('pending')).length,
-      approved: this.requests.filter(r => normalize(r.response_status).includes('approved')).length,
-      denied: this.requests.filter(r => normalize(r.response_status).includes('denied')).length
-    };
-
-    this.todayRequestCount = this.businessCenter.countTodayRequests(
-      this.requests.map((row) => ({ timestamp: row.timestampRaw }))
-    );
-  }
-
-  // ===============================
-  // Auth + Helpers
-  // ===============================
-
-  private buildAuthHeaders(token: string | null): HttpHeaders | null {
-    if (!token) return null;
-    return new HttpHeaders({ Authorization: `Bearer ${token}` });
-  }
-
-  private getUserToken(): string | null {
-    return (
-      localStorage.getItem('token') ??
-      localStorage.getItem('access_token') ??
-      localStorage.getItem('directus_token')
-    );
-  }
-
-  private decodeJwtPayload(token: string): Record<string, unknown> | null {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
+      this.commitViewMutation(() => {
+        console.warn('[ScanRequests] forced exit from loading after timeout');
+        this.pageData = this.pageData ?? { rows: [], departments: [], members: [], requestTypeOptions: [], statusOptions: [], summary: { total: 0, pending: 0, completed: 0, overdue: 0 } };
+        this.rows = this.rows ?? [];
+        this.visibleRows = this.visibleRows ?? [];
+        this.recomputeSummary();
+        this.recomputeVisibleRows();
+        this.pageState = 'ready';
+        this.loading = false;
+      });
+      console.log('[ScanRequests] viewState ready');
+      console.log('[ScanRequests] loading finished');
+    }, 8000);
 
     try {
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-      return typeof payload === 'object' && payload ? (payload as Record<string, unknown>) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private getUserIdFromToken(token: string | null): string | null {
-    if (!token) return null;
-    const payload = this.decodeJwtPayload(token);
-    const id = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
-    return this.normalizeId(id);
-  }
-
-  private resolveCurrentUserId(token: string | null): string | null {
-    if (this.currentAccessUserId) {
-      return this.currentAccessUserId;
-    }
-
-    const tokenUserId = this.getUserIdFromToken(token);
-    if (tokenUserId) {
-      return tokenUserId;
-    }
-
-    if (typeof localStorage === 'undefined') {
-      return null;
-    }
-
-    return this.normalizeId(localStorage.getItem('current_user_id'));
-  }
-
-  private getUserEmailFromToken(token: string | null): string | null {
-    const payload = token ? this.decodeJwtPayload(token) : null;
-    const payloadEmail = payload?.['email'];
-    const storedEmail =
-      typeof localStorage !== 'undefined' ? localStorage.getItem('user_email') : null;
-    return this.normalizeEmail(payloadEmail) ?? this.normalizeEmail(storedEmail);
-  }
-
-  private isValidEmail(value: string): boolean {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  }
-
-  private normalizeEmail(value: unknown): string | null {
-    if (typeof value !== 'string') return null;
-    const email = value.trim().toLowerCase();
-    return this.isValidEmail(email) ? email : null;
-  }
-
-  private normalizeRecipientEmails(values: unknown): {
-    uniqueEmails: string[];
-    invalidEntries: string[];
-  } {
-    const unique = new Set<string>();
-    const invalid: string[] = [];
-    const source = Array.isArray(values) ? values : [values];
-
-    for (const raw of source) {
-      if (typeof raw !== 'string') {
-        continue;
-      }
-      const trimmed = raw.trim();
-      if (!trimmed) {
-        continue;
+      const context = await this.companyContext.ensureActiveContext();
+      if (runId !== this.loadRunId) {
+        return;
       }
 
-      const normalized = trimmed.toLowerCase();
-      if (!this.isValidEmail(normalized)) {
-        invalid.push(trimmed);
-        continue;
+      const activeProfileId = context?.activeBusinessProfile?.id ?? null;
+      if (!activeProfileId) {
+        this.commitViewMutation(() => {
+          console.warn('[ScanRequests] no active business profile');
+          this.pageData = { rows: [], departments: [], members: [], requestTypeOptions: [], statusOptions: [], summary: { total: 0, pending: 0, completed: 0, overdue: 0 } };
+          this.rows = [];
+          this.visibleRows = [];
+          this.recomputeSummary();
+          this.recomputeVisibleRows();
+          this.pageState = 'ready';
+        });
+        return;
       }
 
-      unique.add(normalized);
+      console.log('[ScanRequestsDebug] activeBusinessProfileId', activeProfileId);
+      console.log('[ScanRequestsDebug] current filters', this.filters);
+      console.log('[ScanRequests] active context ready');
+      const workforceData = await firstValueFrom(this.operationsAdmin.getWorkforceRosterData());
+      const result = this.buildRequestsPageDataFromWorkforce(
+        workforceData,
+        activeProfileId,
+        sanitizeDisplayValue(context?.activeBusinessProfile?.company_name, 'Current workspace')
+      );
+      if (runId !== this.loadRunId || this.pageState !== 'loading') {
+        return;
+      }
+
+      this.commitViewMutation(() => {
+        this.pageData = result ?? null;
+        this.rows = this.buildRows(result?.rows ?? []);
+        this.applyStaticOptionsFromPageData();
+        this.selectedRequest = this.resolveSelectedRequestFromQuery();
+        this.pageState = 'ready';
+        this.recomputeSummary();
+        this.recomputeVisibleRows();
+      });
+      console.log('[ScanRequestsDebug] mapped scan requests count', this.rows.length);
+      if (this.requestedMemberId && !this.showCreateModal) {
+        this.openCreateModal(this.requestedMemberId);
+      }
+      console.log('[ScanRequests] requests loaded', this.rows.length);
+      console.log('[ScanRequests] viewState ready');
+    } catch (error: unknown) {
+      if (runId !== this.loadRunId) {
+        return;
+      }
+
+      console.error('[ScanRequests] load failed', error);
+      this.commitViewMutation(() => {
+        this.pageData = null;
+        this.rows = [];
+        this.visibleRows = [];
+        this.applyStaticOptionsFromPageData();
+        this.recomputeSummary();
+        this.recomputeVisibleRows();
+        this.errorMessage = this.resolveLoadErrorMessage(error);
+        this.pageState = 'error';
+      });
+      console.log('[ScanRequests] viewState error');
+    } finally {
+      clearTimeout(safetyTimeout);
+      if (runId !== this.loadRunId) {
+        return;
+      }
+      this.commitViewMutation(() => {
+        this.loading = false;
+        if (this.pageState === 'loading') {
+          this.pageState = this.errorMessage ? 'error' : 'ready';
+          console.log(`[ScanRequests] viewState ${this.pageState}`);
+        }
+      });
+      console.log('[ScanRequests] loading finished');
+    }
+  }
+
+  private resolveLoadErrorMessage(error: unknown): string {
+    const status = (error as { status?: number } | null)?.status ?? 0;
+    const message = (error as { message?: string } | null)?.message ?? '';
+
+    if (message.includes('No active workspace context was found.')) {
+      return 'No active workspace context was found.';
+    }
+
+    if (status === 403) {
+      return 'We could not load scan requests for this workspace. Please check permissions or retry.';
+    }
+
+    return 'We could not load scan requests for this workspace.';
+  }
+
+  private buildRequestsPageDataFromWorkforce(
+    workforceData: WorkforceRosterPageData,
+    activeBusinessProfileId: string,
+    activeBusinessProfileName: string
+  ): RequestsPageData {
+    const rows: RequestRow[] = (workforceData.scanRequestRows ?? []).map((row) => ({
+      id: row.id,
+      status: row.status,
+      request_type: row.request_type,
+      requested_at: row.requested_at,
+      due_at: row.due_at,
+      completed_at: row.completed_at,
+      cancelled_note: row.cancelled_note,
+      target_member_id: row.target_member_id,
+      target_member_name: row.target_member_name,
+      target_member_email: row.target_user_email,
+      requested_by_user_id: row.requested_by_user_id,
+      requested_by_user_name: row.requested_by_name,
+      business_profile_id: activeBusinessProfileId,
+      business_profile_name: activeBusinessProfileName,
+      department_id: row.department_id,
+      department_name: row.department_name,
+      completed_scan_id: null,
+      completed_scan_at: row.completed_at,
+      notification_count: 0
+    }));
+
+    const departments = (workforceData.departments ?? []).map((item) => ({
+      id: item.id,
+      name: item.name
+    }));
+
+    const members: WorkflowMemberOption[] = [];
+    for (const member of workforceData.memberRows ?? []) {
+      if (!member.member_id) {
+        continue;
+      }
+      members.push({
+        member_id: member.member_id,
+        user_id: member.user_id,
+        label: sanitizeDisplayValue(member.name, 'Unknown member'),
+        email: sanitizeDisplayValue(member.email, '') || null,
+        department_id: member.department_id,
+        department_name: sanitizeDisplayValue(member.department_name, 'Unassigned'),
+        status: member.status
+      });
     }
 
     return {
-      uniqueEmails: Array.from(unique),
-      invalidEntries: invalid
+      rows,
+      departments,
+      members,
+      requestTypeOptions: Array.from(new Set(rows.map((row) => this.normalizeText(row.request_type)).filter(Boolean))),
+      statusOptions: Array.from(new Set(rows.map((row) => this.normalizeText(row.status)).filter(Boolean))),
+      summary: {
+        total: rows.length,
+        pending: rows.filter((row) => this.normalizeText(row.status) === 'pending').length,
+        completed: rows.filter((row) => this.normalizeText(row.status) === 'completed').length,
+        overdue: rows.filter((row) => this.isOverdue({ ...row } as RequestRow)).length
+      }
     };
   }
 
-  private normalizeRequiredState(value: unknown): RequiredState | null {
-    if (typeof value !== 'string') return null;
-    const normalized = value.trim();
-    return (REQUIRED_STATE_OPTIONS as readonly string[]).includes(normalized)
-      ? (normalized as RequiredState)
-      : null;
+  private async loadModalOptions(preselectedMemberId: string | null): Promise<void> {
+    this.modalOptionsLoading = true;
+    this.modalOptionsLoaded = false;
+    this.modalOptionsError = '';
+
+    try {
+      const options: RequestModalOptions = await firstValueFrom(this.workflows.getRequestModalOptions());
+      if (!this.showCreateModal) {
+        return;
+      }
+
+      this.modalMembers = options.members ?? [];
+      this.modalDepartments = options.departments ?? [];
+      this.modalOptionsLoaded = true;
+      this.applyModalOptions();
+
+      if (preselectedMemberId) {
+        const matchedMember = this.availableMembers.find(
+          (member) => member.member_id === preselectedMemberId || member.user_id === preselectedMemberId
+        );
+        if (matchedMember) {
+          this.requestForm.targetType = 'individual';
+          this.requestForm.memberId = matchedMember.member_id;
+        }
+      }
+    } catch (error) {
+      console.warn('[ScanRequests] modal options load failed', error);
+      this.modalOptionsError = 'Workspace members and departments are unavailable right now.';
+      this.modalMembers = this.pageData?.members ?? [];
+      this.modalDepartments = (this.pageData?.departments ?? []).map((department) => ({
+        id: department.id,
+        name: department.name
+      }));
+      this.modalOptionsLoaded = true;
+      this.applyModalOptions();
+    } finally {
+      this.modalOptionsLoading = false;
+    }
   }
 
-  private normalizeBusinessRole(value: unknown): BusinessMemberRole | null {
-    const normalized = (value ?? '').toString().trim().toLowerCase();
-    if (
-      normalized === 'owner' ||
-      normalized === 'admin' ||
-      normalized === 'manager' ||
-      normalized === 'member' ||
-      normalized === 'viewer'
-    ) {
-      return normalized;
-    }
-    return null;
+  private buildRows(rows: RequestRow[]): ScanRequestRow[] {
+    return (rows ?? []).map((row) => {
+      const status = this.resolveStatus(row);
+      const statusClass = this.statusClassForStatus(status);
+      const missingMemberRelation = !row.target_member_id;
+      const missingUserProfile = !row.target_member_email;
+      const rawMemberName = this.ensureSafeLabel(
+        formatMember({
+          user: {
+            first_name: row.target_member_name,
+            email: row.target_member_email
+          }
+        }, row.target_member_name || 'Unknown user'),
+        'Unknown user'
+      );
+      const showUnknownUser = rawMemberName === 'Unknown user' || rawMemberName === 'Unknown member';
+      const memberName = showUnknownUser ? 'Unknown user' : rawMemberName;
+      const memberSecondary = showUnknownUser
+        ? (missingMemberRelation ? 'Member relation missing' : 'No linked user profile')
+        : null;
+      const memberEmail = this.ensureSafeLabel(row.target_member_email, 'No linked user profile');
+      const departmentName = this.ensureSafeLabel(
+        formatDepartment(
+          { name: row.department_name },
+          row.department_id ? 'Deleted department' : 'Unassigned'
+        ),
+        row.department_id ? 'Deleted department' : 'Unassigned'
+      );
+      const requestedBy = this.ensureSafeLabel(row.requested_by_user_name, 'System');
+      const businessProfileName = this.ensureSafeLabel(
+        formatBusinessProfile({ name: row.business_profile_name }, 'Unknown workspace'),
+        'Unknown workspace'
+      );
+      const completedScanLabel =
+        row.completed_scan_id && !isUuid(row.completed_scan_id) ? 'Available' : row.completed_scan_id ? 'Available' : '-';
+      return {
+        source: row,
+        status,
+        statusLabel: this.statusLabel(status),
+        statusClass,
+        memberName,
+        memberEmail,
+        memberSecondary,
+        departmentName,
+        businessProfileName,
+        requestedBy,
+        completedScanLabel,
+        requestedAtTs: this.toTimestamp(row.requested_at),
+        dueAtTs: this.toTimestamp(row.due_at),
+        completedAtTs: this.toTimestamp(row.completed_at),
+        requestedAtLabel: this.formatDateTimeLabel(row.requested_at),
+        dueAtLabel: row.due_at ? this.formatDateTimeLabel(row.due_at) : 'Not set',
+        completedAtLabel: this.formatDateTimeLabel(row.completed_at)
+      } satisfies ScanRequestRow;
+    });
   }
 
-  private promoteOptimisticRequestId(fromId: string, toId: string): void {
-    const sourceId = this.normalizeId(fromId);
-    const targetId = this.normalizeId(toId);
-    if (!sourceId || !targetId || sourceId === targetId) {
-      return;
+  private statusClassForStatus(status: ScanRequestStatus): string {
+    if (status === 'completed') return 'request-status request-status--completed';
+    if (status === 'overdue') return 'request-status request-status--overdue';
+    if (status === 'expired' || status === 'cancelled') return 'request-status request-status--neutral';
+    return 'request-status request-status--pending';
+  }
+
+  private resolveStatus(row: RequestRow): ScanRequestStatus {
+    const rawStatus = this.normalizeText(row.status);
+
+    if (rawStatus.includes('cancel')) {
+      return 'cancelled';
     }
 
-    const source = this.optimisticRequests.get(sourceId);
-    if (source) {
-      this.optimisticRequests.delete(sourceId);
-      this.optimisticRequests.set(targetId, { ...source, id: targetId });
+    if (rawStatus.includes('expire')) {
+      return 'expired';
     }
 
-    const idx = this.requests.findIndex((row) => row.id === sourceId);
-    if (idx !== -1) {
-      this.requests[idx] = {
-        ...this.requests[idx],
-        id: targetId
+    if (rawStatus.includes('complete') || Boolean(row.completed_at) || Boolean(row.completed_scan_id)) {
+      return 'completed';
+    }
+
+    if (this.isOverdue(row)) {
+      return 'overdue';
+    }
+
+    return 'pending';
+  }
+
+  private statusLabel(status: ScanRequestStatus): string {
+    if (status === 'pending') return 'Pending';
+    if (status === 'completed') return 'Completed';
+    if (status === 'overdue') return 'Overdue';
+    if (status === 'expired') return 'Expired';
+    return 'Cancelled';
+  }
+
+  private isOverdue(row: RequestRow): boolean {
+    const status = this.normalizeText(row.status);
+    if (!row.due_at) {
+      return false;
+    }
+
+    if (status.includes('complete') || status.includes('cancel') || status.includes('expire')) {
+      return false;
+    }
+
+    const dueAt = this.toTimestamp(row.due_at);
+    return dueAt > 0 && dueAt < Date.now();
+  }
+
+  private resolveSelectedRequestFromQuery(): ScanRequestRow | null {
+    const requestId = this.route.snapshot.queryParamMap.get('request');
+    if (!requestId) {
+      return null;
+    }
+    return this.rows.find((row) => row.source.id === requestId) ?? null;
+  }
+
+  private resolveFilterDateRange(): { start: number; end: number } | null {
+    if (this.filters.dateRange === 'all') {
+      return null;
+    }
+
+    if (this.filters.dateRange === 'today') {
+      return this.todayRange();
+    }
+
+    if (this.filters.dateRange === 'last7') {
+      const today = this.todayRange();
+      const start = today.start - 6 * 24 * 60 * 60 * 1000;
+      return {
+        start,
+        end: today.end - 1
       };
     }
-  }
 
-  private dropOptimisticRequest(rowId: string): void {
-    const id = this.normalizeId(rowId);
-    if (!id) {
-      return;
+    if (!this.filters.customStart || !this.filters.customEnd) {
+      return null;
     }
-    this.optimisticRequests.delete(id);
-    this.requests = this.requests.filter((row) => row.id !== id);
-  }
 
-  private reconcileOptimisticRequests(remoteRows: RequestRow[]): void {
-    const remoteIds = new Set(
-      (remoteRows ?? [])
-        .map((row) => this.normalizeId(row?.id))
-        .filter((value): value is string => Boolean(value))
-    );
+    const start = this.toTimestamp(`${this.filters.customStart}T00:00:00`);
+    const end = this.toTimestamp(`${this.filters.customEnd}T23:59:59`);
 
-    for (const [key, optimistic] of Array.from(this.optimisticRequests.entries())) {
-      if (remoteIds.has(key)) {
-        this.optimisticRequests.delete(key);
-        continue;
-      }
-
-      if (!this.isTempRequestId(key)) {
-        continue;
-      }
-
-      const optimisticTarget = this.normalizeEmail(optimistic.target) ?? this.normalizeLooseText(optimistic.target);
-      const optimisticState = this.normalizeLooseText(optimistic.required_state);
-      const optimisticTs = this.timestampMs(optimistic.timestampRaw);
-
-      const matched = (remoteRows ?? []).some((row) => {
-        const remoteTarget = this.normalizeEmail(row?.target) ?? this.normalizeLooseText(row?.target);
-        const remoteState = this.normalizeLooseText(row?.required_state);
-        if (!optimisticTarget || optimisticTarget !== remoteTarget || optimisticState !== remoteState) {
-          return false;
-        }
-        const remoteTs = this.timestampMs(row?.timestampRaw);
-        return Math.abs(remoteTs - optimisticTs) <= 2 * 60 * 1000;
-      });
-
-      if (matched) {
-        this.optimisticRequests.delete(key);
-      }
+    if (!start || !end || end < start) {
+      return null;
     }
+
+    return { start, end };
   }
 
-  private mergeRequestRows(baseRows: RequestRow[], extraRows: RequestRow[]): RequestRow[] {
-    const byId = new Map<string, RequestRow>();
-    const push = (row: RequestRow | null | undefined) => {
-      const id = this.normalizeId(row?.id);
-      if (!id) {
-        return;
-      }
-      const normalized = {
-        ...row,
-        id,
-        target: row?.target ?? '-',
-        required_state: row?.required_state ?? 'Unknown',
-        response_status: row?.response_status ?? 'Pending',
-        timestampRaw: row?.timestampRaw ?? '',
-        timestamp: row?.timestamp ?? this.formatTimestamp(row?.timestampRaw ?? '')
-      } as RequestRow;
+  private todayRange(): { start: number; end: number } {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const end = start + 24 * 60 * 60 * 1000;
+    return { start, end };
+  }
 
-      const existing = byId.get(id);
-      if (!existing) {
-        byId.set(id, normalized);
-        return;
-      }
+  private recomputeSummary(): void {
+    const todayRange = this.todayRange();
+    const pendingRequests = this.rows.filter((row) => row.status === 'pending').length;
+    const completedToday = this.rows.filter(
+      (row) => row.status === 'completed' && row.completedAtTs >= todayRange.start && row.completedAtTs < todayRange.end
+    ).length;
+    const overdueRequests = this.rows.filter((row) => row.status === 'overdue').length;
+    const expiredOrCancelled = this.rows.filter((row) => row.status === 'expired' || row.status === 'cancelled').length;
+    const totalSentToday = this.rows.filter(
+      (row) =>
+        row.requestedAtTs >= todayRange.start &&
+        row.requestedAtTs < todayRange.end &&
+        row.status !== 'expired' &&
+        row.status !== 'cancelled'
+    ).length;
 
-      const existingTs = this.timestampMs(existing.timestampRaw);
-      const nextTs = this.timestampMs(normalized.timestampRaw);
-      if (nextTs >= existingTs) {
-        byId.set(id, { ...existing, ...normalized, id });
-      }
+    this.summary = {
+      pendingRequests,
+      completedToday,
+      overdueRequests,
+      expiredOrCancelled,
+      completionRate: totalSentToday > 0 ? Math.round((completedToday / totalSentToday) * 100) : 0,
+      totalSentToday
     };
-
-    for (const row of baseRows ?? []) push(row);
-    for (const row of extraRows ?? []) push(row);
-
-    return Array.from(byId.values()).sort((a, b) =>
-      this.timestampMs(b.timestampRaw) - this.timestampMs(a.timestampRaw)
-    );
   }
 
-  private timestampMs(value: unknown): number {
-    const input = typeof value === 'string' ? value : '';
-    const ts = input ? new Date(input).getTime() : NaN;
-    return Number.isNaN(ts) ? 0 : ts;
-  }
+  private recomputeVisibleRows(): void {
+    const search = this.filters.search.trim().toLowerCase();
+    const dateRange = this.resolveFilterDateRange();
+    this.hasActiveFilters = this.computeHasActiveFilters();
 
-  private normalizeLooseText(value: unknown): string {
-    if (typeof value === 'string') {
-      return value.trim().toLowerCase();
+    let filtered = this.rows.filter((row) => {
+      const searchMatch =
+        !search ||
+        row.memberName.toLowerCase().includes(search) ||
+        row.memberEmail.toLowerCase().includes(search) ||
+        row.departmentName.toLowerCase().includes(search) ||
+        row.businessProfileName.toLowerCase().includes(search) ||
+        row.requestedBy.toLowerCase().includes(search);
+      const statusMatch = this.filters.status === 'all' || row.status === this.filters.status;
+      const departmentMatch = !this.filters.department || row.source.department_id === this.filters.department;
+      const dateMatch = !dateRange || (row.requestedAtTs >= dateRange.start && row.requestedAtTs <= dateRange.end);
+      return searchMatch && statusMatch && departmentMatch && dateMatch;
+    });
+
+    if (this.filters.sort === 'dueSoon') {
+      filtered = [...filtered].sort((left, right) => {
+        const leftDue = left.dueAtTs || Number.MAX_SAFE_INTEGER;
+        const rightDue = right.dueAtTs || Number.MAX_SAFE_INTEGER;
+        return leftDue - rightDue;
+      });
+    } else if (this.filters.sort === 'overdueFirst') {
+      filtered = [...filtered].sort((left, right) => {
+        const leftOverdue = left.status === 'overdue' ? 0 : 1;
+        const rightOverdue = right.status === 'overdue' ? 0 : 1;
+        if (leftOverdue !== rightOverdue) return leftOverdue - rightOverdue;
+        const leftDue = left.dueAtTs || Number.MAX_SAFE_INTEGER;
+        const rightDue = right.dueAtTs || Number.MAX_SAFE_INTEGER;
+        return leftDue - rightDue;
+      });
+    } else {
+      filtered = [...filtered].sort((left, right) => right.requestedAtTs - left.requestedAtTs);
     }
-    if (typeof value === 'number' || typeof value === 'boolean') {
-      return String(value).trim().toLowerCase();
-    }
-    return '';
+
+    this.visibleRows = filtered;
+    this.resultCountLabel = `${this.visibleRows.length} of ${this.rows.length} shown`;
+    this.showNoMatchingState = this.pageState === 'ready' && this.visibleRows.length === 0;
   }
 
-  private syntheticRequestId(r: RequestRecord): string {
-    const target =
-      this.normalizeLooseText(r.requested_for_email) ||
-      this.normalizeLooseText(r.requested_for_phone) ||
-      this.normalizeLooseText(r.target) ||
-      this.normalizeLooseText(r.Target) ||
-      'scan';
-    const state = this.normalizeLooseText(r.required_state);
-    const status = this.normalizeLooseText(r.response_status);
-    const timestamp = this.normalizeLooseText(r.timestamp);
-    return `virtual_${target}|${state}|${status}|${timestamp}`;
+  private applyStaticOptionsFromPageData(): void {
+    this.availableDepartments = (this.pageData?.departments ?? []).map((item) => ({ id: item.id, name: item.name }));
+    this.hasDepartments = this.availableDepartments.length > 0;
+
+    const source = this.pageData?.members ?? [];
+    this.availableMembers = source.filter((member) => {
+      const status = this.normalizeText(member.status);
+      return status !== 'inactive' && status !== 'suspended';
+    });
+    this.hasMembers = this.availableMembers.length > 0;
+    this.recomputeMemberOptions();
   }
 
-  private isTempRequestId(id: string): boolean {
-    return id.startsWith('tmp_');
+  private applyModalOptions(): void {
+    this.availableDepartments = this.modalDepartments;
+    this.hasDepartments = this.availableDepartments.length > 0;
+
+    this.availableMembers = this.modalMembers.filter((member) => {
+      const status = this.normalizeText(member.status);
+      return status !== 'inactive' && status !== 'suspended';
+    });
+    this.hasMembers = this.availableMembers.length > 0;
+    this.recomputeMemberOptions();
   }
 
-  private syncAssignableMemberRoleOptions(): void {
-    if (!this.canAssignMemberRole) {
-      this.assignableMemberRoleOptions = [{ value: 'member', label: 'Member' }];
-      this.defaultInviteMemberRole = 'member';
+  private recomputeMemberOptions(): void {
+    const search = this.memberSearch.trim().toLowerCase();
+    if (!search) {
+      this.filteredMemberOptions = [...this.availableMembers];
       return;
     }
 
-    if (this.currentMemberRole === 'owner') {
-      this.assignableMemberRoleOptions = [...this.memberRoleOptions];
-    } else if (this.currentMemberRole === 'admin') {
-      this.assignableMemberRoleOptions = this.memberRoleOptions.filter(
-        (option) => option.value === 'manager' || option.value === 'member'
-      );
-    } else {
-      this.assignableMemberRoleOptions = [{ value: 'member', label: 'Member' }];
-    }
-
-    if (!this.assignableMemberRoleOptions.some((option) => option.value === this.defaultInviteMemberRole)) {
-      this.defaultInviteMemberRole = this.assignableMemberRoleOptions[0]?.value ?? 'member';
-    }
+    this.filteredMemberOptions = this.availableMembers.filter((member) => {
+      const label = this.normalizeText(member.label);
+      const email = this.normalizeText(member.email);
+      return label.includes(search) || email.includes(search);
+    });
   }
 
-  private resolveSelectedMemberRole(value: unknown): ManageTeamMemberRole {
-    const normalized = (value ?? '').toString().trim().toLowerCase();
-    const allowed = this.assignableMemberRoleOptions.map((option) => option.value);
-
-    if (
-      (normalized === 'admin' || normalized === 'manager' || normalized === 'member') &&
-      allowed.includes(normalized as ManageTeamMemberRole)
-    ) {
-      return normalized as ManageTeamMemberRole;
-    }
-
-    return this.defaultInviteMemberRole;
+  trackByDepartment(index: number, item: { id: string; name: string }): string {
+    return item.id || String(index);
   }
 
-  private normalizeId(value: unknown): string | null {
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      return trimmed || null;
+  trackByMember(index: number, item: WorkflowMemberOption): string {
+    return item.member_id || String(index);
+  }
+
+  private defaultRequestForm(): NewRequestForm {
+    return {
+      targetType: '',
+      memberId: '',
+      departmentId: '',
+      dueTime: '',
+      customDueAt: ''
+    };
+  }
+
+  private emptyFormErrors(): NewRequestFormErrors {
+    return {
+      targetType: '',
+      memberId: '',
+      departmentId: '',
+      dueTime: '',
+      customDueAt: ''
+    };
+  }
+
+  private validateForm(): NewRequestFormErrors {
+    const errors = this.emptyFormErrors();
+
+    if (!this.requestForm.targetType) {
+      errors.targetType = 'Target type is required.';
     }
-    if (typeof value === 'number' && !Number.isNaN(value)) {
-      return String(value);
+
+    if (this.requestForm.targetType === 'individual' && !this.requestForm.memberId) {
+      errors.memberId = 'Member is required.';
     }
-    if (value && typeof value === 'object') {
-      return this.normalizeId((value as Record<string, unknown>)['id']);
+
+    if (this.requestForm.targetType === 'department' && !this.requestForm.departmentId) {
+      errors.departmentId = 'Department is required.';
     }
+
+    if (!this.requestForm.dueTime) {
+      errors.dueTime = 'Due time is required.';
+    }
+
+    if (this.requestForm.dueTime === 'custom' && !this.requestForm.customDueAt) {
+      errors.customDueAt = 'Custom due date and time is required.';
+    }
+
+    return errors;
+  }
+
+  private hasFormErrors(errors: NewRequestFormErrors): boolean {
+    return Boolean(
+      errors.targetType ||
+      errors.memberId ||
+      errors.departmentId ||
+      errors.dueTime ||
+      errors.customDueAt
+    );
+  }
+
+  private resolveDueAtIso(): string | null {
+    const now = new Date();
+
+    if (this.requestForm.dueTime === 'endOfToday') {
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 0);
+      return endOfDay.toISOString();
+    }
+
+    if (this.requestForm.dueTime === 'in1Hour') {
+      return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+    }
+
+    if (this.requestForm.dueTime === 'in2Hours') {
+      return new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
+    }
+
+    if (this.requestForm.dueTime === 'custom' && this.requestForm.customDueAt) {
+      const timestamp = this.toTimestamp(this.requestForm.customDueAt);
+      if (!timestamp) {
+        return null;
+      }
+      return new Date(timestamp).toISOString();
+    }
+
     return null;
   }
 
-  private describeHttpError(err: any, fallback: string): string {
-    const status = typeof err?.status === 'number' ? err.status : 0;
-    const detail =
-      err?.error?.errors?.[0]?.extensions?.reason ||
-      err?.error?.errors?.[0]?.message ||
-      err?.error?.error ||
-      err?.error?.message ||
-      err?.message ||
-      '';
+  private pushFeedback(type: FeedbackType, text: string): void {
+    this.feedback = { type, text };
 
-    if (status >= 500) return `Server error (${status}): ${detail || fallback}`;
-    if (status >= 400) return `Request error (${status}): ${detail || fallback}`;
-    return detail || fallback;
+    if (this.feedbackTimer) {
+      clearTimeout(this.feedbackTimer);
+      this.feedbackTimer = null;
+    }
+
+    this.feedbackTimer = setTimeout(() => {
+      this.feedback = null;
+    }, 3500);
   }
 
-  private daysUntil(value: string | null): number | null {
-    if (!value) return null;
-    const ts = new Date(value).getTime();
-    if (Number.isNaN(ts)) return null;
-    const remaining = ts - Date.now();
-    if (remaining <= 0) return 0;
-    return Math.ceil(remaining / (24 * 60 * 60 * 1000));
+  private computeHasActiveFilters(): boolean {
+    return Boolean(
+      this.filters.search.trim() ||
+      this.filters.status !== 'all' ||
+      this.filters.department ||
+      this.filters.dateRange !== 'all' ||
+      this.filters.customStart ||
+      this.filters.customEnd ||
+      this.filters.sort !== 'newest'
+    );
+  }
+
+  private ensureSafeLabel(value: string | null | undefined, fallback: string): string {
+    return sanitizeDisplayValue(value, fallback);
+  }
+
+  private normalizeText(value: string | null | undefined): string {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  private toTimestamp(value: string | null | undefined): number {
+    if (!value) {
+      return 0;
+    }
+
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private togglePageScrollLock(locked: boolean): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const body = document.body;
+    body.style.overflow = locked ? 'hidden' : '';
+  }
+
+  private commitViewMutation(update: () => void): void {
+    this.ngZone.run(() => {
+      update();
+      this.cdr.detectChanges();
+    });
   }
 }
-
-type RequestRecord = {
-  id?: unknown;
-  target?: unknown;
-  Target?: unknown;
-  requested_for_user?: unknown;
-  requested_for_email?: string;
-  requested_for_phone?: string;
-  required_state?: string;
-  response_status?: string;
-  timestamp?: string;
-};
-
-type RequestRow = {
-  id: string;
-  target: string;
-  required_state: string;
-  response_status: string;
-  timestamp: string;
-  timestampRaw: string;
-};
-
-type CreateRequestSummary = {
-  successCount: number;
-  failedCount: number;
-  firstError: string;
-  successEmails: string[];
-};
-
-type RoleAssignmentSummary = {
-  successCount: number;
-  failedCount: number;
-  errorMessage: string;
-};
