@@ -4,7 +4,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { of } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AdminTokenService } from '../../services/admin-token';
-import { environment } from 'src/environments/environment';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-audit-logs',
