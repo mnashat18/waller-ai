@@ -1,0 +1,30 @@
+.employee-web-access {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background: radial-gradient(circle at top, #eff6ff 0%, #f8fafc 45%, #e2e8f0 100%);
+}
+
+.employee-web-access__card {
+  width: min(100%, 32rem);
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 2rem;
+  text-align: center;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.employee-web-access__card h1 {
+  margin: 0 0 0.75rem;
+  color: #0f172a;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.employee-web-access__card p {
+  margin: 0;
+  color: #334155;
+  font-size: 1rem;
+}

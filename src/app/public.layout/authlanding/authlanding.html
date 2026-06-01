@@ -1,80 +1,271 @@
-<section class="hero hero-landing reveal">
+<section class="landing-shell reveal">
+  <header class="landing-topbar reveal">
+    <a routerLink="/" class="brand-lockup" aria-label="Wellar AI home">
+      <img class="brand-logo" src="assets/logo/app_icon.png" alt="Wellar app icon" />
+      <span>
+        <strong>Wellar AI</strong>
+        <small>Operational command layer</small>
+      </span>
+    </a>
 
-  <!-- LEFT -->
-  <div class="hero-left reveal">
-    <span class="badge premium-badge">Enterprise Wellness Intelligence</span>
+    <nav class="landing-nav" aria-label="Primary">
+      <a routerLink="/product">Product</a>
+      <a routerLink="/pricing">Pricing</a>
+      <a routerLink="/download-app">Mobile Scan</a>
+      <a routerLink="/contact">Contact</a>
+    </nav>
 
-    <h1 class="hero-title">
-      Operational Health Signals<br />
-      <span>for Every Workforce</span>
-    </h1>
+    <div class="landing-actions">
+      <button type="button" class="link-button" (click)="openAuth('login')">Log in</button>
+      <button type="button" class="landing-cta" (click)="openAuth('signup')">Start free</button>
+    </div>
+  </header>
 
-    <p class="description">
-      Create your account, complete Business setup, then unlock 14 days of Business access to run daily cognitive scans from mobile,
-      monitor risk in real time, and keep teams safe.
-      Built for transport fleets, factories, clinics, and modern enterprises.
-    </p>
+  <div class="hero-grid">
+    <div class="hero-copy reveal">
+      <span class="hero-badge">Enterprise readiness, made to sell</span>
 
-    <div class="actions">
-      <button type="button" class="btn-primary" (click)="openAuth('signup')">Create Account</button>
-      <a routerLink="/pricing" class="btn-ghost">View Plans</a>
+      <h1>
+        Make shift readiness
+        <span>feel enterprise-grade.</span>
+      </h1>
+
+      <p class="hero-lead">
+        Wellar AI gives operations teams a polished command center for pre-shift scans, live risk signals,
+        and company-scoped control. It is built to feel premium, precise, and easy to position.
+      </p>
+
+      <div class="hero-actions">
+        <button type="button" class="landing-cta" (click)="openAuth('signup')">Create account</button>
+        <a routerLink="/contact" class="ghost-cta">Request demo</a>
+      </div>
+
+      <div class="trust-row">
+        <div>
+          <strong>2 min</strong>
+          <span>guided scan</span>
+        </div>
+        <div>
+          <strong>24/7</strong>
+          <span>visibility</span>
+        </div>
+        <div>
+          <strong>Enterprise</strong>
+          <span>governance</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-visual reveal">
+      <div class="visual-stage">
+        <div class="visual-orb visual-orb-a"></div>
+        <div class="visual-orb visual-orb-b"></div>
+        <div class="visual-orb visual-orb-c"></div>
+
+        <div class="visual-stack">
+          <article class="control-card control-card--hero">
+            <div class="control-card__header">
+              <span class="live-pill">Live control</span>
+              <span class="control-meta">Signal latency 38ms</span>
+            </div>
+
+            <div class="control-score">
+              <strong>98.4</strong>
+              <span>Readiness index</span>
+            </div>
+
+            <p id="rotating-text" class="rotating-text"></p>
+          </article>
+
+          <div class="card-row">
+            <article class="metric-card">
+              <span>Today scans</span>
+              <strong>1,284</strong>
+              <em>+18% vs yesterday</em>
+            </article>
+            <article class="metric-card">
+              <span>Alerts resolved</span>
+              <strong>94%</strong>
+              <em>Fast manager action</em>
+            </article>
+          </div>
+
+          <div class="card-row card-row--tight">
+            <article class="metric-card metric-card--wide">
+              <span>Companies active</span>
+              <strong>312</strong>
+              <em>Scope locked to active business</em>
+            </article>
+            <article class="metric-card metric-card--accent">
+              <span>Pre-shift average</span>
+              <strong>2.0 min</strong>
+              <em>Guided completion</em>
+            </article>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- RIGHT -->
-  <div class="hero-right reveal">
+  <section class="proof-strip reveal">
+    <div class="proof-item">
+      <span>2 min scan</span>
+      <strong>Faster onboarding and cleaner demos</strong>
+    </div>
+    <div class="proof-item">
+      <span>24/7 oversight</span>
+      <strong>Operational control that feels premium</strong>
+    </div>
+    <div class="proof-item">
+      <span>Enterprise scope</span>
+      <strong>Company-aware experience with clear governance</strong>
+    </div>
+  </section>
 
-    <!-- ROTATING TEXT -->
-    <h2 id="rotating-text" class="rotating-text"></h2>
-
-    <!-- STATS -->
-    <div class="stat-card reveal">
-      <strong>2 min</strong>
-      <span>Guided mobile scan</span>
+  <section class="feature-section reveal">
+    <div class="section-heading">
+      <p class="eyebrow">Built to impress</p>
+      <h2>Less clutter, more presence.</h2>
+      <p>
+        The product should look like a finished SaaS asset, not a rough starter template. That means clearer
+        hierarchy, stronger spacing, and visual rhythm that feels intentional.
+      </p>
     </div>
 
-    <div class="stat-card reveal">
-      <strong>24/7</strong>
-      <span>Operational monitoring</span>
+    <div class="feature-grid">
+      <article class="feature-card reveal">
+        <span class="feature-index">01</span>
+        <h3>Sharper hierarchy</h3>
+        <p>One primary headline, one supporting line, and one clear primary CTA.</p>
+      </article>
+      <article class="feature-card reveal">
+        <span class="feature-index">02</span>
+        <h3>Visual depth</h3>
+        <p>Layered panels, glow, and subtle motion create a premium command-room feel.</p>
+      </article>
+      <article class="feature-card reveal">
+        <span class="feature-index">03</span>
+        <h3>Sale-ready positioning</h3>
+        <p>The page reads like a product buyers already expect to pay more for.</p>
+      </article>
     </div>
+  </section>
 
-    <div class="stat-card reveal">
-      <strong>Enterprise</strong>
-      <span>Role-based controls</span>
+  <section class="enterprise-section reveal">
+    <div class="enterprise-card reveal">
+      <div>
+        <p class="eyebrow">Enterprise readiness</p>
+        <h2>Security, governance, and a UI that can close larger deals.</h2>
+        <p>
+          The goal is not only to look modern. It is to make the platform feel valuable enough that
+          people expect a higher price before they even read the feature list.
+        </p>
+      </div>
+      <div class="enterprise-actions">
+        <a routerLink="/contact" class="landing-cta">Talk to Wellar</a>
+        <button type="button" class="ghost-cta" (click)="openAuth('signup')">Create trial</button>
+      </div>
     </div>
-
-  </div>
-
+  </section>
 </section>
 
 <div class="auth-modal" *ngIf="showAuthModal">
   <div class="auth-backdrop" (click)="closeAuth()"></div>
   <div class="auth-card">
+    <div class="auth-card__glow auth-card__glow--a"></div>
+    <div class="auth-card__glow auth-card__glow--b"></div>
     <button class="auth-close" (click)="closeAuth()">&times;</button>
 
     <div class="auth-header">
-      <img
-        class="auth-logo-img"
-        src="assets/logo/app_icon.png"
-        alt="Wellar app icon" />
-      <h2 *ngIf="authMode === 'signup'">Create a free account</h2>
-      <h2 *ngIf="authMode === 'login'">Log in to your account</h2>
-      <p>Every new account must complete Business setup before the 14-day Business trial starts.</p>
+      <img class="auth-logo-img" src="assets/logo/app_icon.png" alt="Wellar app icon" />
+      <h2 *ngIf="authMode === 'signup' && !inviteMode">Create a premium workspace</h2>
+      <h2 *ngIf="authMode === 'signup' && inviteMode">Create your account to join your workspace</h2>
+      <h2 *ngIf="authMode === 'login' && !inviteMode">Log in to your control room</h2>
+      <h2 *ngIf="authMode === 'login' && inviteMode">Log in to join your workspace</h2>
+      <p *ngIf="inviteMode">
+        You were invited to join a Wellar AI workspace. Sign in or create an account to continue.
+      </p>
+      <p *ngIf="!inviteMode">Everything stays scoped to the active company so teams get a clean, enterprise-grade flow.</p>
+    </div>
+
+    <div class="auth-mode-tabs" role="tablist" aria-label="Authentication mode">
+      <button
+        type="button"
+        role="tab"
+        [attr.aria-selected]="authMode === 'login'"
+        [class.active]="authMode === 'login'"
+        (click)="switchAuth('login')"
+      >
+        Log in
+      </button>
+      <button
+        type="button"
+        role="tab"
+        [attr.aria-selected]="authMode === 'signup'"
+        [class.active]="authMode === 'signup'"
+        (click)="switchAuth('signup')"
+      >
+        Sign up
+      </button>
     </div>
 
     <form *ngIf="authMode === 'signup'" (ngSubmit)="submitSignup()" class="auth-form">
-      <input class="auth-input" placeholder="First name" [(ngModel)]="signup.firstName" name="firstName" />
-      <input class="auth-input" placeholder="Last name" [(ngModel)]="signup.lastName" name="lastName" />
-      <input class="auth-input" placeholder="Email address" [(ngModel)]="signup.email" name="email" type="email" />
-      <input class="auth-input" placeholder="Password" [(ngModel)]="signup.password" name="password" type="password" />
-      <p class="trial-note">After login, you will be redirected to Business setup to activate your 14-day trial.</p>
-      <button class="auth-primary" type="submit" [disabled]="submitting">Create account</button>
+      <label class="auth-field">
+        <span>First name</span>
+        <input class="auth-input" placeholder="John" [(ngModel)]="signup.firstName" name="firstName" />
+      </label>
+      <label class="auth-field">
+        <span>Last name</span>
+        <input class="auth-input" placeholder="Carter" [(ngModel)]="signup.lastName" name="lastName" />
+      </label>
+      <label class="auth-field">
+        <span>Email address</span>
+        <input class="auth-input" placeholder="you@company.com" [(ngModel)]="signup.email" name="email" type="email" />
+      </label>
+      <label class="auth-field">
+        <span>Password</span>
+        <div class="auth-password-wrap">
+          <input
+            class="auth-input auth-input--password"
+            placeholder="Create strong password"
+            [(ngModel)]="signup.password"
+            name="password"
+            [type]="showSignupPassword ? 'text' : 'password'"
+          />
+          <button type="button" class="password-toggle" (click)="toggleSignupPasswordVisibility()">
+            {{ showSignupPassword ? 'Hide' : 'Show' }}
+          </button>
+        </div>
+      </label>
+      <p class="trial-note">After sign-in, choose the active company workspace and continue to the dashboard.</p>
+      <button class="auth-primary" type="submit" [disabled]="submitting">
+        {{ inviteMode ? 'Create account and join workspace' : 'Create account' }}
+      </button>
     </form>
 
     <form *ngIf="authMode === 'login'" (ngSubmit)="submitLogin()" class="auth-form">
-      <input class="auth-input" placeholder="Email address" [(ngModel)]="login.email" name="loginEmail" type="email" />
-      <input class="auth-input" placeholder="Password" [(ngModel)]="login.password" name="loginPassword" type="password" />
-      <button class="auth-primary" type="submit" [disabled]="submitting">Log in</button>
+      <label class="auth-field">
+        <span>Email address</span>
+        <input class="auth-input" placeholder="you@company.com" [(ngModel)]="login.email" name="loginEmail" type="email" />
+      </label>
+      <label class="auth-field">
+        <span>Password</span>
+        <div class="auth-password-wrap">
+          <input
+            class="auth-input auth-input--password"
+            placeholder="Enter your password"
+            [(ngModel)]="login.password"
+            name="loginPassword"
+            [type]="showLoginPassword ? 'text' : 'password'"
+          />
+          <button type="button" class="password-toggle" (click)="toggleLoginPasswordVisibility()">
+            {{ showLoginPassword ? 'Hide' : 'Show' }}
+          </button>
+        </div>
+      </label>
+      <button class="auth-primary" type="submit" [disabled]="submitting">
+        {{ inviteMode ? 'Log in to join your workspace' : 'Log in' }}
+      </button>
     </form>
 
     <div class="auth-divider">
@@ -101,65 +292,3 @@
     </p>
   </div>
 </div>
-
-<section class="industry-section reveal">
-  <div class="section-title">
-    <p class="eyebrow">Built for every operation</p>
-    <h2>Use cases that scale across industries</h2>
-  </div>
-  <div class="industry-grid">
-    <article class="industry-card reveal">
-      <h3>Transport & Fleets</h3>
-      <p>Daily scan check-ins before each shift with instant manager alerts.</p>
-      <span class="tag">Drivers</span>
-    </article>
-    <article class="industry-card reveal">
-      <h3>Factories & Plants</h3>
-      <p>Monitor fatigue risk, reduce incidents, and keep compliance reports ready.</p>
-      <span class="tag">Industrial</span>
-    </article>
-    <article class="industry-card reveal">
-      <h3>Clinics & Hospitals</h3>
-      <p>Track patient recovery, physician notes, and care-team handoffs.</p>
-      <span class="tag">Healthcare</span>
-    </article>
-  </div>
-</section>
-
-<section class="flow-section reveal">
-  <div class="section-title">
-    <p class="eyebrow">How it works</p>
-    <h2>Mobile scans, web control</h2>
-  </div>
-  <div class="flow-grid">
-    <div class="flow-card reveal">
-      <span class="flow-number">01</span>
-      <h3>Invite the team</h3>
-      <p>Send email or WhatsApp invites with one click from the dashboard.</p>
-    </div>
-    <div class="flow-card reveal">
-      <span class="flow-number">02</span>
-      <h3>Run daily scans</h3>
-      <p>Users complete a guided scan on mobile in under two minutes.</p>
-    </div>
-    <div class="flow-card reveal">
-      <span class="flow-number">03</span>
-      <h3>Act on insights</h3>
-      <p>Managers review reports, track trends, and export compliance logs.</p>
-    </div>
-  </div>
-</section>
-
-<section class="enterprise-section reveal">
-  <div class="enterprise-card reveal">
-    <div>
-      <p class="eyebrow">Enterprise readiness</p>
-      <h2>Security, governance, and control from day one</h2>
-      <p class="muted">
-        Plans are built for teams that need audit trails, secure access, and structured workflows.
-        Activate Admin or Business to unlock requests, team management, and advanced reporting.
-      </p>
-    </div>
-    <a routerLink="/pricing" class="btn-primary">Compare Plans</a>
-  </div>
-</section>

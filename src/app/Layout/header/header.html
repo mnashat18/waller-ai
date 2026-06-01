@@ -1,21 +1,54 @@
 <header class="app-header">
-
-
   <div>
-    <h1 class="text-lg font-semibold text-slate-900 dark:text-white">
-      {{ title }}
-    </h1>
-    <p class="text-sm text-slate-500 hidden md:block">
-      {{ today }}
-    </p>
+    <h1 class="text-lg font-semibold text-slate-900 dark:text-white">{{ title }}</h1>
+    <p class="text-sm text-slate-500 hidden md:block">{{ subtitle }}</p>
   </div>
 
-  <div class="flex items-center gap-4">
+  <div class="flex items-center gap-3">
+    <div class="relative" (click)="stopPropagation($event)">
+      <button
+        type="button"
+        (click)="toggleCompanySwitcher()"
+        class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-sky-700">C</span>
+        <span class="text-left">
+          <span class="block font-medium">{{ activeCompanyLabel }}</span>
+          <span class="block text-xs text-slate-500">{{ activeDepartmentLabel }}</span>
+        </span>
+      </button>
+
+      <div *ngIf="switcherOpen" class="absolute right-0 mt-3 w-72 rounded-3xl border border-slate-200 bg-white p-4 shadow-xl">
+        <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Company Switcher</p>
+        <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p class="text-sm font-medium text-slate-900">{{ activeCompanyLabel }}</p>
+          <p class="mt-1 text-xs text-slate-500">Active role: {{ activeRoleLabel }}</p>
+          <p class="mt-1 text-xs text-slate-500">Active department: {{ activeDepartmentLabel }}</p>
+        </div>
+        <a routerLink="/company" class="mt-3 inline-flex text-sm font-medium text-sky-700">Manage company context</a>
+      </div>
+    </div>
+
     <app-notifications></app-notifications>
 
-    <button (click)="toggleDark()" class="app-theme-toggle">
-      Theme
-    </button>
-  </div>
+    <div class="relative" (click)="stopPropagation($event)">
+      <button
+        type="button"
+        (click)="toggleProfileMenu()"
+        class="inline-flex items-center gap-3 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm">
+        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-white">U</span>
+        <span class="hidden lg:block text-left">
+          <span class="block font-medium">{{ activeRoleLabel }}</span>
+          <span class="block text-xs text-slate-500">Profile menu</span>
+        </span>
+      </button>
 
+      <div *ngIf="profileMenuOpen" class="absolute right-0 mt-3 w-56 rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
+        <a routerLink="/profile" class="block rounded-2xl px-4 py-3 text-sm text-slate-700 hover:bg-slate-50">Profile</a>
+        <a routerLink="/settings" class="block rounded-2xl px-4 py-3 text-sm text-slate-700 hover:bg-slate-50">Settings</a>
+        <button type="button" (click)="logout()" class="block w-full rounded-2xl px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50">
+          Log out
+        </button>
+      </div>
+    </div>
+  </div>
 </header>

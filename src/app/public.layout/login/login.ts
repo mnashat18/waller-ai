@@ -1,36 +1,88 @@
-import { Component } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth';
+import { InviteService } from '../../services/invites';
+import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 
 @Component({
   selector: 'app-login',
-  imports: [FormsModule, RouterModule],
+  imports: [CommonModule, FormsModule, RouterModule],
   standalone: true,
   templateUrl: './login.html',
   styleUrls: ['./login.css']
 })
-export class LoginComponent {
+export class LoginComponent implements OnInit {
   email = '';
   password = '';
   loading = false;
+  inviteMode = false;
+  authNotice = '';
+
+  private pendingInviteToken: string | null = null;
 
   constructor(
     private auth: AuthService,
-    private router: Router
-  ) {}
+    private invites: InviteService,
+    private route: ActivatedRoute,
+    private router: Router,
+    private postLoginRouting: PostLoginRoutingService
+  ) {
+    this.syncInviteContext();
+    this.authNotice = this.auth.consumeAuthNotice() ?? '';
+  }
+
+  ngOnInit(): void {
+    void this.handleInviteEntryRoute();
+  }
+
+  private async handleInviteEntryRoute(): Promise<void> {
+    this.syncInviteContext();
+    const inviteFromQuery = this.hasInviteQueryParams();
+    const inviteToken = this.pendingInviteToken ?? this.invites.getPendingInviteToken();
+    if (inviteFromQuery && inviteToken && !this.auth.isLoggedIn()) {
+      await this.router.navigate(['/'], {
+        queryParams: { invite: '1', token: inviteToken, auth: 'signup' },
+        replaceUrl: true
+      });
+      return;
+    }
+
+    if (inviteToken && this.auth.isLoggedIn()) {
+      await this.router.navigate(['/invites/claim'], {
+        queryParams: { token: inviteToken },
+        replaceUrl: true
+      });
+    }
+  }
 
   login() {
     if (!this.email || !this.password) {
       return;
     }
 
+    this.syncInviteContext();
     this.loading = true;
 
     this.auth.login(this.email, this.password).subscribe({
-      next: () => {
+      next: async () => {
         this.loading = false;
-        this.router.navigateByUrl(this.auth.consumePostAuthRedirect('/dashboard'));
+        try {
+          this.invites.debugFlow('auth success');
+          const inviteToken = this.pendingInviteToken ?? this.invites.getPendingInviteToken();
+          if (inviteToken) {
+            await this.router.navigate(['/invites/claim'], {
+              queryParams: { token: inviteToken },
+              replaceUrl: true
+            });
+            return;
+          }
+          const nextRoute = await this.postLoginRouting.resolveDestination();
+          await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
+        } catch {
+          this.authNotice = 'Unable to continue after login. Please try again.';
+        }
       },
       error: (err) => {
         this.loading = false;
@@ -46,6 +98,51 @@ export class LoginComponent {
   }
 
   continueWithGoogle() {
+    this.syncInviteContext();
+    if (this.pendingInviteToken) {
+      this.invites.setPendingInviteToken(this.pendingInviteToken);
+      this.auth.setPostAuthRedirect(
+        `/invites/claim?token=${encodeURIComponent(this.pendingInviteToken)}`
+      );
+    }
     this.auth.loginWithGoogle();
+  }
+
+  private syncInviteContext(): void {
+    const queryToken = this.readInviteTokenFromQuery();
+    if (queryToken) {
+      this.pendingInviteToken = queryToken;
+      this.invites.setPendingInviteToken(queryToken);
+    } else {
+      this.pendingInviteToken = this.invites.getPendingInviteToken();
+    }
+
+    if (this.pendingInviteToken) {
+      this.auth.setPostAuthRedirect(
+        `/invites/claim?token=${encodeURIComponent(this.pendingInviteToken)}`
+      );
+    }
+
+    const inviteFlag = this.route.snapshot.queryParamMap.get('invite') === '1';
+    this.inviteMode = inviteFlag || Boolean(this.pendingInviteToken);
+  }
+
+  private readInviteTokenFromQuery(): string | null {
+    const tokenParam =
+      this.route.snapshot.queryParamMap.get('token') ??
+      this.route.snapshot.queryParamMap.get('code');
+    const inviteParam = this.route.snapshot.queryParamMap.get('invite');
+    const inviteToken = inviteParam && inviteParam !== '1' ? inviteParam : null;
+    const normalized = (tokenParam ?? inviteToken ?? '').trim();
+    return normalized || null;
+  }
+
+  private hasInviteQueryParams(): boolean {
+    const query = this.route.snapshot.queryParamMap;
+    return (
+      query.has('invite') ||
+      query.has('token') ||
+      query.has('code')
+    );
   }
 }

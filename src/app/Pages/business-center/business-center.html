@@ -9,10 +9,9 @@
     </div>
 
     <div class="hero-actions">
-      <span class="chip">{{ accessBadgeLabel() }}</span>
       <span class="chip">{{ roleBadgeLabel() }}</span>
       <span class="chip" *ngIf="trialBadgeLabel()">{{ trialBadgeLabel() }}</span>
-      <a routerLink="/pricing" class="chip">Compare Plans</a>
+      <a routerLink="/app/workspace/request" class="chip">Request Workspace</a>
     </div>
   </div>
 
@@ -40,20 +39,19 @@
   <div *ngIf="!loadingAccess && !missingBusinessProfile && !hasBusinessAccess" class="panel">
     <div class="panel-header">
       <h3 class="panel-title">Business Paid Access Required</h3>
-      <span class="chip">Upgrade</span>
+    <span class="chip">Workspace</span>
     </div>
     <p class="text-slate-300">
       {{ accessReason || 'Your account is not on active paid Business yet.' }}
     </p>
     <div class="mt-4 flex flex-wrap gap-3">
       <button
-        *ngIf="canUpgrade"
+      *ngIf="false"
         class="btn-primary px-5 py-2 rounded-full"
         [disabled]="upgradeSubmitting"
         (click)="submitUpgradeRequest()">
-        {{ upgradeSubmitting ? 'Submitting...' : 'Request Business Upgrade' }}
-      </button>
-      <a routerLink="/payment" class="chip">Open Billing</a>
+      {{ upgradeSubmitting ? 'Submitting...' : 'Request Business Upgrade' }}
+    </button>
       <a routerLink="/dashboard" class="chip">Back to Dashboard</a>
     </div>
   </div>
@@ -73,15 +71,13 @@
       <section class="panel">
         <div class="panel-header">
           <h3 class="panel-title">1) Business Profile Summary</h3>
-          <span class="chip">{{ safeProfile('billing_status') || '-' }}</span>
+    <span class="chip">{{ safeProfile('is_active') ? 'Active' : 'Needs review' }}</span>
         </div>
 
         <div class="summary-grid">
           <div><strong>ID</strong><br />{{ safeProfile('id') || '-' }}</div>
           <div><strong>Owner User</strong><br />{{ safeProfile('owner_user') || '-' }}</div>
-          <div><strong>Source Request</strong><br />{{ safeProfile('source_request') || '-' }}</div>
           <div><strong>Company</strong><br />{{ safeProfile('company_name') || '-' }}</div>
-          <div><strong>Business Name</strong><br />{{ safeProfile('business_name') || '-' }}</div>
           <div><strong>Contact Name</strong><br />{{ safeProfile('contact_name') || '-' }}</div>
           <div><strong>Work Email</strong><br />{{ safeProfile('work_email') || '-' }}</div>
           <div><strong>Phone</strong><br />{{ safeProfile('phone') || '-' }}</div>
@@ -89,10 +85,9 @@
           <div><strong>Team Size</strong><br />{{ safeProfile('team_size') || '-' }}</div>
           <div><strong>Country</strong><br />{{ safeProfile('country') || '-' }}</div>
           <div><strong>City</strong><br />{{ safeProfile('city') || '-' }}</div>
-          <div><strong>Address</strong><br />{{ safeProfile('address') || '-' }}</div>
           <div><strong>Website</strong><br />{{ safeProfile('website') || '-' }}</div>
-          <div><strong>Plan Code</strong><br />{{ safeProfile('plan_code') || '-' }}</div>
-          <div><strong>Billing Status</strong><br />{{ safeProfile('billing_status') || '-' }}</div>
+      <div><strong>Company Profile</strong><br />{{ safeProfile('id') || '-' }}</div>
+      <div><strong>Workspace Status</strong><br />{{ safeProfile('is_active') ? 'Active' : 'Inactive' }}</div>
           <div><strong>Is Active</strong><br />{{ formatBoolean(safeProfile('is_active')) }}</div>
           <div><strong>Trial Start</strong><br />{{ formatDate(safeProfile('trial_started_at')) }}</div>
           <div><strong>Trial Expires</strong><br />{{ formatDate(safeProfile('trial_expires_at')) }}</div>
@@ -200,7 +195,7 @@
 
         <ng-container *ngIf="canCreateRequestsFromCenter(); else inviteReadonlyState">
           <div class="request-limit-hint mt-5">
-            Business plan: you can send up to {{ dailyRequestLimit }} requests per day.
+      Your active company workspace can send up to {{ dailyRequestLimit }} requests per day.
             <strong>Used today: {{ todayRequestCount }}</strong>
             <strong class="ml-2">Remaining today: {{ dailyRequestsRemaining() }}</strong>
           </div>
@@ -288,7 +283,7 @@
                 <td>{{ req?.recipient_industry || '-' }}</td>
                 <td>{{ req?.required_state || '-' }}</td>
                 <td>{{ requestStatusLabel(req?.response_status) }}</td>
-                <td>{{ formatDate(req?.timestamp) }}</td>
+                <td>{{ formatDate(req?.requested_at) }}</td>
               </tr>
 
               <tr *ngIf="!requests.length">
@@ -412,7 +407,7 @@
         <div class="panel-header">
           <h3 class="panel-title">5) Activity Log</h3>
           <span class="chip">{{ filteredActivityEvents.length }} events</span>
-          <span class="chip">{{ hasOrgScope() ? 'Scope: org' : 'Scope: team/audit' }}</span>
+      <span class="chip">{{ hasOrgScope() ? 'Scope: company' : 'Scope: active team' }}</span>
           <span class="chip" *ngIf="filteredActivityEvents.length !== activityEvents.length">
             total: {{ activityEvents.length }}
           </span>

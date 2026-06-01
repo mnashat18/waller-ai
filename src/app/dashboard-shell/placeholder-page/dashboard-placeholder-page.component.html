@@ -1,0 +1,52 @@
+<div class="space-y-6">
+  <ng-container *ngIf="state$ | async as state">
+    <app-page-header
+      eyebrow="Phase 1 Placeholder"
+      [title]="page.title"
+      [description]="page.description"
+      [breadcrumbs]="breadcrumbs">
+      <div pageActions>
+        <app-role-badge [role]="state.context.activeMemberRole"></app-role-badge>
+      </div>
+    </app-page-header>
+
+    <app-loading-state
+      *ngIf="state.loading"
+      title="Loading company context"
+      description="Resolving active business profile, department scope, and role access for this page.">
+    </app-loading-state>
+
+    <app-error-state
+      *ngIf="!state.loading && state.error"
+      title="Company context could not be resolved"
+      [message]="state.error"
+      (retry)="retry()">
+    </app-error-state>
+
+    <div class="grid gap-4 xl:grid-cols-3">
+      <app-company-context-chip
+        label="Role Scope Summary"
+        [value]="roleScopeSummary(state.context.activeMemberRole, state.context.activeDepartmentName, state.context.activeDepartmentId)"
+        detail="Guard behavior is based on active_member_role and active_department.">
+      </app-company-context-chip>
+
+      <app-company-context-chip
+        label="Current Company Context"
+        [value]="state.context.activeBusinessProfileName || state.context.activeBusinessProfileId"
+        [detail]="companyScopeSummary(state.context.activeBusinessProfileName, state.context.activeBusinessProfileId)">
+      </app-company-context-chip>
+
+      <app-company-context-chip
+        label="Current Department Context"
+        [value]="state.context.activeDepartmentName || state.context.activeDepartmentId"
+        [detail]="state.context.activeDepartmentId ? 'Manager routes remain department-scoped.' : 'No department override is active.'"
+        fallback="Company-wide">
+      </app-company-context-chip>
+    </div>
+
+    <app-empty-state
+      title="Implementation pending"
+      [message]="'The ' + page.title + ' page is routed, guarded, and attached to the shared shell. Detailed widgets and business tables will be built in the next execution phases.'">
+    </app-empty-state>
+  </ng-container>
+</div>

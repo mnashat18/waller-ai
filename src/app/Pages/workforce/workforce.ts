@@ -1,0 +1,1198 @@
+import { CommonModule } from '@angular/common';
+import { ChangeDetectorRef, Component, HostListener, OnDestroy, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { finalize, take } from 'rxjs/operators';
+
+import { CompanyContextService } from '../../core/context/company-context.service';
+import { type ActiveMemberRole } from '../../ia/wellar-ia';
+import { AuthService } from '../../services/auth';
+import {
+  OperationsAdminService,
+  type CreateInviteInput,
+  type WorkforceRosterPageData,
+  type WorkforceRosterRow,
+  type WorkforceScanRequestRow,
+  type WorkforceScanStatus,
+  type WorkforceSummary
+} from '../../services/operations-admin.service';
+import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
+import { DashboardSectionComponent } from '../../shared/ui/dashboard-section/dashboard-section.component';
+import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
+
+type ViewState = 'loading' | 'ready' | 'empty' | 'error';
+type FeedbackType = 'success' | 'error' | 'info';
+
+type FeedbackMessage = {
+  type: FeedbackType;
+  text: string;
+};
+
+type WorkforceFilters = {
+  search: string;
+  role: string;
+  department: string;
+  status: string;
+  todayScan: string;
+};
+
+type InviteForm = {
+  email: string;
+  role: string;
+  department: string;
+  note: string;
+};
+
+type StatusFilterOption = {
+  value: string;
+  label: string;
+};
+
+type DestructiveAction = {
+  kind: 'remove_member' | 'cancel_invite';
+  row: WorkforceRosterRow;
+  title: string;
+  description: string;
+  confirmLabel: string;
+};
+
+@Component({
+  selector: 'app-workforce-page',
+  standalone: true,
+  imports: [
+    CommonModule,
+    FormsModule,
+    RouterModule,
+    DashboardSectionComponent,
+    KpiCardComponent,
+    CardSkeletonLoaderComponent
+  ],
+  templateUrl: './workforce.html',
+  styleUrls: ['./workforce.css']
+})
+export class WorkforcePageComponent implements OnInit, OnDestroy {
+  viewState: ViewState = 'loading';
+  feedback: FeedbackMessage | null = null;
+  errorMessage = '';
+  errorDetails = '';
+  relationWarning: string | null = null;
+
+  pageData: WorkforceRosterPageData | null = null;
+  summary: WorkforceSummary = {
+    activeMembers: 0,
+    scanEligible: 0,
+    scanRequested: 0,
+    scannedToday: 0,
+    missingScans: 0,
+    pendingInvites: 0,
+    ownerCount: 0,
+    hrCount: 0,
+    managerCount: 0,
+    employeeCount: 0,
+    needsReviewCount: 0
+  };
+
+  filters: WorkforceFilters = {
+    search: '',
+    role: '',
+    department: '',
+    status: 'all',
+    todayScan: 'all'
+  };
+
+  readonly statusFilterOptions: StatusFilterOption[] = [
+    { value: 'all', label: 'All rows' },
+    { value: 'active_member', label: 'Active Members' },
+    { value: 'pending_invite', label: 'Pending Invites' }
+  ];
+
+  readonly todayScanFilterOptions: StatusFilterOption[] = [
+    { value: 'all', label: 'All scan states' },
+    { value: 'eligible', label: 'Scan Eligible' },
+    { value: 'requested', label: 'Scan Requested' },
+    { value: 'none_assigned', label: 'No Scan Assigned' }
+  ];
+
+  showInviteModal = false;
+  savingInvite = false;
+  inviteFormError = '';
+  inviteForm: InviteForm = this.defaultInviteForm();
+
+  selectedMember: WorkforceRosterRow | null = null;
+  showDetailsModal = false;
+
+  showRoleModal = false;
+  roleModalMember: WorkforceRosterRow | null = null;
+  roleModalValue = 'employee';
+  savingRole = false;
+
+  showDepartmentModal = false;
+  departmentModalMember: WorkforceRosterRow | null = null;
+  departmentModalValue = '';
+  savingDepartment = false;
+
+  showDestructiveModal = false;
+  destructiveAction: DestructiveAction | null = null;
+  destructiveLoading = false;
+
+  private requestInFlight = false;
+  private blockedByForbidden = false;
+  private readonly expandedKeys = new Set<string>();
+  private pendingMemberFromQuery: string | null = null;
+
+  constructor(
+    private operationsAdmin: OperationsAdminService,
+    private companyContext: CompanyContextService,
+    private auth: AuthService,
+    private router: Router,
+    private route: ActivatedRoute,
+    private cdr: ChangeDetectorRef
+  ) {}
+
+  ngOnInit(): void {
+    this.loadPage();
+
+    this.route.queryParamMap.subscribe((params) => {
+      const memberId = params.get('member')?.trim() ?? '';
+      if (!memberId) {
+        this.pendingMemberFromQuery = null;
+        return;
+      }
+      this.pendingMemberFromQuery = memberId;
+      if (!this.pageData) {
+        return;
+      }
+
+      const match = this.pageData.memberRows.find(
+        (row) => row.member_id === memberId || row.user_id === memberId
+      );
+      if (match) {
+        this.openMemberView(match);
+        return;
+      }
+      this.pendingMemberFromQuery = null;
+      this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { member: null },
+        queryParamsHandling: 'merge'
+      });
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.setBodyScrollLocked(false);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (this.showDetailsModal) {
+      this.closeMemberView();
+    }
+  }
+
+  get canInviteMember(): boolean {
+    return this.currentRole === 'owner' || this.currentRole === 'hr';
+  }
+
+  get currentRole(): ActiveMemberRole | null {
+    return this.companyContext.snapshot().context.activeMemberRole;
+  }
+
+  get departmentOptions(): Array<{ id: string; name: string }> {
+    return this.pageData?.departments ?? [];
+  }
+
+  get hasDepartments(): boolean {
+    return this.departmentOptions.length > 0;
+  }
+
+  get roleOptions(): string[] {
+    const rows = this.pageData?.rows ?? [];
+    return Array.from(new Set(rows.map((row) => row.member_role).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b)
+    );
+  }
+
+  get filteredRows(): WorkforceRosterRow[] {
+    const rows = this.pageData?.rows ?? [];
+    const search = this.filters.search.trim().toLowerCase();
+    const roleFilter = this.normalizeRoleForUi(this.filters.role);
+
+    return rows.filter((row) => {
+      const matchesSearch =
+        !search ||
+        (row.name ?? '').toLowerCase().includes(search) ||
+        (row.email ?? '').toLowerCase().includes(search) ||
+        (row.department_name ?? '').toLowerCase().includes(search);
+
+      const matchesRole =
+        !roleFilter || this.normalizeRoleForUi(row.member_role) === roleFilter;
+
+      const matchesDepartment =
+        !this.filters.department || row.department_id === this.filters.department;
+
+      const matchesStatus = this.matchesStatusFilter(row, this.filters.status);
+      const matchesScan = this.matchesScanFilter(row, this.filters.todayScan);
+
+      return (
+        matchesSearch &&
+        matchesRole &&
+        matchesDepartment &&
+        matchesStatus &&
+        matchesScan
+      );
+    });
+  }
+
+  get filteredMemberRows(): WorkforceRosterRow[] {
+    return this.filteredRows.filter((row) => row.type === 'member');
+  }
+
+  get filteredInviteRows(): WorkforceRosterRow[] {
+    return this.filteredRows.filter(
+      (row) => row.type === 'invite' && ['pending', 'sent'].includes(this.normalizeStatus(row.status))
+    );
+  }
+
+  get needsReviewRows(): WorkforceRosterRow[] {
+    return [];
+  }
+
+  get resultCountLabel(): string {
+    const total = this.pageData?.rows.length ?? 0;
+    const visible = this.filteredRows.length;
+    return `${visible} of ${total} shown`;
+  }
+
+  get openScanRequestRows(): WorkforceScanRequestRow[] {
+    const rows = this.pageData?.scanRequestRows ?? [];
+    return rows.filter((row) => !row.cancelled && !this.isClosedRequestStatus(row.status)).slice(0, 5);
+  }
+
+  get hasOpenScanRequests(): boolean {
+    return this.openScanRequestRows.length > 0;
+  }
+
+  refresh(): void {
+    this.blockedByForbidden = false;
+    this.loadPage(true);
+  }
+
+  clearFilters(): void {
+    this.filters = {
+      search: '',
+      role: '',
+      department: '',
+      status: 'all',
+      todayScan: 'all'
+    };
+  }
+
+  toggleExpanded(row: WorkforceRosterRow): void {
+    if (!row.key) {
+      return;
+    }
+    if (this.expandedKeys.has(row.key)) {
+      this.expandedKeys.delete(row.key);
+      return;
+    }
+    this.expandedKeys.add(row.key);
+  }
+
+  isExpanded(row: WorkforceRosterRow): boolean {
+    return !!row.key && this.expandedKeys.has(row.key);
+  }
+
+  openInviteModal(): void {
+    if (!this.canInviteMember) {
+      return;
+    }
+
+    this.inviteForm = this.defaultInviteForm();
+    this.inviteFormError = '';
+    this.showInviteModal = true;
+  }
+
+  closeInviteModal(): void {
+    this.showInviteModal = false;
+    this.inviteFormError = '';
+  }
+
+  sendInvite(): void {
+    if (!this.canInviteMember || this.savingInvite) {
+      return;
+    }
+
+    const email = this.toNullable(this.inviteForm.email);
+    if (!email) {
+      this.inviteFormError = 'Email is required.';
+      return;
+    }
+
+    const payload: CreateInviteInput = {
+      email,
+      member_role: this.normalizeRoleForUi(this.inviteForm.role || 'employee'),
+      department: this.toNullable(this.inviteForm.department),
+      invite_type: 'member_onboarding',
+      note: this.toNullable(this.inviteForm.note)
+    };
+
+    this.savingInvite = true;
+    this.inviteFormError = '';
+
+    this.operationsAdmin.createInvite(payload).pipe(
+      finalize(() => {
+        this.savingInvite = false;
+      })
+    ).subscribe({
+      next: () => {
+        this.showInviteModal = false;
+        this.pushFeedback('success', 'Invite sent successfully.');
+        this.loadPage();
+      },
+      error: (error) => {
+        this.inviteFormError = this.toFriendlyError(error, 'Failed to send invite.');
+      }
+    });
+  }
+
+  openMemberView(row: WorkforceRosterRow): void {
+    this.selectedMember = row;
+    this.showDetailsModal = true;
+    this.setBodyScrollLocked(true);
+
+    if (row.member_id) {
+      this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { member: row.member_id },
+        queryParamsHandling: 'merge'
+      });
+    }
+  }
+
+  closeMemberView(): void {
+    this.selectedMember = null;
+    this.showDetailsModal = false;
+    this.setBodyScrollLocked(false);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { member: null },
+      queryParamsHandling: 'merge'
+    });
+  }
+
+  canSendScanRequest(row: WorkforceRosterRow): boolean {
+    if (row.type !== 'member') {
+      return false;
+    }
+    const role = this.currentRole;
+    return (
+      (role === 'owner' || role === 'hr' || role === 'manager') &&
+      this.normalizeStatus(row.status) === 'active'
+    );
+  }
+
+  sendScanRequest(row: WorkforceRosterRow): void {
+    const memberRef = row.member_id ?? row.user_id;
+    if (memberRef) {
+      this.router.navigate(['/app/scan-requests'], {
+        queryParams: { member: memberRef }
+      });
+      return;
+    }
+
+    this.router.navigate(['/app/scan-requests']);
+  }
+
+  canEditRole(row: WorkforceRosterRow | null): boolean {
+    if (!row || row.type !== 'member' || !row.member_id) {
+      return false;
+    }
+
+    return this.currentRole === 'owner' || this.currentRole === 'hr';
+  }
+
+  openRoleModal(row: WorkforceRosterRow): void {
+    if (!this.canEditRole(row)) {
+      return;
+    }
+
+    this.roleModalMember = row;
+    this.roleModalValue = this.normalizeRoleForUi(row.member_role || 'employee') || 'employee';
+    this.showRoleModal = true;
+  }
+
+  closeRoleModal(): void {
+    this.showRoleModal = false;
+    this.roleModalMember = null;
+  }
+
+  roleEditOptions(member: WorkforceRosterRow | null): string[] {
+    if (!member) {
+      return ['employee'];
+    }
+
+    const currentRole = this.currentRole;
+    if (currentRole === 'owner') {
+      return ['owner', 'hr', 'manager', 'employee'];
+    }
+
+    if (currentRole === 'hr') {
+      return ['hr', 'manager', 'employee'];
+    }
+
+    return ['employee'];
+  }
+
+  saveRole(): void {
+    const member = this.roleModalMember;
+    if (!member?.member_id || !this.canEditRole(member) || this.savingRole) {
+      return;
+    }
+
+    this.savingRole = true;
+    const role = this.normalizeRoleForUi(this.roleModalValue);
+
+    this.operationsAdmin.updateMember(member.member_id, { member_role: role }).pipe(
+      finalize(() => {
+        this.savingRole = false;
+      })
+    ).subscribe({
+      next: () => {
+        this.closeRoleModal();
+        this.pushFeedback('success', 'Member role updated.');
+        this.loadPage();
+      },
+      error: (error) => {
+        this.pushFeedback('error', this.toFriendlyError(error, 'Failed to update role.'));
+      }
+    });
+  }
+
+  canAssignDepartment(row: WorkforceRosterRow | null): boolean {
+    if (!row || row.type !== 'member' || !row.member_id) {
+      return false;
+    }
+    return this.currentRole === 'owner' || this.currentRole === 'hr';
+  }
+
+  openDepartmentModal(row: WorkforceRosterRow): void {
+    if (!this.canAssignDepartment(row)) {
+      return;
+    }
+
+    this.departmentModalMember = row;
+    this.departmentModalValue = row.department_id ?? '';
+    this.showDepartmentModal = true;
+  }
+
+  closeDepartmentModal(): void {
+    this.showDepartmentModal = false;
+    this.departmentModalMember = null;
+  }
+
+  saveDepartment(): void {
+    const member = this.departmentModalMember;
+    if (!member?.member_id || !this.canAssignDepartment(member) || this.savingDepartment) {
+      return;
+    }
+
+    this.savingDepartment = true;
+
+    this.operationsAdmin.updateMember(member.member_id, {
+      department: this.toNullable(this.departmentModalValue)
+    }).pipe(
+      finalize(() => {
+        this.savingDepartment = false;
+      })
+    ).subscribe({
+      next: () => {
+        this.closeDepartmentModal();
+        this.pushFeedback('success', 'Department updated.');
+        this.loadPage();
+      },
+      error: (error) => {
+        this.pushFeedback('error', this.toFriendlyError(error, 'Failed to update department.'));
+      }
+    });
+  }
+
+  canDeactivate(row: WorkforceRosterRow | null): boolean {
+    if (!row || row.type !== 'member' || !row.member_id) {
+      return false;
+    }
+    return this.currentRole === 'owner' || this.currentRole === 'hr';
+  }
+
+  requestDeactivate(row: WorkforceRosterRow): void {
+    if (!this.canDeactivate(row)) {
+      return;
+    }
+
+    const label = row.name || row.email || 'this member';
+    this.destructiveAction = {
+      kind: 'remove_member',
+      row,
+      title: 'Remove Member',
+      description: `Deactivate ${label} from active workforce?`,
+      confirmLabel: 'Remove Member'
+    };
+    this.showDestructiveModal = true;
+  }
+
+  canResendInvite(row: WorkforceRosterRow): boolean {
+    return row.type === 'invite' && Boolean(row.invite_id);
+  }
+
+  resendInvite(row: WorkforceRosterRow): void {
+    if (!row.invite_id) {
+      return;
+    }
+
+    this.operationsAdmin.resendInvite(row.invite_id).subscribe({
+      next: () => {
+        this.pushFeedback('success', 'Invite resent.');
+        this.loadPage();
+      },
+      error: (error) => {
+        this.pushFeedback('error', this.toFriendlyError(error, 'Failed to resend invite.'));
+      }
+    });
+  }
+
+  copyInviteLink(row: WorkforceRosterRow): void {
+    const token = row.invite_token?.trim();
+    if (!token || typeof window === 'undefined') {
+      this.pushFeedback('error', 'Invite link is unavailable for this row.');
+      return;
+    }
+
+    const inviteLink = `${window.location.origin}/invites/claim?token=${encodeURIComponent(token)}`;
+
+    const fallback = () => {
+      try {
+        window.prompt('Copy invite link', inviteLink);
+      } catch {
+        // no-op
+      }
+    };
+
+    if (!navigator?.clipboard?.writeText) {
+      fallback();
+      this.pushFeedback('info', 'Invite link ready to copy.');
+      return;
+    }
+
+    navigator.clipboard.writeText(inviteLink)
+      .then(() => {
+        this.pushFeedback('success', 'Invite link copied.');
+      })
+      .catch(() => {
+        fallback();
+        this.pushFeedback('info', 'Invite link ready to copy.');
+      });
+  }
+
+  requestCancelInvite(row: WorkforceRosterRow): void {
+    if (!row.invite_id) {
+      return;
+    }
+
+    const label = row.email || row.name || 'this invite';
+    this.destructiveAction = {
+      kind: 'cancel_invite',
+      row,
+      title: 'Cancel Invite',
+      description: `Cancel pending invite for ${label}?`,
+      confirmLabel: 'Cancel Invite'
+    };
+    this.showDestructiveModal = true;
+  }
+
+  canRevokeInvite(row: WorkforceRosterRow): boolean {
+    return row.type === 'invite' && Boolean(row.invite_id) && this.canInviteMember;
+  }
+
+  openInScanRequests(request: WorkforceScanRequestRow): void {
+    this.router.navigate(['/app/scan-requests'], {
+      queryParams: { request: request.id || null }
+    });
+  }
+
+  closeDestructiveModal(): void {
+    if (this.destructiveLoading) {
+      return;
+    }
+    this.showDestructiveModal = false;
+    this.destructiveAction = null;
+  }
+
+  confirmDestructiveAction(): void {
+    if (!this.destructiveAction || this.destructiveLoading) {
+      return;
+    }
+
+    this.destructiveLoading = true;
+    const action = this.destructiveAction;
+
+    if (action.kind === 'remove_member') {
+      const memberId = action.row.member_id;
+      if (!memberId) {
+        this.destructiveLoading = false;
+        this.closeDestructiveModal();
+        return;
+      }
+
+      this.operationsAdmin.deactivateMember(memberId).pipe(
+        finalize(() => {
+          this.destructiveLoading = false;
+        })
+      ).subscribe({
+        next: () => {
+          this.closeDestructiveModal();
+          this.pushFeedback('success', 'Member removed from active roster.');
+          this.loadPage();
+        },
+        error: (error) => {
+          this.pushFeedback('error', this.toFriendlyError(error, 'Failed to deactivate member.'));
+        }
+      });
+      return;
+    }
+
+    const inviteId = action.row.invite_id;
+    if (!inviteId) {
+      this.destructiveLoading = false;
+      this.closeDestructiveModal();
+      return;
+    }
+
+    this.operationsAdmin.revokeInvite(inviteId).pipe(
+      finalize(() => {
+        this.destructiveLoading = false;
+      })
+    ).subscribe({
+      next: () => {
+        this.closeDestructiveModal();
+        this.pushFeedback('success', 'Invite cancelled.');
+        this.loadPage();
+      },
+      error: (error) => {
+        this.pushFeedback('error', this.toFriendlyError(error, 'Failed to cancel invite.'));
+      }
+    });
+  }
+
+  roleLabel(value: string | null | undefined): string {
+    const normalized = this.normalizeRoleForUi(value);
+    if (normalized === 'owner') return 'OWNER';
+    if (normalized === 'hr') return 'HR';
+    if (normalized === 'manager') return 'MANAGER';
+    if (normalized === 'employee') return 'EMPLOYEE';
+    return value?.trim() || 'Unknown';
+  }
+
+  statusLabel(value: string | null | undefined): string {
+    const normalized = this.normalizeStatus(value);
+    if (normalized === 'active') return 'Active';
+    if (normalized === 'inactive') return 'Inactive';
+    if (normalized === 'pending') return 'Pending';
+    if (normalized === 'cancelled') return 'Cancelled';
+    if (normalized === 'revoked') return 'Revoked';
+    if (normalized === 'expired') return 'Expired';
+    if (normalized === 'accepted') return 'Accepted';
+    return value?.trim() || 'Unknown';
+  }
+
+  rowBadgeLabel(row: WorkforceRosterRow): string {
+    if (row.type === 'invite') {
+      if (row.claimed_at || this.normalizeStatus(row.status) === 'accepted') {
+        return 'Invite Claimed';
+      }
+      if (this.isInviteExpired(row)) {
+        return 'Invite Expired';
+      }
+      return 'Pending Invite';
+    }
+
+    if (this.normalizeStatus(row.status) === 'active') {
+      return 'Active Member';
+    }
+
+    return `${this.statusLabel(row.status)} Member`;
+  }
+
+  rowBadgeClass(row: WorkforceRosterRow): string {
+    if (row.type === 'invite') {
+      if (row.claimed_at || this.normalizeStatus(row.status) === 'accepted') {
+        return 'workforce-badge workforce-badge--claimed';
+      }
+      if (this.isInviteExpired(row)) {
+        return 'workforce-badge workforce-badge--expired';
+      }
+      return 'workforce-badge workforce-badge--pending';
+    }
+
+    if (this.normalizeStatus(row.status) === 'active') {
+      return 'workforce-badge workforce-badge--active';
+    }
+
+    return 'workforce-badge workforce-badge--inactive';
+  }
+
+  scanBadgeLabel(row: WorkforceRosterRow): string {
+    if (row.scan_status === 'completed') return 'Scan Completed';
+    if (row.scan_status === 'requested') return 'Scan Requested';
+    if (row.scan_status === 'missing') return 'Missing Scan';
+    if (row.scan_status === 'none_assigned') return 'No Scan Assigned';
+    return 'No Scan Assigned';
+  }
+
+  scanBadgeClass(row: WorkforceRosterRow): string {
+    if (row.scan_status === 'completed') return 'workforce-badge workforce-badge--scan-completed';
+    if (row.scan_status === 'requested') return 'workforce-badge workforce-badge--scan-requested';
+    if (row.scan_status === 'missing') return 'workforce-badge workforce-badge--scan-missing';
+    return 'workforce-badge workforce-badge--neutral';
+  }
+
+  presenceBadgeClass(row: WorkforceRosterRow): string {
+    if (row.presence_status === 'online') return 'workforce-badge workforce-badge--online';
+    if (row.presence_status === 'idle') return 'workforce-badge workforce-badge--idle';
+    if (row.presence_status === 'offline') return 'workforce-badge workforce-badge--offline';
+    return 'workforce-badge workforce-badge--neutral';
+  }
+
+  readinessLabel(row: WorkforceRosterRow): string {
+    if (row.scan_status !== 'completed') {
+      return 'No scan data';
+    }
+
+    return row.readiness_label || 'No scan data';
+  }
+
+  isScanEligible(row: WorkforceRosterRow): boolean {
+    if (row.type !== 'member') {
+      return false;
+    }
+    return this.normalizeStatus(row.status) === 'active' && this.normalizeRoleForUi(row.member_role) === 'employee';
+  }
+
+  lastScanLabel(row: WorkforceRosterRow): string {
+    const timestamp = row.last_scan_at;
+    if (!timestamp) {
+      return 'No scan data';
+    }
+
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+      return 'No scan data';
+    }
+
+    if (this.isSameDay(date, new Date())) {
+      return `Today ${this.formatTime(date)}`;
+    }
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (this.isSameDay(date, yesterday)) {
+      return 'Yesterday';
+    }
+
+    return this.formatShortDateTime(date);
+  }
+
+  memberName(row: WorkforceRosterRow): string {
+    return row.name || row.email || 'Member';
+  }
+
+  memberEmail(row: WorkforceRosterRow): string {
+    if (row.email) {
+      return row.email;
+    }
+    return 'Email unavailable';
+  }
+
+  inviteContact(row: WorkforceRosterRow): string {
+    return row.email || row.invite_phone || 'Invite contact unavailable';
+  }
+
+  detailsTitle(row: WorkforceRosterRow | null): string {
+    if (!row) return 'Details';
+    return row.type === 'invite' ? 'Invite Details' : 'Member Details';
+  }
+
+  maskInviteToken(token: string | null | undefined): string {
+    const clean = (token ?? '').trim();
+    if (!clean) return '-';
+    return `${clean.slice(0, 4)}-****`;
+  }
+
+  memberInitials(row: WorkforceRosterRow): string {
+    const label = this.memberName(row);
+    const parts = label.split(/\s+/).filter(Boolean);
+    const initials = parts.slice(0, 2).map((part) => part.charAt(0));
+    return initials.join('').toUpperCase() || 'W';
+  }
+
+  trackByMember(index: number, row: WorkforceRosterRow): string {
+    return row.key || row.member_id || row.invite_id || String(index);
+  }
+
+  trackByScanRequest(index: number, row: WorkforceScanRequestRow): string {
+    return row.id || String(index);
+  }
+
+  requestStatusLabel(status: string): string {
+    const normalized = this.normalizeStatus(status);
+    if (normalized === 'completed') return 'Completed';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'Cancelled';
+    if (normalized === 'opened' || normalized === 'open') return 'Open';
+    if (normalized === 'sent') return 'Sent';
+    if (normalized === 'pending') return 'Pending';
+    if (normalized === 'expired') return 'Expired';
+    return status || 'Pending';
+  }
+
+  dateOrDash(value: string | null | undefined): string {
+    if (!value) {
+      return '-';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '-';
+    }
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(date);
+  }
+
+  private loadPage(manualRetry = false): void {
+    if (this.blockedByForbidden && !manualRetry) {
+      return;
+    }
+    if (this.requestInFlight) {
+      return;
+    }
+
+    const context = this.companyContext.snapshot().context;
+    const token = this.auth.getStoredAccessToken();
+    if (
+      !context.authInitialized ||
+      !context.workspaceInitialized ||
+      !context.isAuthenticated ||
+      !token ||
+      !context.activeBusinessProfileId
+    ) {
+      this.viewState = 'loading';
+      this.errorMessage = '';
+      this.errorDetails = '';
+      this.relationWarning = null;
+
+      this.companyContext.ensureLoaded().pipe(take(1)).subscribe({
+        next: () => {
+          const settled = this.companyContext.snapshot().context;
+          const settledToken = this.auth.getStoredAccessToken();
+          if (
+            settled.authInitialized &&
+            settled.workspaceInitialized &&
+            settled.isAuthenticated &&
+            settledToken &&
+            settled.activeBusinessProfileId
+          ) {
+            queueMicrotask(() => this.loadPage(manualRetry));
+            return;
+          }
+
+          if (!settledToken || !settled.isAuthenticated) {
+            this.viewState = 'error';
+            this.errorMessage = 'Please sign in to load workforce data.';
+            this.errorDetails = '';
+            return;
+          }
+
+          this.viewState = 'error';
+          this.errorMessage = 'Select an active workspace before opening Workforce.';
+          this.errorDetails = '';
+        },
+        error: (error) => {
+          this.viewState = 'error';
+          this.errorMessage = this.resolveSetupError(error);
+          this.errorDetails = '';
+        }
+      });
+      return;
+    }
+
+    this.requestInFlight = true;
+    this.viewState = 'loading';
+    this.errorMessage = '';
+    this.errorDetails = '';
+    this.relationWarning = null;
+
+    this.operationsAdmin.getWorkforceRosterData().pipe(
+      finalize(() => {
+        this.requestInFlight = false;
+        this.cdr.detectChanges();
+      })
+    ).subscribe({
+      next: (pageData) => {
+        this.pageData = pageData;
+        this.summary = pageData.summary;
+        this.relationWarning = pageData.relationWarning;
+        if (this.pendingMemberFromQuery) {
+          const match = pageData.memberRows.find(
+            (row) => row.member_id === this.pendingMemberFromQuery || row.user_id === this.pendingMemberFromQuery
+          );
+          if (match) {
+            this.openMemberView(match);
+          } else {
+            this.router.navigate([], {
+              relativeTo: this.route,
+              queryParams: { member: null },
+              queryParamsHandling: 'merge'
+            });
+          }
+          this.pendingMemberFromQuery = null;
+        }
+
+        if (pageData.relationWarning === 'Workforce data access is not configured for this role.') {
+          this.blockedByForbidden = true;
+          this.viewState = 'error';
+          this.errorMessage = pageData.relationWarning;
+          this.errorDetails = 'Ask an administrator to grant read access for workforce collections.';
+          return;
+        }
+
+        const hasRows = pageData.rows.length > 0;
+        this.viewState = hasRows ? 'ready' : 'empty';
+      },
+      error: (error) => {
+        this.pageData = null;
+        this.summary = {
+          activeMembers: 0,
+          scanEligible: 0,
+          scanRequested: 0,
+          scannedToday: 0,
+          missingScans: 0,
+          pendingInvites: 0,
+          ownerCount: 0,
+          hrCount: 0,
+          managerCount: 0,
+          employeeCount: 0,
+          needsReviewCount: 0
+        };
+        this.viewState = 'error';
+        const status = (error as { status?: number } | null)?.status ?? 0;
+        if (status === 403) {
+          this.blockedByForbidden = true;
+          this.errorMessage = 'Workforce data access is not configured for this role.';
+          this.errorDetails = 'Directus returned 403 FORBIDDEN for workforce collections.';
+          return;
+        }
+        const normalized = this.toFriendlyError(error, 'Failed to load workforce data.');
+        if (normalized === 'AUTH_REQUIRED' || normalized === 'AUTH_TOKEN_MISSING') {
+          this.errorMessage = 'Your session has expired. Please sign in again.';
+          this.errorDetails = '';
+          void this.router.navigateByUrl('/login?reason=session');
+          return;
+        }
+        if (normalized === 'WORKSPACE_CONTEXT_MISSING') {
+          this.errorMessage = 'Select an active workspace before opening Workforce.';
+          this.errorDetails = '';
+          void this.router.navigateByUrl('/app/workspace-access');
+          return;
+        }
+        this.errorMessage = normalized;
+        this.errorDetails = this.extractErrorDetails(error);
+      }
+    });
+  }
+
+  private resolveSetupError(error: unknown): string {
+    const normalized = this.toFriendlyError(error, 'Workforce setup is not ready.');
+    if (
+      normalized === 'AUTH_REQUIRED' ||
+      normalized === 'AUTH_TOKEN_MISSING' ||
+      normalized.toLowerCase().includes('token')
+    ) {
+      return 'Please sign in to load workforce data.';
+    }
+    return normalized;
+  }
+
+  private matchesStatusFilter(row: WorkforceRosterRow, filter: string): boolean {
+    if (!filter || filter === 'all') {
+      return true;
+    }
+
+    if (filter === 'active_member') {
+      return row.type === 'member' && this.normalizeStatus(row.status) === 'active';
+    }
+
+    if (filter === 'pending_invite') {
+      return row.type === 'invite' && ['pending', 'sent'].includes(this.normalizeStatus(row.status)) && !this.isInviteExpired(row);
+    }
+
+    return false;
+  }
+
+  private matchesScanFilter(row: WorkforceRosterRow, filter: string): boolean {
+    if (!filter || filter === 'all') {
+      return true;
+    }
+
+    if (row.type === 'invite') {
+      return true;
+    }
+    if (filter === 'eligible') {
+      return this.isScanEligible(row);
+    }
+    return row.scan_status === (filter as WorkforceScanStatus);
+  }
+
+  private defaultInviteForm(): InviteForm {
+    return {
+      email: '',
+      role: 'employee',
+      department: '',
+      note: ''
+    };
+  }
+
+  private pushFeedback(type: FeedbackType, text: string): void {
+    this.feedback = { type, text };
+  }
+
+  private normalizeStatus(value: string | null | undefined): string {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  private isClosedRequestStatus(status: string): boolean {
+    const normalized = this.normalizeStatus(status);
+    return normalized === 'completed' || normalized === 'cancelled' || normalized === 'canceled' || normalized === 'expired';
+  }
+
+  private normalizeRoleForUi(value: string | null | undefined): string {
+    const normalized = (value ?? '').trim().toLowerCase();
+    if (normalized === 'manger') {
+      return 'manager';
+    }
+    return normalized;
+  }
+
+  private isInviteExpired(row: WorkforceRosterRow): boolean {
+    const explicitStatus = this.normalizeStatus(row.status);
+    if (explicitStatus === 'expired') {
+      return true;
+    }
+
+    if (!row.expires_at) {
+      return false;
+    }
+
+    const expiresTs = new Date(row.expires_at).getTime();
+    if (!Number.isFinite(expiresTs)) {
+      return false;
+    }
+
+    return expiresTs < Date.now();
+  }
+
+  private isSameDay(left: Date, right: Date): boolean {
+    return (
+      left.getFullYear() === right.getFullYear() &&
+      left.getMonth() === right.getMonth() &&
+      left.getDate() === right.getDate()
+    );
+  }
+
+  private formatTime(date: Date): string {
+    return new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(date);
+  }
+
+  private formatShortDateTime(date: Date): string {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).format(date);
+  }
+
+  private toNullable(value: string | null | undefined): string | null {
+    return value && value.trim() ? value.trim() : null;
+  }
+
+  private toFriendlyError(error: unknown, fallback: string): string {
+    const anyError = error as {
+      error?: {
+        errors?: Array<{ extensions?: { reason?: string }; message?: string }>;
+        message?: string;
+      };
+      message?: string;
+    };
+
+    const backendMessage =
+      anyError?.error?.errors?.[0]?.extensions?.reason ||
+      anyError?.error?.errors?.[0]?.message ||
+      anyError?.error?.message;
+
+    if (typeof backendMessage === 'string' && backendMessage.trim()) {
+      return backendMessage.trim();
+    }
+
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    if (typeof error === 'string' && error.trim()) {
+      return error.trim();
+    }
+
+    return fallback;
+  }
+
+  private extractErrorDetails(error: unknown): string {
+    const anyError = error as {
+      status?: number;
+      error?: {
+        errors?: Array<{ message?: string; extensions?: { reason?: string; code?: string } }>;
+        message?: string;
+      };
+      message?: string;
+    };
+
+    const status = typeof anyError?.status === 'number' ? anyError.status : null;
+    const reason =
+      anyError?.error?.errors?.[0]?.extensions?.reason ||
+      anyError?.error?.errors?.[0]?.message ||
+      anyError?.error?.message ||
+      anyError?.message ||
+      null;
+
+    if (!reason && status === null) {
+      return '';
+    }
+
+    const statusPart = status !== null ? `HTTP ${status}` : '';
+    const reasonPart = reason ? String(reason).trim() : '';
+    return [statusPart, reasonPart].filter(Boolean).join(' - ');
+  }
+
+  private setBodyScrollLocked(locked: boolean): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.body.style.overflow = locked ? 'hidden' : '';
+  }
+}

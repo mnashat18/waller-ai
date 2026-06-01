@@ -1,105 +1,85 @@
 <div class="sidebar-stack">
-  <!-- LOGO -->
   <div class="app-logo">
     <img src="assets/logo/app_icon.png" alt="Wellar" class="app-logo-img" />
     <span class="app-logo-ring"></span>
   </div>
 
-  <!-- NAV -->
-  <nav class="sidebar-nav">
-
-    <a routerLink="/dashboard"
-       routerLinkActive="active"
-       class="sidebar-item">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M3 11.5L12 4l9 7.5"></path>
-        <path d="M5 10.5V20h14v-9.5"></path>
-      </svg>
-      <span class="label">Dashboard</span>
-    </a>
-
-    <a routerLink="/history"
-       routerLinkActive="active"
-       class="sidebar-item">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M3 12a9 9 0 1 0 9-9"></path>
-        <path d="M3 4v6h6"></path>
-        <path d="M12 7v5l3 3"></path>
-      </svg>
-      <span class="label">History</span>
-    </a>
-
-    <a routerLink="/audit-logs"
-       routerLinkActive="active"
-       *ngIf="canOpenAuditLogs"
-       class="sidebar-item">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M5 8h14v12H5z"></path>
-        <path d="M9 12h6"></path>
-        <path d="M9 16h6"></path>
-      </svg>
-      <span class="label">Audit Logs</span>
-    </a>
-
-    <a routerLink="/requests"
-       routerLinkActive="active"
-       [routerLinkActiveOptions]="{ exact: true }"
-       *ngIf="canOpenRequestsCenter"
-       class="sidebar-item">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M4 7h16"></path>
-        <path d="M4 12h16"></path>
-        <path d="M4 17h16"></path>
-      </svg>
-      <span class="label">Requests</span>
-    </a>
-
-    <a routerLink="/business-center"
-       routerLinkActive="active"
-       *ngIf="canOpenBusinessCenter && !isUserRole"
-       class="sidebar-item">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M4 20V8l8-4 8 4v12"></path>
-        <path d="M8 20v-5h8v5"></path>
-        <path d="M9 10h.01"></path>
-        <path d="M15 10h.01"></path>
-      </svg>
-      <span class="label">Business Center</span>
-    </a>
-
-    <a routerLink="/payment"
-       routerLinkActive="active"
-       *ngIf="!hasBusinessAccess || trialExpired"
-       class="sidebar-item">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <rect x="2.5" y="5" width="19" height="14" rx="2"></rect>
-        <path d="M2.5 10h19"></path>
-        <path d="M7 15h4"></path>
-      </svg>
-      <span class="label">Billing</span>
-    </a>
-
-    <a routerLink="/profile"
-       routerLinkActive="active"
-       class="sidebar-item">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <circle cx="12" cy="8" r="4"></circle>
-        <path d="M4 20c2-3 5-5 8-5s6 2 8 5"></path>
-      </svg>
-      <span class="label">Profile</span>
-    </a>
-
-  </nav>
-
-  <div class="sidebar-plan-card" *ngIf="!isUserRole">
-    <p class="sidebar-plan-title">Plan Status</p>
-    <p class="sidebar-plan-name">{{ planLabel }}</p>
-    <p class="sidebar-plan-meta">Role: {{ memberRoleLabel }}</p>
-    <p class="sidebar-plan-meta">{{ statusText() }}</p>
-    <div class="sidebar-progress">
-      <span [style.width.%]="trialProgressPercent()"></span>
+  <div class="sidebar-plan-card sidebar-company-card">
+    <div class="sidebar-company-card__avatar">{{ companyInitial() }}</div>
+    <div class="sidebar-company-card__body">
+      <p class="sidebar-plan-title">Active Company</p>
+      <p class="sidebar-plan-name">{{ activeCompanyLabel }}</p>
+      <p class="sidebar-plan-meta">{{ statusText() }}</p>
+      <p class="sidebar-plan-meta">Role: {{ memberRoleLabel }}</p>
     </div>
-    <a routerLink="/payment" class="sidebar-plan-link" *ngIf="!hasBusinessAccess || trialExpired">Open Payment</a>
-    <a routerLink="/business-center" class="sidebar-plan-link" *ngIf="canOpenBusinessCenter">Open Business</a>
+    <span class="sidebar-company-card__badge">{{ activeDepartmentLabel }}</span>
+    <a routerLink="/app/company" class="sidebar-plan-link">Open Company</a>
   </div>
+
+  <nav class="sidebar-nav">
+    <div *ngFor="let section of sections" class="sidebar-group">
+      <p class="sidebar-group-title">
+        {{ section.label }}
+      </p>
+
+      <a
+        *ngFor="let item of section.items"
+        [routerLink]="toAppRoute(item.path)"
+        (click)="onNavigate(item)"
+        routerLinkActive="active"
+        class="sidebar-item">
+        <svg *ngIf="item.icon === 'dashboard'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 11.5L12 4l9 7.5"></path>
+          <path d="M5 10.5V20h14v-9.5"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'company'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 20V8l8-4 8 4v12"></path>
+          <path d="M8 20v-5h8v5"></path>
+          <path d="M9 10h.01"></path>
+          <path d="M15 10h.01"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'members'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="9" cy="8" r="3"></circle>
+          <circle cx="17" cy="10" r="2.5"></circle>
+          <path d="M3 20c1.5-3 4-5 6-5s4.5 2 6 5"></path>
+          <path d="M14.5 20c.8-1.8 2.1-3.2 4.1-4.1"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'departments'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="4" width="7" height="7"></rect>
+          <rect x="14" y="4" width="7" height="7"></rect>
+          <rect x="8.5" y="14" width="7" height="7"></rect>
+        </svg>
+        <svg *ngIf="item.icon === 'invites'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 6h16v12H4z"></path>
+          <path d="M4 7l8 6 8-6"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'compliance'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M7 4h10"></path>
+          <path d="M9 2v4"></path>
+          <path d="M15 2v4"></path>
+          <rect x="4" y="6" width="16" height="14" rx="2"></rect>
+          <path d="M8 13l2.5 2.5L16 10"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'alerts'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 9v4"></path>
+          <path d="M12 17h.01"></path>
+          <path d="M5 20l7-16 7 16H5z"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'activity'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 12h4l2-5 4 10 2-5h6"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'reports'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M6 3h9l3 3v15H6z"></path>
+          <path d="M15 3v4h4"></path>
+          <path d="M9 13h6"></path>
+          <path d="M9 17h6"></path>
+        </svg>
+        <svg *ngIf="item.icon === 'settings'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.2a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.2a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.2a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1.1H21a2 2 0 0 1 0 4h-.2a1.6 1.6 0 0 0-1.4.9z"></path>
+        </svg>
+        <span class="label">{{ item.label }}</span>
+      </a>
+    </div>
+  </nav>
 </div>

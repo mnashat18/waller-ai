@@ -1,104 +1,57 @@
-<div class="min-h-screen flex">
-
-  <!-- LEFT BRAND (Desktop only) -->
-  <div
-    class="hidden lg:flex w-1/2
-           bg-gradient-to-br from-indigo-600 to-blue-900
-           text-white items-center justify-center px-12">
-
-    <div class="max-w-md text-center space-y-6">
-
-      <!-- LOGO -->
-      <svg
-        class="mx-auto w-64"
-        viewBox="0 0 420 140"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#7C3AED"/>
-            <stop offset="100%" stop-color="#38BDF8"/>
-          </linearGradient>
-        </defs>
-
-        <g>
-          <polygon
-            points="40,20 80,45 80,85 40,110 0,85 0,45"
-            stroke="url(#brandGrad)"
-            stroke-width="4"
-            fill="none"
-          />
-          <path
-            d="M28 52 L28 78 M52 52 L52 78"
-            stroke="url(#brandGrad)"
-            stroke-width="4"
-            stroke-linecap="round"
-          />
-          <text x="120" y="92" fill="white" font-size="48">
-            Waller <tspan fill="#38BDF8">AI</tspan>
-          </text>
-        </g>
-      </svg>
-
-      <h1 class="text-3xl font-semibold">
-        Secure AI Healthcare Access
-      </h1>
-
-      <p class="text-white/80">
+<div class="auth-layout">
+  <section class="auth-brand">
+    <div class="brand-content">
+      <img class="brand-mark" src="assets/logo/waller-ai.png" alt="Wellar AI" />
+      <p class="brand-kicker">{{ inviteMode ? 'Workspace invite' : 'Enterprise wellness intelligence' }}</p>
+      <h1>{{ inviteMode ? 'Log in to join your workspace' : 'Secure AI Healthcare Access' }}</h1>
+      <p *ngIf="inviteMode">
+        You were invited to join a Wellar AI workspace. Sign in or create an account to continue.
+      </p>
+      <p *ngIf="!inviteMode">
         Monitor cognitive wellness, detect risks early,
         and empower better healthcare decisions with AI.
       </p>
+      <div class="brand-points">
+        <span>Secure workspace</span>
+        <span>Cognitive monitoring</span>
+        <span>{{ inviteMode ? 'Invite-based access' : 'Operational clarity' }}</span>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <!-- RIGHT FORM -->
-  <div class="flex flex-1 items-center justify-center px-4">
+  <section class="auth-form">
+    <div class="auth-card animate-auth">
+      <p class="auth-eyebrow">Welcome back</p>
+      <h2>{{ inviteMode ? 'Log in to join your workspace' : 'Log in' }}</h2>
+      <p class="auth-subtitle" *ngIf="!inviteMode">Login to continue with Wellar AI.</p>
+      <p class="auth-subtitle" *ngIf="inviteMode">You were invited to join a Wellar AI workspace. Sign in or create an account to continue.</p>
 
-    <div class="w-full max-w-md bg-white dark:bg-slate-900
-                rounded-xl shadow-xl p-8 animate-auth">
+      <p class="auth-subtitle" *ngIf="authNotice">{{ authNotice }}</p>
 
-      <h2 class="text-2xl font-semibold mb-1">
-        Welcome back
-      </h2>
-
-      <p class="text-slate-500 mb-6">
-        Login to continue with Waller AI
-      </p>
-
-      <!-- EMAIL -->
-      <div class="mb-4">
+      <div class="field">
         <label class="label">Email</label>
         <input
           type="email"
           class="input"
           placeholder="Enter your email"
-          [(ngModel)]="email"
-        />
+          [(ngModel)]="email" />
       </div>
 
-      <!-- PASSWORD -->
-      <div class="mb-6">
+      <div class="field">
         <label class="label">Password</label>
         <input
           type="password"
           class="input"
           placeholder="Enter your password"
-          [(ngModel)]="password"
-        />
+          [(ngModel)]="password" />
       </div>
 
-      <button
-        type="button"
-        class="btn-primary w-full"
-        (click)="login()"
-      >
-        Continue
+      <button type="button" class="btn-primary" (click)="login()">
+        {{ inviteMode ? 'Log in to join your workspace' : 'Continue' }}
       </button>
 
-      <div class="flex items-center gap-3 my-6 text-xs text-slate-500">
-        <span class="flex-1 h-px bg-slate-200/20"></span>
-        OR
-        <span class="flex-1 h-px bg-slate-200/20"></span>
+      <div class="auth-divider">
+        <span>OR</span>
       </div>
 
       <button type="button" class="google-btn" (click)="continueWithGoogle()">
@@ -111,17 +64,10 @@
         Continue with Google
       </button>
 
-      <p class="text-sm text-center text-slate-500 mt-6">
+      <p class="auth-note">
         Don't have an account?
-        <a
-          routerLink="/signup"
-          class="text-primary font-medium hover:underline"
-        >
-          Create one
-        </a>
+        <a routerLink="/signup">Create one</a>
       </p>
-
     </div>
-  </div>
-
+  </section>
 </div>

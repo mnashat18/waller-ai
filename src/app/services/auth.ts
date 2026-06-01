@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { Observable, firstValueFrom, from, of, throwError } from 'rxjs';
-import { catchError, map, switchMap, tap } from 'rxjs/operators';
+import { catchError, map, switchMap, tap, timeout } from 'rxjs/operators';
 import { SubscriptionService } from './subscription.service';
 import { BusinessCenterService } from './business-center.service';
 
@@ -60,15 +60,28 @@ export class AuthService {
 
     const hashParams = source.hash ? new URLSearchParams(source.hash.replace('#', '?')) : null;
     const searchParams = source.search ? new URLSearchParams(source.search) : null;
+    const currentHashParams = current.hash ? new URLSearchParams(current.hash.replace('#', '?')) : null;
+    const currentSearchParams = current.search ? new URLSearchParams(current.search) : null;
+    const isAuthCallback = this.isAuthCallbackPath(source.pathname);
+    const isCurrentAuthCallback = this.isAuthCallbackPath(current.pathname);
+    const isInviteClaim = this.isInviteClaimPath(current.pathname);
+    const inviteToken = this.extractInviteTokenFromParams(currentSearchParams, currentHashParams);
 
-    const hasCode = hashParams?.has('code') === true || searchParams?.has('code') === true;
+    if (isInviteClaim && inviteToken) {
+      this.persistPendingInviteToken(inviteToken);
+    }
 
-    const accessToken =
+    const hasCode =
+      isAuthCallback &&
+      (hashParams?.has('code') === true || searchParams?.has('code') === true);
+
+    const accessTokenCandidate =
       hashParams?.get('access_token') ??
-      hashParams?.get('token') ??
       searchParams?.get('access_token') ??
-      searchParams?.get('token') ??
-      undefined;
+      (isAuthCallback
+        ? hashParams?.get('token') ??
+          searchParams?.get('token')
+        : undefined);
 
     const refreshToken =
       hashParams?.get('refresh_token') ??
@@ -87,11 +100,26 @@ export class AuthService {
       hashParams?.get('error_description') ??
       undefined;
 
+    const normalizedAccessToken = accessTokenCandidate?.trim() ?? '';
+    const accessToken =
+      normalizedAccessToken && this.isLikelyJwt(normalizedAccessToken)
+        ? normalizedAccessToken
+        : undefined;
+
+    if (normalizedAccessToken && !accessToken) {
+      if (this.isInviteLikeToken(normalizedAccessToken)) {
+        this.persistPendingInviteToken(normalizedAccessToken);
+      }
+      this.clearInvalidStoredAuthToken(normalizedAccessToken, 'captureAuthFromUrl');
+    }
+
+    const normalizedRefreshToken = refreshToken?.trim() ?? '';
+
     if (accessToken) {
       this.storeAccessToken(accessToken);
     }
-    if (refreshToken) {
-      this.storeRefreshToken(refreshToken);
+    if (normalizedRefreshToken) {
+      this.storeRefreshToken(normalizedRefreshToken);
     }
 
     if (hasCode && !reason && !errorDescription) {
@@ -99,25 +127,39 @@ export class AuthService {
       sessionStorage.removeItem('auth_refresh_attempted');
     }
 
-    if (accessToken || refreshToken) {
+    if (accessToken || normalizedRefreshToken) {
       sessionStorage.removeItem('auth_callback_pending');
       localStorage.removeItem('auth_error');
     }
 
-    if (accessToken || refreshToken || reason || errorDescription || hasCode) {
+    const hasAuthTokenParam =
+      searchParams?.has('access_token') === true ||
+      hashParams?.has('access_token') === true ||
+      (isAuthCallback && (searchParams?.has('token') === true || hashParams?.has('token') === true));
+    const hasRefreshTokenParam =
+      searchParams?.has('refresh_token') === true || hashParams?.has('refresh_token') === true;
+    const hasAuthSignal =
+      hasAuthTokenParam ||
+      hasRefreshTokenParam ||
+      Boolean(reason) ||
+      Boolean(errorDescription) ||
+      hasCode;
+
+    if (hasAuthSignal) {
       const cleaned = new URL(window.location.href);
       const dropKeys = [
         'access_token',
-        'token',
         'refresh_token',
         'expires',
         'expires_in',
-        'code',
         'state',
         'reason',
         'error',
         'error_description'
       ];
+      if (isCurrentAuthCallback) {
+        dropKeys.push('token', 'code');
+      }
       dropKeys.forEach((key) => cleaned.searchParams.delete(key));
       if (cleaned.hash) {
         cleaned.hash = '';
@@ -131,7 +173,7 @@ export class AuthService {
     return {
       stored: Boolean(accessToken),
       accessToken,
-      refreshToken,
+      refreshToken: normalizedRefreshToken || undefined,
       reason,
       errorDescription,
       hasCode
@@ -299,7 +341,10 @@ export class AuthService {
     );
   }
 
-  getCurrentUser(accessToken?: string): Observable<any | null> {
+  getCurrentUser(
+    accessToken?: string,
+    _options?: { hydrateWorkspace?: boolean }
+  ): Observable<any | null> {
     return this.http.get<any>(
       `${this.api}/users/me`,
       {
@@ -307,6 +352,7 @@ export class AuthService {
         withCredentials: true
       }
     ).pipe(
+      timeout(12000),
       map((res) => res?.data ?? null),
       switchMap((user) => {
         if (!user) {
@@ -361,18 +407,16 @@ export class AuthService {
 
         const token = accessToken ?? this.getStoredAccessToken() ?? undefined;
         return this.businessCenter.claimPendingInviteForUser(user, token).pipe(
+          timeout(12000),
           catchError(() => of(false)),
-          tap((claimed) => {
-            if (claimed) {
-              this.setPostAuthRedirect('/requests');
-            }
-          }),
           switchMap(() =>
             this.businessCenter.ensureBusinessProfileForUser(user, token).pipe(
+              timeout(12000),
               catchError(() => of(null)),
               map(() => user)
             )
           ),
+          timeout(15000),
           tap(() => {
             this.subscriptions.notifyAuthStateChanged();
           })
@@ -398,23 +442,37 @@ export class AuthService {
       localStorage.getItem('token') ??
       localStorage.getItem('access_token') ??
       localStorage.getItem('directus_token');
+    const normalizedToken = token?.trim() ?? '';
 
-    if (token && this.isTokenExpired(token)) {
+    if (!normalizedToken) {
+      return null;
+    }
+
+    if (!this.isLikelyJwt(normalizedToken) || this.isInviteLikeToken(normalizedToken)) {
+      this.clearInvalidStoredAuthToken(normalizedToken, 'getStoredAccessToken');
+      return null;
+    }
+
+    if (this.isTokenExpired(normalizedToken)) {
       this.clearStoredAccessTokenAliases();
       return null;
     }
 
-    if (token) {
-      this.syncAccessTokenAliases(token);
-    }
+    this.syncAccessTokenAliases(normalizedToken);
 
-    return token;
+    return normalizedToken;
   }
 
   storeAccessToken(token: string) {
-    localStorage.setItem('token', token);
-    localStorage.setItem('access_token', token);
-    localStorage.setItem('directus_token', token);
+    const normalizedToken = token.trim();
+    if (!normalizedToken || !this.isLikelyJwt(normalizedToken) || this.isInviteLikeToken(normalizedToken)) {
+      this.clearInvalidStoredAuthToken(normalizedToken, 'storeAccessToken');
+      return;
+    }
+
+    localStorage.setItem('token', normalizedToken);
+    localStorage.setItem('access_token', normalizedToken);
+    localStorage.setItem('directus_token', normalizedToken);
     sessionStorage.setItem('is_logged_in', '1');
     sessionStorage.setItem('auth_session_established_at', Date.now().toString());
     localStorage.removeItem('auth_error');
@@ -427,6 +485,8 @@ export class AuthService {
   }
 
   clearAuthState() {
+    this.clearInviteFlowState();
+
     localStorage.removeItem('token');
     localStorage.removeItem('access_token');
     localStorage.removeItem('directus_token');
@@ -452,8 +512,17 @@ export class AuthService {
   }
 
   getAuthHeaders(accessToken?: string): HttpHeaders {
-    const candidate = accessToken ?? this.getStoredAccessToken();
-    const token = candidate && this.isTokenExpired(candidate) ? null : candidate;
+    const candidate = (accessToken ?? this.getStoredAccessToken())?.trim() ?? null;
+    if (!candidate) {
+      return new HttpHeaders();
+    }
+
+    if (!this.isLikelyJwt(candidate) || this.isInviteLikeToken(candidate)) {
+      this.clearInvalidStoredAuthToken(candidate, 'getAuthHeaders');
+      return new HttpHeaders();
+    }
+
+    const token = this.isTokenExpired(candidate) ? null : candidate;
 
     if (candidate && !token) {
       this.clearStoredAccessTokenAliases();
@@ -499,6 +568,48 @@ export class AuthService {
       map(() => true),
       catchError(() => of(false))
     );
+  }
+
+  async getCurrentUserAfterRestore(): Promise<any | null> {
+    const token = this.getStoredAccessToken() ?? undefined;
+    try {
+      return await firstValueFrom(
+        this.getCurrentUser(token).pipe(
+          timeout(16000),
+          catchError(() => of(null))
+        )
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  async refreshAuthTokenWithStoredRefreshToken(): Promise<string | null> {
+    return this.refreshFromCookieInternal();
+  }
+
+  setAuthNotice(message: string): void {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('auth_notice', String(message ?? '').trim());
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  consumeAuthNotice(): string | null {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return null;
+      }
+      const value = localStorage.getItem('auth_notice');
+      localStorage.removeItem('auth_notice');
+      const normalized = typeof value === 'string' ? value.trim() : '';
+      return normalized || null;
+    } catch {
+      return null;
+    }
   }
 
   private refreshUserFromCookie(): Observable<any | null> {
@@ -659,6 +770,82 @@ export class AuthService {
     sessionStorage.removeItem('is_logged_in');
   }
 
+  private isLikelyJwt(token: string): boolean {
+    const parts = token.split('.');
+    return parts.length === 3 && parts.every((part) => part.trim().length > 0);
+  }
+
+  private isInviteLikeToken(token: string): boolean {
+    return /^wlr-[a-z0-9_-]+$/i.test(token.trim());
+  }
+
+  private isAuthCallbackPath(pathname: string): boolean {
+    const normalized = pathname.trim().toLowerCase();
+    return normalized === '/auth-callback' || normalized.endsWith('/auth-callback');
+  }
+
+  private isInviteClaimPath(pathname: string): boolean {
+    const normalized = pathname.trim().toLowerCase();
+    return normalized === '/invites/claim' || normalized.endsWith('/invites/claim');
+  }
+
+  private extractInviteTokenFromParams(
+    searchParams: URLSearchParams | null,
+    hashParams: URLSearchParams | null
+  ): string | null {
+    const token = searchParams?.get('token') ?? hashParams?.get('token');
+    const code = searchParams?.get('code') ?? hashParams?.get('code');
+    const invite = searchParams?.get('invite') ?? hashParams?.get('invite');
+
+    const normalizedToken = token?.trim() ?? '';
+    if (normalizedToken) {
+      return normalizedToken;
+    }
+
+    const normalizedCode = code?.trim() ?? '';
+    if (normalizedCode) {
+      return normalizedCode;
+    }
+
+    const normalizedInvite = invite?.trim() ?? '';
+    if (normalizedInvite && normalizedInvite !== '1') {
+      return normalizedInvite;
+    }
+
+    return null;
+  }
+
+  private persistPendingInviteToken(token: string): void {
+    const normalized = token.trim();
+    if (!normalized) {
+      return;
+    }
+
+    try {
+      localStorage.setItem('pending_invite_token', normalized);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private clearInvalidStoredAuthToken(token: string, source: string): void {
+    if (!token) {
+      return;
+    }
+
+    this.clearStoredAccessTokenAliases();
+    if (environment.production) {
+      return;
+    }
+
+    if (this.isInviteLikeToken(token)) {
+      console.error('[Auth] invalid auth token storage contained invite token', { source, token });
+      return;
+    }
+
+    console.error('[Auth] invalid auth token storage', { source, token });
+  }
+
   private syncAccessTokenAliases(token: string): void {
     if (localStorage.getItem('token') !== token) {
       localStorage.setItem('token', token);
@@ -677,6 +864,45 @@ export class AuthService {
     }
     if (localStorage.getItem('directus_refresh_token') !== token) {
       localStorage.setItem('directus_refresh_token', token);
+    }
+  }
+
+  private clearInviteFlowState(): void {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('pending_invite_token');
+
+      const claimPrefixes = ['invite_claim_success_', 'invite_claim_attempted_'];
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (!key) {
+          continue;
+        }
+
+        if (claimPrefixes.some((prefix) => key.startsWith(prefix))) {
+          localStorage.removeItem(key);
+        }
+      }
+    }
+
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('invite_claim_error');
+      sessionStorage.removeItem('invite_claim_completed');
+
+      const sessionPrefixes = [
+        'invite_claim_in_progress_',
+        'invite_claim_attempted_',
+        'invite_claim_success_'
+      ];
+      for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+        const key = sessionStorage.key(index);
+        if (!key) {
+          continue;
+        }
+
+        if (sessionPrefixes.some((prefix) => key.startsWith(prefix))) {
+          sessionStorage.removeItem(key);
+        }
+      }
     }
   }
 

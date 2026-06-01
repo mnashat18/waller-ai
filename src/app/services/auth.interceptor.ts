@@ -93,8 +93,25 @@ export class AuthInterceptor implements HttpInterceptor {
       localStorage.getItem('token') ??
       localStorage.getItem('access_token') ??
       localStorage.getItem('directus_token');
+    const normalized = token?.trim() ?? '';
 
-    return typeof token === 'string' && token.trim() ? token : null;
+    if (!normalized) {
+      return null;
+    }
+
+    if (!this.isLikelyJwt(normalized) || this.isInviteLikeToken(normalized)) {
+      this.clearStoredAuthState();
+      if (!environment.production) {
+        if (this.isInviteLikeToken(normalized)) {
+          console.error('[Auth] invalid auth token storage contained invite token', { source: 'interceptor', token: normalized });
+        } else {
+          console.error('[Auth] invalid auth token storage', { source: 'interceptor', token: normalized });
+        }
+      }
+      return null;
+    }
+
+    return normalized;
   }
 
   private syncAccessTokenAliases(token: string): void {
@@ -128,6 +145,15 @@ export class AuthInterceptor implements HttpInterceptor {
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('directus_refresh_token');
     localStorage.removeItem('wellar_business_hub_access_state_v1');
+  }
+
+  private isLikelyJwt(token: string): boolean {
+    const parts = token.split('.');
+    return parts.length === 3 && parts.every((part) => part.trim().length > 0);
+  }
+
+  private isInviteLikeToken(token: string): boolean {
+    return /^wlr-[a-z0-9_-]+$/i.test(token.trim());
   }
 
   private isApiRequest(url: string): boolean {

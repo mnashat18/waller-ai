@@ -19,7 +19,7 @@ export class CreateRequestModalComponent implements OnChanges {
   @Input() allowRoleSelection = false;
   @Input() memberRoleOptions: readonly TeamMemberRoleOption[] = DEFAULT_MEMBER_ROLE_OPTIONS;
   @Input() defaultMemberRole: TeamMemberRole = 'member';
-  @Input() requiredStateOptions: readonly RequiredState[] = REQUIRED_STATE_OPTIONS;
+  @Input() requestTypeOptions: readonly RequestType[] = REQUEST_TYPE_OPTIONS;
 
   form: ModalFormModel = this.buildDefaultFormModel();
 
@@ -37,13 +37,13 @@ export class CreateRequestModalComponent implements OnChanges {
   }
 
   onSubmit(): void {
-    const normalizedState = this.isRequiredState(this.form.requiredState)
-      ? this.form.requiredState
-      : '';
+    const normalizedRequestType = this.isRequestType(this.form.requestType)
+      ? this.form.requestType
+      : 'manual';
 
     this.submitRequest.emit({
       requestedForEmails: [...this.form.requestedForEmails],
-      requiredState: normalizedState,
+      requestType: normalizedRequestType,
       memberRole: this.normalizeTeamMemberRole(this.form.memberRole)
     });
   }
@@ -85,14 +85,14 @@ export class CreateRequestModalComponent implements OnChanges {
     return item?.value ?? String(index);
   }
 
-  private isRequiredState(value: string): value is RequiredState {
-    return (REQUIRED_STATE_OPTIONS as readonly string[]).includes(value);
+  private isRequestType(value: string): value is RequestType {
+    return (REQUEST_TYPE_OPTIONS as readonly string[]).includes(value);
   }
 
   private buildDefaultFormModel(): ModalFormModel {
     return {
       requestedForEmails: [''],
-      requiredState: '',
+      requestType: 'manual',
       memberRole: this.normalizeTeamMemberRole(this.defaultMemberRole)
     };
   }
@@ -121,7 +121,7 @@ export class CreateRequestModalComponent implements OnChanges {
 
 export type CreateRequestForm = {
   requestedForEmails: string[];
-  requiredState: RequiredState | '';
+  requestType: RequestType;
   memberRole: TeamMemberRole;
 };
 
@@ -130,18 +130,17 @@ export type SubmitFeedback = {
   message: string;
 };
 
-export type RequiredState = 'Stable' | 'Low Focus' | 'Elevated Fatigue' | 'High Risk';
+export type RequestType = 'manual' | 'bulk' | 'reminder';
 export type TeamMemberRole = 'owner' | 'admin' | 'manager' | 'member';
 export type TeamMemberRoleOption = {
   value: TeamMemberRole;
   label: string;
 };
 
-export const REQUIRED_STATE_OPTIONS: readonly RequiredState[] = [
-  'Stable',
-  'Low Focus',
-  'Elevated Fatigue',
-  'High Risk'
+export const REQUEST_TYPE_OPTIONS: readonly RequestType[] = [
+  'manual',
+  'bulk',
+  'reminder'
 ];
 
 export const DEFAULT_MEMBER_ROLE_OPTIONS: readonly TeamMemberRoleOption[] = [
@@ -153,6 +152,6 @@ export const DEFAULT_MEMBER_ROLE_OPTIONS: readonly TeamMemberRoleOption[] = [
 
 type ModalFormModel = {
   requestedForEmails: string[];
-  requiredState: string;
+  requestType: string;
   memberRole: TeamMemberRole;
 };

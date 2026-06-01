@@ -1,0 +1,16 @@
+import { CommonModule } from '@angular/common';
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-filter-bar-shell',
+  standalone: true,
+  imports: [CommonModule],
+  template: `
+    <div class="app-dashboard-panel app-dashboard-panel--compact">
+      <div class="flex flex-wrap items-center gap-3">
+        <ng-content></ng-content>
+      </div>
+    </div>
+  `
+})
+export class FilterBarShellComponent {}

@@ -1,0 +1,148 @@
+<header class="app-header__panel">
+  <div class="app-header__context">
+    <p class="app-header__eyebrow">Workspace</p>
+    <span class="app-header__context-note">Compact company and user controls</span>
+  </div>
+
+  <ng-container *ngIf="state$ | async as state">
+    <div class="app-header__actions">
+      <app-global-notifications-panel></app-global-notifications-panel>
+
+      <div class="app-header__menu" (click)="stopPropagation($event)">
+        <button
+          type="button"
+          (click)="toggleCompanyMenu($event)"
+          class="app-header__button app-header__button--compact">
+          <span class="app-header__avatar">C</span>
+          <span class="app-header__button-copy">
+            <strong>
+              {{
+                state.ui.showWorkspaceLoading
+                  ? 'Loading workspace...'
+                  : (state.context.activeBusinessProfileName || 'No active workspace')
+              }}
+            </strong>
+            <small>
+              {{
+                state.ui.showWorkspaceLoading
+                  ? 'Loading role...'
+                  : (state.context.activeDepartmentName || 'Company-wide scope')
+              }}
+            </small>
+          </span>
+        </button>
+
+        <div *ngIf="companyMenuOpen" class="app-header__popover">
+          <div class="app-header__popover-top">
+            <p>Company Switcher</p>
+            <button
+              type="button"
+              (click)="refreshContext()">
+              {{ refreshingContext ? 'Refreshing...' : 'Refresh Context' }}
+            </button>
+          </div>
+
+          <div class="app-header__popover-stack">
+            <ng-container *ngIf="state.ui.showWorkspaceLoading; else workspaceContextReady">
+              <app-company-context-chip label="Active Company" value="Loading workspace..."></app-company-context-chip>
+              <app-company-context-chip label="Active Department" value="Loading role..."></app-company-context-chip>
+            </ng-container>
+            <ng-template #workspaceContextReady>
+              <app-company-context-chip
+                label="Active Company"
+                [value]="state.context.activeBusinessProfileName || 'No active workspace'">
+              </app-company-context-chip>
+
+              <app-company-context-chip
+                label="Active Department"
+                [value]="state.context.activeDepartmentName"
+                fallback="Company-wide">
+              </app-company-context-chip>
+
+              <app-role-badge [role]="state.context.activeMemberRole"></app-role-badge>
+              <button
+                *ngIf="!state.ui.hasActiveWorkspace"
+                class="app-header__secondary app-header__secondary--full"
+                type="button"
+                (click)="goToWorkspaceAccess()">
+                Request workspace access
+              </button>
+            </ng-template>
+          </div>
+
+          <div class="app-header__popover-list" *ngIf="state.context.availableCompanies.length; else noCompanies">
+            <button
+              *ngFor="let company of state.context.availableCompanies"
+              type="button"
+              (click)="switchCompany(company.id)"
+              [disabled]="company.isActive || switchingCompanyId === company.id">
+              <span>
+                <strong>{{ company.name }}</strong>
+                <small>{{ company.membershipStatus || 'active' }}</small>
+              </span>
+              <span>
+                <app-role-badge [role]="company.role"></app-role-badge>
+                <em *ngIf="company.isActive">Active</em>
+                <em *ngIf="switchingCompanyId === company.id">Switching...</em>
+              </span>
+            </button>
+          </div>
+
+          <button
+            *ngIf="state.context.activeDepartmentId && state.context.activeMemberRole !== 'manager'"
+            type="button"
+            (click)="clearDepartmentScope()"
+            class="app-header__secondary">
+            Clear Department Scope
+          </button>
+        </div>
+      </div>
+
+      <div class="app-header__menu" (click)="stopPropagation($event)">
+        <button
+          type="button"
+          (click)="toggleUserMenu($event)"
+          class="app-header__button app-header__button--compact">
+          <span class="app-header__avatar app-header__avatar--dark">
+            {{ (state.ui.sessionLabel || 'U').slice(0, 1).toUpperCase() }}
+          </span>
+          <span class="app-header__button-copy">
+            <strong>{{ state.ui.sessionLabel }}</strong>
+            <small>{{ state.ui.sessionSubLabel }}</small>
+          </span>
+        </button>
+
+        <div *ngIf="userMenuOpen" class="app-header__popover app-header__popover--user">
+          <p class="app-header__user-name">{{ state.ui.sessionLabel }}</p>
+          <p class="app-header__user-email">{{ state.ui.sessionSubLabel }}</p>
+
+          <div class="app-header__role">
+            <app-role-badge [role]="state.context.activeMemberRole"></app-role-badge>
+          </div>
+
+          <button
+            type="button"
+            (click)="refreshContext()"
+            class="app-header__secondary app-header__secondary--full">
+            Refresh company context
+          </button>
+          <button
+            type="button"
+            (click)="logout()"
+            class="app-header__danger">
+            Log out
+          </button>
+        </div>
+      </div>
+    </div>
+  </ng-container>
+</header>
+
+<ng-template #noCompanies>
+  <div class="app-header__empty">
+    <app-empty-state
+      title="No additional companies"
+      message="The switcher is connected, but no alternate company memberships were returned for this user.">
+    </app-empty-state>
+  </div>
+</ng-template>

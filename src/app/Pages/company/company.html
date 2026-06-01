@@ -1,0 +1,434 @@
+﻿<div class="company-page space-y-5">
+  <section class="company-header app-dashboard-panel animate-dashboard-rise">
+    <div class="company-header__main">
+      <h1>Company</h1>
+      <p>Manage company identity, departments, access rules, and workspace-level settings.</p>
+      <div class="company-header__chips" *ngIf="profile">
+        <span class="dashboard-filter-chip">{{ profile.company_name || 'Active workspace' }}</span>
+        <span class="dashboard-filter-chip">{{ roleChipLabel }}</span>
+        <span class="dashboard-filter-chip">{{ workspaceStatusLabel }}</span>
+        <span class="dashboard-filter-chip">{{ profile.plan_code || 'Plan not set' }}</span>
+      </div>
+    </div>
+
+    <div class="company-header__actions">
+      <button type="button" class="dashboard-action-button" (click)="refresh()" [disabled]="loading">Refresh</button>
+      <button
+        *ngIf="canEditCompanyProfile && (hasPendingCompanyChanges || savingCompany)"
+        type="button"
+        class="dashboard-action-button dashboard-action-button--primary"
+        (click)="saveCompanyProfile()"
+        [disabled]="savingCompany || !hasPendingCompanyChanges || loading">
+        {{ savingCompany ? 'Saving...' : 'Save Changes' }}
+      </button>
+    </div>
+  </section>
+
+  <section *ngIf="feedback" class="company-feedback" [class.company-feedback--error]="feedback.type === 'error'">
+    {{ feedback.text }}
+  </section>
+
+  <ng-container *ngIf="viewState === 'loading'">
+    <app-card-skeleton-loader [count]="4"></app-card-skeleton-loader>
+  </ng-container>
+
+  <section *ngIf="viewState === 'permission_denied'" class="company-state app-dashboard-panel">
+    <p class="company-state__title">Company access is unavailable</p>
+    <p class="company-state__body">Your workspace permissions do not allow this page.</p>
+  </section>
+
+  <app-error-state
+    *ngIf="viewState === 'error'"
+    title="Company page failed to load"
+    [message]="errorMessage || 'Please refresh and try again.'"
+    (retry)="refresh()">
+  </app-error-state>
+
+  <ng-container *ngIf="viewState === 'ready' && profile">
+    <section class="company-tabs app-dashboard-panel">
+      <button type="button" [class.active]="activeTab === 'overview'" (click)="setTab('overview')">Overview</button>
+      <button type="button" [class.active]="activeTab === 'departments'" (click)="setTab('departments')">Departments</button>
+      <button type="button" [class.active]="activeTab === 'access'" (click)="setTab('access')">Access</button>
+      <button type="button" [class.active]="activeTab === 'settings'" (click)="setTab('settings')">Settings</button>
+    </section>
+
+    <section *ngIf="partialWarnings.length" class="company-partial-warning">
+      <p>Some workspace sections are unavailable due to permissions.</p>
+      <ul>
+        <li *ngFor="let warning of partialWarnings">{{ warning }}</li>
+      </ul>
+    </section>
+
+    <section class="company-tab-panel" [attr.data-tab]="activeTab">
+      <ng-container [ngSwitch]="activeTab">
+        <div *ngSwitchCase="'overview'" class="company-overview space-y-4">
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Company Profile</h2>
+              <p class="company-card__sub">Workspace identity and subscription snapshot.</p>
+            </div>
+
+            <div class="company-profile-grid">
+              <label class="company-input-label">
+                Company Name
+                <input
+                  [(ngModel)]="companyNameDraft"
+                  name="companyNameDraft"
+                  [disabled]="!canEditCompanyProfile"
+                  class="company-input" />
+              </label>
+
+              <div class="company-profile-meta">
+                <div><span>Workspace Status</span><strong>{{ workspaceStatusLabel }}</strong></div>
+                <div><span>Plan Code</span><strong>{{ profile.plan_code || 'Not set' }}</strong></div>
+                <div><span>Billing Status</span><strong>{{ profile.billing_status || 'Not set' }}</strong></div>
+                <div><span>Created</span><strong>{{ formatDate(profile.date_created) }}</strong></div>
+                <div><span>Last Updated</span><strong>{{ formatDate(profile.date_updated) }}</strong></div>
+              </div>
+            </div>
+
+          </article>
+
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Workspace Summary</h2>
+              <p class="company-card__sub">Current workforce and workspace structure at a glance.</p>
+            </div>
+            <div class="company-metrics">
+              <div><span>Active Members</span><strong>{{ roleSummary.totalActiveMembers }}</strong></div>
+              <div><span>Owners</span><strong>{{ roleSummary.owners }}</strong></div>
+              <div><span>HR</span><strong>{{ roleSummary.hr }}</strong></div>
+              <div><span>Managers</span><strong>{{ roleSummary.managers }}</strong></div>
+              <div><span>Employees</span><strong>{{ roleSummary.employees }}</strong></div>
+              <div><span>Unassigned Members</span><strong>{{ roleSummary.unassignedMembers }}</strong></div>
+              <div><span>Active Departments</span><strong>{{ activeDepartmentsCount }}</strong></div>
+              <div><span>Pending Invites</span><strong>{{ pendingInvitesCount }}</strong></div>
+            </div>
+          </article>
+
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Setup Health</h2>
+              <p class="company-card__sub">Operational setup checks for this workspace.</p>
+            </div>
+            <div class="company-health-list">
+              <div class="company-health-row" *ngFor="let item of setupHealth">
+                <span>{{ item.label }}</span>
+                <strong [class.ok]="item.completed">{{ item.completed ? 'Completed' : 'Needs Attention' }}</strong>
+              </div>
+            </div>
+            <p *ngIf="setupNeedsAssignmentAttention" class="company-inline-hint">
+              Some members are not assigned to a department. Review Workforce or assign departments.
+            </p>
+            <div class="company-department-card__actions mt-3">
+              <button type="button" class="company-row-action" (click)="viewWorkforce()">Open Workforce</button>
+              <button type="button" class="company-row-action company-row-action--primary" (click)="openDepartmentsTab()">Manage Departments</button>
+            </div>
+          </article>
+        </div>
+
+        <div *ngSwitchCase="'departments'" class="company-departments space-y-4">
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head company-card__head--row">
+              <div>
+                <h2>Departments</h2>
+                <p class="company-card__sub">Manage department ownership, status, and workforce structure.</p>
+              </div>
+              <button
+                type="button"
+                class="dashboard-action-button dashboard-action-button--primary"
+                (click)="openCreateDepartmentModal()"
+                [disabled]="!canManageDepartments"
+                [attr.title]="departmentActionDisabledReason() || null">
+                Add Department
+              </button>
+            </div>
+
+            <label class="company-input-label company-input-label--search">
+              Search
+              <input [(ngModel)]="departmentSearch" name="departmentSearch" class="company-input" placeholder="Search department or manager" />
+            </label>
+
+            <div class="company-department-list" *ngIf="filteredDepartments.length; else noDepartments">
+              <article class="company-department-card" *ngFor="let department of filteredDepartments; trackBy: trackByDepartment">
+                <div class="company-department-card__top">
+                  <h3>{{ department.name }}</h3>
+                  <span class="company-status-pill" [class.active]="department.is_active" [class.inactive]="!department.is_active">
+                    {{ department.is_active ? 'Active' : 'Inactive' }}
+                  </span>
+                </div>
+                <div class="company-department-card__meta">
+                  <span>Active Members: <strong>{{ departmentActiveMemberCount(department.id) }}</strong></span>
+                  <span>Manager: <strong>{{ managerLabel(department) }}</strong></span>
+                  <span>Created: <strong>{{ formatDate(department.date_created) }}</strong></span>
+                  <span *ngIf="department.date_updated">Updated: <strong>{{ formatDate(department.date_updated) }}</strong></span>
+                </div>
+                <div class="company-department-card__actions">
+                  <button type="button" class="company-row-action" (click)="viewWorkforce(department.id)">View Workforce</button>
+                  <button type="button" class="company-row-action" (click)="openEditDepartmentModal(department)" [disabled]="!canManageDepartments" [attr.title]="departmentActionDisabledReason() || null">Edit</button>
+                  <button type="button" class="company-row-action" (click)="assignOrChangeManager(department)" [disabled]="!canManageDepartments" [attr.title]="departmentActionDisabledReason() || null">
+                    {{ department.manager_member_id ? 'Change Manager' : 'Assign Manager' }}
+                  </button>
+                  <button type="button" class="company-row-action" (click)="toggleDepartmentActive(department)" [disabled]="!canManageDepartments">
+                    {{ department.is_active ? 'Deactivate' : 'Activate' }}
+                  </button>
+                </div>
+              </article>
+            </div>
+
+            <ng-template #noDepartments>
+              <div class="company-empty-inline">No departments available for this workspace.</div>
+            </ng-template>
+          </article>
+        </div>
+
+        <div *ngSwitchCase="'access'" class="company-access space-y-4">
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Workspace Role Summary</h2>
+              <p class="company-card__sub">Current role distribution and invite backlog.</p>
+            </div>
+            <div class="company-metrics company-metrics--access">
+              <div><span>Owners</span><strong>{{ roleSummary.owners }}</strong></div>
+              <div><span>HR</span><strong>{{ roleSummary.hr }}</strong></div>
+              <div><span>Managers</span><strong>{{ roleSummary.managers }}</strong></div>
+              <div><span>Employees</span><strong>{{ roleSummary.employees }}</strong></div>
+              <div><span>Inactive Members</span><strong>{{ roleSummary.inactiveMembers }}</strong></div>
+              <div *ngIf="hasInviteData"><span>Pending Invites</span><strong>{{ pendingInvitesCount }}</strong></div>
+            </div>
+          </article>
+
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Role Permissions</h2>
+              <p class="company-card__sub">Operational permissions are always enforced by backend role access.</p>
+            </div>
+            <div class="company-rules-rows">
+              <div><span>Owner</span><p>Full workspace administration when backend permissions allow. Can manage departments, members, scan requests, alerts, reports, and company settings.</p></div>
+              <div><span>HR</span><p>Can manage workforce and scan-request operations when backend permissions allow. Can review operational readiness data if allowed.</p></div>
+              <div><span>Manager</span><p>Can view assigned operational scope and follow up on team readiness if backend permissions allow.</p></div>
+              <div><span>Employee</span><p>Mobile-first only. Employees should not use the web dashboard in the final product.</p></div>
+            </div>
+          </article>
+
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Pending Invites</h2>
+              <p class="company-card__sub">Invite tracking by role, department, and delivery state.</p>
+            </div>
+
+            <div *ngIf="hasInviteData; else inviteUnavailable">
+              <div class="company-invite-list" *ngIf="latestInvites.length; else noInvites">
+                <div class="company-invite-head">
+                  <span>Email</span>
+                  <span>Role</span>
+                  <span>Department</span>
+                  <span>Status</span>
+                  <span>Sent At</span>
+                  <span>Accepted At</span>
+                  <span>Invited By</span>
+                </div>
+                <div class="company-invite-row" *ngFor="let invite of latestInvites; trackBy: trackByInvite">
+                  <span><strong>{{ invite.email || 'Invite email unavailable' }}</strong></span>
+                  <span>{{ invite.member_role || 'member' }}</span>
+                  <span>{{ invite.department_name || 'Unassigned' }}</span>
+                  <span>{{ inviteStatusLabel(invite.status) }}</span>
+                  <span>{{ formatDate(invite.sent_at) }}</span>
+                  <span>{{ invite.claimed_at ? formatDate(invite.claimed_at) : 'Not accepted' }}</span>
+                  <span>{{ inviteInviterLabel(invite) }}</span>
+                </div>
+              </div>
+              <ng-template #noInvites>
+                <div class="company-empty-inline">No pending invites currently.</div>
+              </ng-template>
+            </div>
+
+            <ng-template #inviteUnavailable>
+              <div class="company-empty-inline">Invite data is unavailable due to workspace permissions.</div>
+            </ng-template>
+          </article>
+        </div>
+
+        <div *ngSwitchCase="'settings'" class="company-settings space-y-4">
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Shift Templates</h2>
+              <p class="company-card__sub">Active readiness schedule templates and member coverage.</p>
+            </div>
+
+            <div *ngIf="pageData?.shiftTemplatesIssue; else shiftReady" class="company-empty-inline">
+              Shift template management is not available for this workspace yet.
+            </div>
+
+            <ng-template #shiftReady>
+              <div class="company-shift-list" *ngIf="shiftTemplateRows.length; else noShiftTemplates">
+                <article class="company-shift-card" *ngFor="let template of shiftTemplateRows; trackBy: trackByShiftTemplate">
+                  <div class="company-shift-card__top">
+                    <h3>{{ template.name }}</h3>
+                    <span class="company-status-pill" [class.active]="template.isActive !== false" [class.inactive]="template.isActive === false">
+                      {{ template.isActive === false ? 'Inactive' : 'Active' }}
+                    </span>
+                  </div>
+                  <div class="company-shift-card__meta">
+                    <span>Assigned Members: <strong>{{ template.assignedMembers }}</strong></span>
+                    <span>Updated: <strong>{{ formatDate(template.dateUpdated) }}</strong></span>
+                  </div>
+                </article>
+              </div>
+              <ng-template #noShiftTemplates>
+                <div class="company-empty-inline">Shift template management is not available for this workspace yet.</div>
+              </ng-template>
+            </ng-template>
+          </article>
+
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Employee Access Policy</h2>
+            </div>
+            <p class="company-card__sub">{{ employeesWebPolicySummary }}</p>
+            <div class="company-rules-rows mt-3">
+              <div><span>Owner</span><p>Web allowed</p></div>
+              <div><span>HR</span><p>Web allowed</p></div>
+              <div><span>Manager</span><p>Web allowed</p></div>
+              <div><span>Employee</span><p>Mobile only (web blocked in final policy)</p></div>
+            </div>
+          </article>
+
+          <article class="company-card app-dashboard-panel">
+            <div class="company-card__head">
+              <h2>Scan Policy Summary</h2>
+            </div>
+            <div class="company-rules-rows">
+              <div><span>Operational policy</span><p>Readiness checks are operational wellness probability checks. They are not diagnosis.</p></div>
+              <div><span>Readiness labels</span><p>Stable, Low Focus, Elevated Fatigue, High Risk.</p></div>
+            </div>
+          </article>
+
+          <article class="company-card app-dashboard-panel">
+            <button type="button" class="company-collapse-toggle" (click)="toggleDangerZone()">
+              <span>Danger Zone</span>
+              <span>{{ dangerZoneExpanded ? 'Hide' : 'Show' }}</span>
+            </button>
+
+            <div *ngIf="dangerZoneExpanded" class="company-danger-body">
+              <p class="company-danger-helper">Sensitive workspace actions are kept here and require additional confirmation before they can be enabled.</p>
+              <div class="company-danger-row">
+                <button type="button" class="company-danger-button" disabled>Deactivate workspace</button>
+                <p>Available later with additional confirmation controls.</p>
+              </div>
+              <div class="company-danger-row">
+                <button type="button" class="company-danger-button" disabled>Transfer ownership</button>
+                <p>Available later with additional confirmation controls.</p>
+              </div>
+              <div class="company-danger-row">
+                <button type="button" class="company-danger-button" disabled>Leave workspace</button>
+                <p>Available later with additional confirmation controls.</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </ng-container>
+    </section>
+  </ng-container>
+
+  <div *ngIf="showCreateDepartmentModal" class="company-modal-backdrop">
+    <div class="company-modal company-modal--create">
+      <div class="company-modal__head">
+        <div>
+          <h3>Create Department</h3>
+          <p class="company-modal__subtitle">
+            Organize your workforce into operational groups for scan coverage and reporting.
+          </p>
+        </div>
+      </div>
+
+      <div class="company-modal__body">
+        <label class="company-input-label">
+          Department Name
+          <input
+            [(ngModel)]="departmentForm.name"
+            name="createDepartmentName"
+            class="company-input"
+            placeholder="e.g. Morning Operations" />
+        </label>
+        <label class="company-input-label">
+          Department Manager
+          <select [(ngModel)]="departmentForm.managerMemberId" name="createDepartmentManager" class="company-input">
+            <option value="">No manager assigned</option>
+            <option *ngFor="let option of managerOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="company-toggle-field">
+          <input type="checkbox" [(ngModel)]="departmentForm.isActive" name="createDepartmentActive" />
+          <span class="company-toggle-field__label">Active department</span>
+        </label>
+        <p class="company-toggle-field__helper">
+          Active departments can be used for workforce grouping and scan coverage.
+        </p>
+      </div>
+
+      <div class="company-modal__actions">
+        <button type="button" class="dashboard-action-button" (click)="closeDepartmentModals()" [disabled]="savingDepartment">Cancel</button>
+        <button
+          type="button"
+          class="dashboard-action-button dashboard-action-button--primary"
+          (click)="createDepartment()"
+          [disabled]="!canCreateDepartmentSubmit">
+          {{ savingDepartment ? 'Creating...' : 'Create Department' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showEditDepartmentModal" class="company-modal-backdrop">
+    <div class="company-modal">
+      <div class="company-modal__head">
+        <h3>Edit Department</h3>
+        <button type="button" class="company-row-action" (click)="closeDepartmentModals()">Cancel</button>
+      </div>
+
+      <div class="company-modal__body">
+        <label class="company-input-label">
+          Department name
+          <input [(ngModel)]="departmentForm.name" name="editDepartmentName" class="company-input" />
+        </label>
+        <label class="company-input-label">
+          Manager (optional)
+          <select [(ngModel)]="departmentForm.managerMemberId" name="editDepartmentManager" class="company-input">
+            <option value="">No manager assigned</option>
+            <option *ngFor="let option of managerOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+        <label class="company-toggle-field">
+          <input type="checkbox" [(ngModel)]="departmentForm.isActive" name="editDepartmentActive" />
+          <span class="company-toggle-field__label">Active department</span>
+        </label>
+      </div>
+
+      <div class="company-modal__actions">
+        <button type="button" class="dashboard-action-button" (click)="closeDepartmentModals()" [disabled]="savingDepartment">Cancel</button>
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="saveDepartment()" [disabled]="savingDepartment">
+          {{ savingDepartment ? 'Saving...' : 'Save Changes' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showDeactivateConfirmModal" class="company-modal-backdrop">
+    <div class="company-modal company-modal--small">
+      <div class="company-modal__head">
+        <h3>Deactivate Department</h3>
+      </div>
+      <p class="company-modal__message">
+        Deactivate {{ pendingDeactivateDepartment?.name || 'this department' }}? You can activate it again later.
+      </p>
+      <div class="company-modal__actions">
+        <button type="button" class="dashboard-action-button" (click)="closeDeactivateModal()" [disabled]="savingDepartment">Cancel</button>
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="confirmDeactivateDepartment()" [disabled]="savingDepartment">
+          {{ savingDepartment ? 'Updating...' : 'Confirm Deactivate' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

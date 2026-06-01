@@ -1,12 +1,10 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { RouterModule } from '@angular/router';
-import { map } from 'rxjs/operators';
-import { AdminTokenService } from '../../services/admin-token';
+
 import { NotificationsComponent } from '../../components/notifications/notifications';
+import { DashboardService, ScanResult } from '../../services/dashboard.service';
 import { SubscriptionService } from '../../services/subscription.service';
-import { environment } from 'src/environments/environment';
 
 @Component({
   selector: 'app-history-mobile',
@@ -27,15 +25,21 @@ export class HistoryMobileComponent implements OnInit {
   hasBusinessAccess = false;
 
   constructor(
-    private http: HttpClient,
-    private adminTokens: AdminTokenService,
+    private dashboardService: DashboardService,
     private subscriptions: SubscriptionService,
     private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
-    this.loadPlanState();
-    this.loadHistory();
+    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
+      this.hasBusinessAccess = snapshot.hasBusinessAccess;
+      this.cdr.detectChanges();
+    });
+
+    this.dashboardService.getScanResults(50).subscribe((scans) => {
+      this.scans = scans.map((scan) => this.mapToHistoryScan(scan));
+      this.cdr.detectChanges();
+    });
   }
 
   openScan(scan: HistoryScan): void {
@@ -48,69 +52,6 @@ export class HistoryMobileComponent implements OnInit {
     this.cdr.detectChanges();
   }
 
-  private loadHistory() {
-    const userToken = this.getUserToken();
-    const userId = this.getUserId(userToken);
-    const isAdminUser = this.isAdminUser(userToken);
-    const filterByUser = true;
-
-    if (!userId) {
-      this.applyScans([]);
-      return;
-    }
-
-    if (!isAdminUser) {
-      this.fetchScans(userToken, userId, filterByUser).subscribe({
-        next: (scans) => this.applyScans(scans),
-        error: (fetchErr) => console.error('[history-mobile] scan_results error:', fetchErr)
-      });
-      return;
-    }
-
-    this.adminTokens.getToken().subscribe({
-      next: (adminToken) => {
-        const token = adminToken ?? userToken;
-        this.fetchScans(token, userId, filterByUser).subscribe({
-          next: (scans) => this.applyScans(scans),
-          error: (err) => console.error('[history-mobile] scan_results error:', err)
-        });
-      },
-      error: () => {
-        this.fetchScans(userToken, userId, filterByUser).subscribe({
-          next: (scans) => this.applyScans(scans),
-          error: (fetchErr) => console.error('[history-mobile] scan_results error:', fetchErr)
-        });
-      }
-    });
-  }
-
-  private fetchScans(token: string | null, userId: string | null, filterByUser: boolean) {
-    const headers = this.buildAuthHeaders(token);
-    const url = this.buildScanResultsUrl(50, userId, filterByUser);
-
-    return this.http.get<{ data?: ScanResult[] }>(
-      url,
-      headers ? { headers } : {}
-    ).pipe(
-      map(res => res.data ?? [])
-    );
-  }
-
-  private buildScanResultsUrl(limit: number, userId: string | null, filterByUser: boolean): string {
-    const base = `${environment.API_URL}/items/scan_results?sort=-date_created&limit=${limit}`;
-    if (!filterByUser || !userId) {
-      return base;
-    }
-
-    const encodedId = encodeURIComponent(userId);
-    return `${base}&filter[scan_id][user][_eq]=${encodedId}`;
-  }
-
-  private applyScans(scans: ScanResult[]) {
-    this.scans = scans.map((scan) => this.mapToHistoryScan(scan));
-    this.cdr.detectChanges();
-  }
-
   private mapToHistoryScan(scan: ScanResult): HistoryScan {
     const createdAt = scan.date_created ? new Date(scan.date_created) : null;
     const date = createdAt ? createdAt.toLocaleDateString('en-CA') : '';
@@ -118,8 +59,8 @@ export class HistoryMobileComponent implements OnInit {
       ? createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
       : '';
     const result = this.coerceState(scan.overall_state);
-    const report = scan.explanation ?? scan.medical_report ?? 'No report available';
-    const recommendation = scan.medical_report ?? scan.explanation ?? 'No recommendation available';
+      const report = scan.explanation ?? 'No readiness summary available';
+      const recommendation = scan.explanation ?? 'No next-step guidance available';
 
     return {
       id: scan.id ?? '',
@@ -131,73 +72,6 @@ export class HistoryMobileComponent implements OnInit {
       fatigueLevel: this.stateToFatigueLevel(result),
       focusScore: this.formatFocusScore(scan)
     };
-  }
-
-  private buildAuthHeaders(token: string | null): HttpHeaders | null {
-    if (!token || this.isTokenExpired(token)) {
-      return null;
-    }
-
-    return new HttpHeaders({ Authorization: `Bearer ${token}` });
-  }
-
-  private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
-    if (!userToken || this.isTokenExpired(userToken)) {
-      return null;
-    }
-    return userToken;
-  }
-
-  private isTokenExpired(token: string): boolean {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return false;
-    }
-
-    try {
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const exp = payload?.exp;
-      if (typeof exp !== 'number') {
-        return false;
-      }
-      return Math.floor(Date.now() / 1000) >= exp;
-    } catch {
-      return false;
-    }
-  }
-
-  private isAdminUser(token: string | null): boolean {
-    if (!token || this.isTokenExpired(token)) {
-      return false;
-    }
-
-    const payload = this.decodeJwtPayload(token);
-    return payload?.['admin_access'] === true;
-  }
-
-  private decodeJwtPayload(token: string): Record<string, unknown> | null {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return null;
-    }
-
-    try {
-      const payload = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-      return JSON.parse(payload) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-
-  private getUserId(token: string | null): string | null {
-    if (!token || this.isTokenExpired(token)) {
-      return null;
-    }
-
-    const payload = this.decodeJwtPayload(token);
-    const id = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
-    return typeof id === 'string' && id ? id : null;
   }
 
   private normalizeState(state?: string): string {
@@ -257,24 +131,7 @@ export class HistoryMobileComponent implements OnInit {
     }
     return null;
   }
-
-  private loadPlanState() {
-    this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
-      this.hasBusinessAccess = snapshot.hasBusinessAccess;
-      this.cdr.detectChanges();
-    });
-  }
 }
-
-type ScanResult = {
-  id?: string;
-  date_created?: string;
-  overall_state?: string;
-  explanation?: string;
-  medical_report?: string;
-  task_performance_score?: number | string;
-  confidence?: number | string;
-};
 
 type HistoryScan = {
   id: string;
@@ -286,4 +143,3 @@ type HistoryScan = {
   fatigueLevel: string;
   focusScore: string;
 };
-

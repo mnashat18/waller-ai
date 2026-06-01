@@ -1,165 +1,228 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
-import { RouterModule } from '@angular/router';
-import { WeeklyChartComponent } from '../../components/weekly-chart/weekly-chart';
-import { DashboardService, DashboardStats, ScanResult } from '../../services/dashboard.service';
-import { SubscriptionService } from '../../services/subscription.service';
+import { Router, RouterModule } from '@angular/router';
+import { finalize } from 'rxjs/operators';
+
+import { CompanyContextService } from '../../core/context/company-context.service';
+import { InviteService } from '../../services/invites';
+import {
+  OperationalDashboardService,
+  type DashboardAlertItem,
+  type DashboardAttentionItem,
+  type DashboardDepartmentCompliance,
+  type DashboardKpiCardData,
+  type DashboardReadinessBucket,
+  type DashboardRequestItem,
+  type DashboardScanActivityItem,
+  type OperationalDashboardViewModel
+} from '../../services/operational-dashboard.service';
+import { PostLoginRoutingService } from '../../services/post-login-routing.service';
+import { DashboardSectionComponent } from '../../shared/ui/dashboard-section/dashboard-section.component';
+import { ErrorStateComponent } from '../../shared/ui/error-state/error-state.component';
+import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
+import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
+import { RiskBadgeComponent } from '../../shared/ui/risk-badge/risk-badge.component';
+import { StatusBadgeComponent } from '../../shared/ui/status-badge/status-badge.component';
 
 @Component({
-  standalone: true,
   selector: 'app-dashboard',
-  imports: [CommonModule, RouterModule, WeeklyChartComponent],
-  templateUrl: './dashboard.html'
+  standalone: true,
+  imports: [
+    CommonModule,
+    RouterModule,
+    DashboardSectionComponent,
+    KpiCardComponent,
+    RiskBadgeComponent,
+    StatusBadgeComponent,
+    CardSkeletonLoaderComponent,
+    ErrorStateComponent
+  ],
+  templateUrl: './dashboard.html',
+  styleUrl: './dashboard.css'
 })
 export class Dashboard implements OnInit {
-  loading = false;
-  showScanModal = false;
-  hasBusinessAccess = false;
-  isUserRole = true;
-  skeletonCards = [0, 1, 2, 3];
-
-  stats: DashboardStats = {
-    stable: 0,
-    low_focus: 0,
-    fatigue: 0,
-    high_risk: 0
-  };
-
-  recentScans: ScanResult[] = [];
+  loading = true;
+  state: 'loadingContext' | 'loadingDashboard' | 'ready' | 'error' = 'loadingContext';
+  errorMessage = '';
+  view: OperationalDashboardViewModel | null = null;
+  activeMembership: any = null;
+  activeBusinessProfile: any = null;
+  activeMemberRole: string | null = null;
 
   constructor(
-    private dashboardService: DashboardService,
-    private subscriptions: SubscriptionService,
+    private dashboardService: OperationalDashboardService,
+    private workspaceContext: CompanyContextService,
+    private postLoginRouting: PostLoginRoutingService,
+    private invites: InviteService,
+    private router: Router,
     private cdr: ChangeDetectorRef
   ) {}
 
-  ngOnInit() {
-    this.loadDashboard();
-    this.loadPlanState();
+  ngOnInit(): void {
+    void this.bootstrap();
   }
 
-  loadDashboard() {
-    this.dashboardService.getDashboardSnapshot(20).subscribe({
-      next: (snapshot) => {
-        this.recentScans = snapshot.scans;
-        this.stats = snapshot.stats;
-        this.loading = false;
-        this.cdr.detectChanges();
-      },
-      error: (fetchErr) => {
-        console.error('[dashboard] scan_results error:', fetchErr);
-        this.loading = false;
+  refresh(): void {
+    void this.bootstrap();
+  }
+
+  trackByKpi(index: number, item: DashboardKpiCardData): string {
+    return `${index}-${item.label}`;
+  }
+
+  trackByAttention(index: number, item: DashboardAttentionItem): string {
+    return `${index}-${item.id}`;
+  }
+
+  trackByBucket(index: number, item: DashboardReadinessBucket): string {
+    return `${index}-${item.key}`;
+  }
+
+  trackByDepartment(index: number, item: DashboardDepartmentCompliance): string {
+    return `${index}-${item.id}`;
+  }
+
+  trackByScan(index: number, item: DashboardScanActivityItem): string {
+    return `${index}-${item.id}`;
+  }
+
+  trackByAlert(index: number, item: DashboardAlertItem): string {
+    return `${index}-${item.id}`;
+  }
+
+  trackByRequest(index: number, item: DashboardRequestItem): string {
+    return `${index}-${item.id}`;
+  }
+
+  private async bootstrap(): Promise<void> {
+    try {
+      this.state = 'loadingContext';
+      this.loading = true;
+      this.errorMessage = '';
+      this.view = null;
+
+      const context = await this.resolveDashboardContext();
+
+      console.log('[Dashboard] context result', context);
+
+      if (!context?.activeMembership?.id || !context?.activeBusinessProfile?.id) {
+        const inviteFlowDetected = this.hasInviteClaimSignal();
+        if (inviteFlowDetected) {
+          this.state = 'error';
+          this.errorMessage = 'Invite accepted, but workspace context could not be loaded.';
+          return;
+        }
+
+        console.warn('[Dashboard] missing context, redirecting to workspace access');
+        await this.router.navigateByUrl('/app/workspace-access', { replaceUrl: true });
+        return;
       }
-    });
-  }
 
-  openScanModal() {
-    this.showScanModal = true;
-  }
+      this.activeMembership = context.activeMembership;
+      this.activeBusinessProfile = context.activeBusinessProfile;
+      this.activeMemberRole = context.activeMemberRole;
 
-  closeScanModal() {
-    this.showScanModal = false;
-  }
+      this.state = 'loadingDashboard';
 
-  private loadPlanState() {
-    this.subscriptions.getBusinessAccessSnapshot({ forceRefresh: true }).subscribe((snapshot) => {
-      this.hasBusinessAccess = snapshot.hasBusinessAccess;
-      this.isUserRole = this.resolveIsUserRole();
+      await this.loadDashboardData(context.activeBusinessProfile.id);
+
+      this.state = 'ready';
+    } catch (error) {
+      console.error('[Dashboard] failed to load', error);
+      this.state = 'error';
+      this.errorMessage = 'Dashboard failed to load.';
+    } finally {
+      this.loading = this.state !== 'ready' && this.state !== 'error';
       this.cdr.detectChanges();
+    }
+  }
+
+  private loadDashboardData(_businessProfileId: string): Promise<void> {
+    this.loading = true;
+    this.errorMessage = '';
+    this.view = null;
+
+    return new Promise((resolve, reject) => {
+      this.dashboardService.getDashboardData(_businessProfileId).pipe(
+        finalize(() => {
+          this.loading = false;
+          this.cdr.detectChanges();
+        })
+      ).subscribe({
+        next: (view) => {
+          this.view = view;
+          resolve();
+        },
+        error: (error) => {
+          this.errorMessage = error?.message || 'Failed to load dashboard data.';
+          reject(error);
+        }
+      });
     });
   }
 
-  private resolveIsUserRole(): boolean {
-    const role = this.readRoleHint();
-    return role === '' || role === 'user';
-  }
+  private async resolveDashboardContext(): Promise<{
+    activeMembership: any;
+    activeBusinessProfile: any;
+    activeMemberRole: string;
+  } | null> {
+    const inviteFlowDetected = this.hasInviteClaimSignal();
+    const maxAttempts = inviteFlowDetected ? 3 : 1;
 
-  private readRoleHint(): string {
-    if (typeof localStorage === 'undefined') {
-      return '';
-    }
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const context = await Promise.race([
+        this.workspaceContext.ensureActiveContext(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
+      ]);
 
-    const storedRoleName = this.pickLowerString(localStorage.getItem('user_role_name'));
-    if (storedRoleName) {
-      return storedRoleName;
-    }
+      if (context?.activeMembership?.id && context?.activeBusinessProfile?.id) {
+        return context;
+      }
 
-    const payload = this.decodeJwtPayload(this.getSessionToken());
-    if (!payload) {
-      return '';
-    }
+      if (!inviteFlowDetected || attempt >= maxAttempts - 1) {
+        return context;
+      }
 
-    const roleCandidates: unknown[] = [
-      payload['member_role'],
-      payload['business_role'],
-      payload['role_name'],
-      payload['role_label'],
-      payload['account_type'],
-      payload['role']
-    ];
-
-    for (const candidate of roleCandidates) {
-      const value = this.pickLowerString(candidate);
-      if (value) {
-        return value;
+      try {
+        await this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true });
+      } catch {
+        // Keep retrying with best-effort context restore.
       }
     }
 
-    return '';
+    return null;
   }
 
-  private getSessionToken(): string {
+  private hasInviteClaimSignal(): boolean {
+    if (this.invites.hasClaimCompleted()) {
+      return true;
+    }
+
+    const pendingToken = this.invites.getPendingInviteToken();
+    if (pendingToken) {
+      return true;
+    }
+
     if (typeof localStorage === 'undefined') {
-      return '';
-    }
-
-    const tokenCandidates = [
-      localStorage.getItem('token'),
-      localStorage.getItem('access_token'),
-      localStorage.getItem('directus_token')
-    ];
-
-    for (const tokenCandidate of tokenCandidates) {
-      const value = this.pickLowerString(tokenCandidate);
-      if (value) {
-        return tokenCandidate ?? '';
-      }
-    }
-
-    return '';
-  }
-
-  private decodeJwtPayload(token: string): Record<string, unknown> | null {
-    if (!token) {
-      return null;
-    }
-
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return null;
+      return false;
     }
 
     try {
-      return JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>;
+      const prefix = 'invite_claim_success_';
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index);
+        if (!key || !key.startsWith(prefix)) {
+          continue;
+        }
+
+        if (localStorage.getItem(key) === 'true') {
+          return true;
+        }
+      }
     } catch {
-      return null;
-    }
-  }
-
-  private pickLowerString(value: unknown): string {
-    if (typeof value === 'string') {
-      const trimmed = value.trim().toLowerCase();
-      return trimmed;
+      return false;
     }
 
-    if (typeof value === 'number' && !Number.isNaN(value)) {
-      return String(value).toLowerCase();
-    }
-
-    return '';
-  }
-
-  trackByIndex(index: number): number {
-    return index;
+    return false;
   }
 }

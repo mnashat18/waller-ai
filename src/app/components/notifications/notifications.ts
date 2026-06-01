@@ -1,9 +1,15 @@
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { interval, of, Subscription } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
-import { environment } from 'src/environments/environment';
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Router } from '@angular/router';
+import { Subscription } from 'rxjs';
+
+import { environment } from '../../../environments/environment';
+import {
+  NotificationsService,
+  type WorkspaceNotification
+} from '../../services/notifications.service';
+import { AuthService } from '../../services/auth';
 
 @Component({
   selector: 'app-notifications',
@@ -13,364 +19,150 @@ import { environment } from 'src/environments/environment';
   styleUrl: './notifications.css'
 })
 export class NotificationsComponent implements OnInit, OnDestroy {
-
   open = false;
   loading = false;
-  selectedNotification: NotificationItem | null = null;
+  errorMessage = '';
   notifications: NotificationItem[] = [];
+  unreadCount = 0;
+  selectedNotification: NotificationItem | null = null;
 
-  private refreshSub?: Subscription;
-  private notificationsEndpointForbidden = false;
+  private stateSub?: Subscription;
 
   constructor(
+    private notificationsService: NotificationsService,
+    private auth: AuthService,
     private http: HttpClient,
-    private cdr: ChangeDetectorRef
+    private router: Router
   ) {}
 
-  ngOnInit() {
-    this.loadNotifications();
-    this.refreshSub = interval(30000).subscribe(() => this.loadNotifications());
+  ngOnInit(): void {
+    this.notificationsService.initialize();
+    this.stateSub = this.notificationsService.state$.subscribe((state) => {
+      this.loading = state.loading;
+      this.errorMessage = state.error ?? '';
+      this.unreadCount = state.unreadCount;
+      this.notifications = (state.recentNotifications ?? []).map((row) => this.mapItem(row));
+    });
+    this.notificationsService.refresh('component-init');
   }
 
-  ngOnDestroy() {
-    this.refreshSub?.unsubscribe();
+  ngOnDestroy(): void {
+    this.stateSub?.unsubscribe();
   }
 
-  toggleOpen() {
+  toggleOpen(): void {
     this.open = !this.open;
     if (this.open) {
-      this.loadNotifications();
+      this.notificationsService.refresh('panel-open');
     }
   }
 
-  closePanel() {
+  closePanel(): void {
     this.open = false;
   }
 
-  openDetails(notification: NotificationItem) {
+  refresh(): void {
+    this.notificationsService.refresh('panel-refresh');
+  }
+
+  viewAll(): void {
+    this.open = false;
+    void this.router.navigateByUrl('/app/activity');
+  }
+
+  openDetails(notification: NotificationItem): void {
     this.markAsRead(notification);
     this.selectedNotification = notification;
     this.open = false;
   }
 
-  closeDetails() {
+  closeDetails(): void {
     this.selectedNotification = null;
   }
 
-  statusClass(notification: NotificationItem): string {
-    const label = this.normalizeLabel(notification.status);
-    const type = this.normalizeLabel(notification.type);
-
-    if (type.includes('scan')) {
-      if (label.includes('stable')) {
-        return 'status-stable';
-      }
-      if (label.includes('low')) {
-        return 'status-low';
-      }
-      if (label.includes('fatigue')) {
-        return 'status-fatigue';
-      }
-      if (label.includes('risk')) {
-        return 'status-risk';
-      }
-      return 'status-stable';
-    }
-
-    if (label.includes('denied') || label.includes('rejected')) {
-      return 'status-denied';
-    }
-    if (label.includes('approved') || label.includes('accepted')) {
-      return 'status-approved';
-    }
-    if (label.includes('delayed') || label.includes('pending')) {
-      return 'status-delayed';
-    }
-    return 'status-delayed';
+  isUnread(notification: NotificationItem): boolean {
+    const status = this.normalize(notification.status);
+    return status === 'new' || status === 'unread' || status === 'open' || status === '';
   }
 
-  private loadNotifications() {
-    if (this.notificationsEndpointForbidden) {
-      this.notifications = [];
-      this.loading = false;
-      this.cdr.detectChanges();
-      return;
+  relativeTime(notification: NotificationItem): string {
+    if (!notification.dateCreated) {
+      return 'Just now';
     }
 
-    const token = this.getUserToken();
-    const userId = this.getUserId(token);
-
-    if (!token || !userId) {
-      this.notifications = [];
-      this.loading = false;
-      this.cdr.detectChanges();
-      return;
+    const timestamp = new Date(notification.dateCreated).getTime();
+    if (!Number.isFinite(timestamp)) {
+      return 'Just now';
     }
 
-    const headers = this.buildAuthHeaders(token);
-    if (!headers) {
-      this.notifications = [];
-      this.loading = false;
-      this.cdr.detectChanges();
-      return;
-    }
+    const diffSeconds = Math.max(Math.floor((Date.now() - timestamp) / 1000), 0);
+    if (diffSeconds < 60) return 'Just now';
+    const diffMinutes = Math.floor(diffSeconds / 60);
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
 
-    this.loading = true;
-    this.cdr.detectChanges();
-
-    this.fetchNotifications(headers, userId).subscribe({
-      next: (items) => {
-        const merged = items
-          .sort((a, b) => b.timestamp - a.timestamp)
-          .slice(0, 100);
-
-        this.notifications = merged;
-        this.loading = false;
-        this.cdr.detectChanges();
-      },
-      error: () => {
-        this.notifications = [];
-        this.loading = false;
-        this.cdr.detectChanges();
-      }
-    });
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric'
+    }).format(new Date(timestamp));
   }
 
-  private fetchNotifications(headers: HttpHeaders, userId: string) {
-    const fields = [
-      'id',
-      'date_created',
-      'title',
-      'body',
-      'type',
-      'status',
-      'link_type',
-      'link_id',
-      'meta'
-    ].join(',');
-
-    const params = new URLSearchParams({
-      'sort': '-date_created',
-      'limit': '100',
-      'fields': fields
-    });
-    params.set('filter[user][_eq]', userId);
-
-    return this.http.get<{ data?: NotificationRecord[] }>(
-      `${environment.API_URL}/items/notifications?${params.toString()}`,
-      { headers }
-    ).pipe(
-      map(res => (res.data ?? []).map((record) => this.mapNotification(record))),
-      catchError((err) => {
-        if (this.isForbiddenError(err)) {
-          this.notificationsEndpointForbidden = true;
-          this.refreshSub?.unsubscribe();
-        }
-        return of([]);
-      })
-    );
-  }
-
-  private mapNotification(record: NotificationRecord): NotificationItem {
-    const title = this.formatText(record.title, 'Notification');
-    const description = this.formatBody(record.body);
-    const status = this.formatText(record.status, 'Unread');
-    const type = this.formatText(record.type, 'General');
-    const date = this.formatTimestamp(record.date_created ?? '');
-    const statusLabel = this.normalizeLabel(status);
-    const isRead = statusLabel === 'read';
-
+  private mapItem(row: WorkspaceNotification): NotificationItem {
     return {
-      id: record.id ? `notification-${record.id}` : `notification-${record.date_created ?? ''}`,
-      sourceId: record.id,
-      type,
-      title,
-      description,
-      status,
-      date,
-      timestamp: this.toMillis(record.date_created),
-      isRead,
-      details: {
-        link_type: record.link_type ?? '',
-        link_id: record.link_id ?? '',
-        meta: record.meta ?? null
-      }
+      id: row.id,
+      title: row.title || 'Notification',
+      message: row.message || 'No additional details.',
+      status: row.status || 'new',
+      dateCreated: row.dateCreated,
+      iconKey: row.iconKey || 'general'
     };
   }
 
-  private normalizeLabel(value?: string): string {
-    return (value ?? '').toLowerCase();
-  }
-
-  private formatText(value: unknown, fallback: string): string {
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      return trimmed ? trimmed : fallback;
-    }
-    if (typeof value === 'number') {
-      return String(value);
-    }
-    return fallback;
-  }
-
-  private formatBody(value: unknown): string {
-    if (typeof value === 'string') {
-      return value;
-    }
-    if (value == null) {
-      return 'You have a new notification.';
-    }
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return 'You have a new notification.';
-    }
-  }
-
-  private formatTimestamp(value: string | number | Date): string {
-    if (!value) {
-      return '';
-    }
-    const date = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return String(value);
-    }
-    const datePart = date.toLocaleDateString('en-CA');
-    const timePart = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    return `${datePart} ${timePart}`;
-  }
-
-  private toMillis(value?: string | number | Date): number {
-    if (!value) {
-      return 0;
-    }
-    const date = value instanceof Date ? value : new Date(value);
-    const time = date.getTime();
-    return Number.isNaN(time) ? 0 : time;
-  }
-
-  private buildAuthHeaders(token: string | null): HttpHeaders | null {
-    if (!token || this.isTokenExpired(token)) {
-      return null;
+  private markAsRead(notification: NotificationItem): void {
+    if (!this.isUnread(notification)) {
+      return;
     }
 
-    return new HttpHeaders({
-      Authorization: `Bearer ${token}`
+    notification.status = 'read';
+
+    const token = this.auth.getStoredAccessToken();
+    if (!token) {
+      return;
+    }
+
+    this.http.patch(
+      `${environment.API_URL}/items/notifications/${encodeURIComponent(notification.id)}`,
+      {
+        status: 'read',
+        read_at: new Date().toISOString()
+      },
+      {
+        headers: this.auth.getAuthHeaders(token),
+        withCredentials: true
+      }
+    ).subscribe({
+      next: () => {
+        this.notificationsService.refresh('mark-read');
+      },
+      error: () => {
+        // ignore write failures to keep popup functional
+      }
     });
   }
 
-  private getUserToken(): string | null {
-    const userToken = localStorage.getItem('token') ?? localStorage.getItem('access_token') ?? localStorage.getItem('directus_token');
-    if (!userToken || this.isTokenExpired(userToken)) {
-      return null;
-    }
-
-    return userToken;
-  }
-
-  private getUserId(token: string | null): string | null {
-    if (!token || this.isTokenExpired(token)) {
-      return null;
-    }
-
-    const payload = this.decodeJwtPayload(token);
-    const id = payload?.['id'] ?? payload?.['user_id'] ?? payload?.['sub'];
-    return typeof id === 'string' && id ? id : null;
-  }
-
-  private decodeJwtPayload(token: string): Record<string, unknown> | null {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return null;
-    }
-
-    try {
-      const payload = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-      return JSON.parse(payload) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-
-  private isTokenExpired(token: string): boolean {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return false;
-    }
-
-    try {
-      const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-      const exp = payload?.exp;
-      if (typeof exp !== 'number') {
-        return false;
-      }
-      return Math.floor(Date.now() / 1000) >= exp;
-    } catch {
-      return false;
-    }
-  }
-
-  private isForbiddenError(err: any): boolean {
-    return err?.status === 401 || err?.status === 403;
-  }
-
-  get unreadCount(): number {
-    return this.notifications.filter((n) => !n.isRead).length;
-  }
-
-  private markAsRead(notification: NotificationItem) {
-    if (notification.isRead) {
-      return;
-    }
-
-    const token = this.getUserToken();
-    const headers = token ? this.buildAuthHeaders(token) : null;
-    if (!headers || !notification.sourceId) {
-      notification.isRead = true;
-      notification.status = 'Read';
-      return;
-    }
-
-    notification.isRead = true;
-    notification.status = 'Read';
-
-    this.http.patch(
-      `${environment.API_URL}/items/notifications/${encodeURIComponent(String(notification.sourceId))}`,
-      { status: 'Read' },
-      { headers }
-    ).pipe(
-      catchError(() => {
-        notification.isRead = false;
-        notification.status = 'Unread';
-        return of(null);
-      })
-    ).subscribe();
+  private normalize(value: string | null | undefined): string {
+    return (value ?? '').trim().toLowerCase();
   }
 }
 
 type NotificationItem = {
   id: string;
-  sourceId?: string | number;
-  type: string;
   title: string;
-  description: string;
+  message: string;
   status: string;
-  date: string;
-  timestamp: number;
-  isRead: boolean;
-  details: Record<string, unknown>;
+  dateCreated: string | null;
+  iconKey: string;
 };
-
-type NotificationRecord = {
-  id?: string | number;
-  date_created?: string;
-  user?: string | number | Record<string, unknown>;
-  title?: string;
-  body?: unknown;
-  type?: string;
-  status?: string;
-  link_type?: string;
-  link_id?: string | number;
-  meta?: unknown;
-};
-

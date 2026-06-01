@@ -6,6 +6,8 @@ import { AuthService } from '../../services/auth';
 import { of, Subscription } from 'rxjs';
 import { catchError, filter, map, switchMap, timeout } from 'rxjs/operators';
 import { BusinessCenterService } from '../../services/business-center.service';
+import { InviteService } from '../../services/invites';
+import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 
 @Component({
   selector: 'app-authlanding',
@@ -30,6 +32,9 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   authMode: 'signup' | 'login' = 'signup';
   submitting = false;
   feedback = '';
+  inviteMode = false;
+  showSignupPassword = false;
+  showLoginPassword = false;
 
   signup = {
     firstName: '',
@@ -46,22 +51,15 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   private routeSub?: Subscription;
   private textRotationInterval: ReturnType<typeof setInterval> | null = null;
   private textRotationSwapTimer: ReturnType<typeof setTimeout> | null = null;
-  private snowAnimationFrame: number | null = null;
   private revealObserver: IntersectionObserver | null = null;
-  private snowCanvas: HTMLCanvasElement | null = null;
-  private readonly handleWindowResize = () => {
-    if (!this.snowCanvas) {
-      return;
-    }
-    this.snowCanvas.width = window.innerWidth;
-    this.snowCanvas.height = window.innerHeight;
-  };
 
   constructor(
     private auth: AuthService,
     private businessCenter: BusinessCenterService,
     private router: Router,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
+    private invites: InviteService,
+    private postLoginRouting: PostLoginRoutingService
   ) {}
 
   ngOnInit() {
@@ -73,7 +71,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   ngAfterViewInit() {
     this.startTextRotation();
-    this.startSnow();
     this.setupReveal();
   }
 
@@ -87,16 +84,10 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       clearTimeout(this.textRotationSwapTimer);
       this.textRotationSwapTimer = null;
     }
-    if (this.snowAnimationFrame !== null) {
-      cancelAnimationFrame(this.snowAnimationFrame);
-      this.snowAnimationFrame = null;
-    }
     if (this.revealObserver) {
       this.revealObserver.disconnect();
       this.revealObserver = null;
     }
-    this.snowCanvas = null;
-    window.removeEventListener('resize', this.handleWindowResize);
   }
 
   openAuth(mode: 'signup' | 'login' = 'signup') {
@@ -117,6 +108,14 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   switchAuth(mode: 'signup' | 'login') {
     this.authMode = mode;
     this.feedback = '';
+  }
+
+  toggleSignupPasswordVisibility() {
+    this.showSignupPassword = !this.showSignupPassword;
+  }
+
+  toggleLoginPasswordVisibility() {
+    this.showLoginPassword = !this.showLoginPassword;
   }
 
   submitSignup() {
@@ -162,14 +161,36 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         this.submitting = false;
         return of(null);
       })
-    ).subscribe((result) => {
+    ).subscribe(async (result) => {
       if (!result?.loginResult) {
         return;
       }
 
-      const postAuthRedirect = this.auth.consumePostAuthRedirect('/dashboard');
       this.submitting = false;
       this.closeAuth(false);
+
+      const inviteToken = this.resolveInviteTokenFromContext();
+      if (inviteToken) {
+        await this.router.navigate(['/invites/claim'], {
+          queryParams: { token: inviteToken },
+          replaceUrl: true
+        });
+        return;
+      }
+
+      const nextRoute = await this.postLoginRouting.resolveDestination();
+      const hasActiveWorkspace = this.hasActiveWorkspaceContext();
+      const shouldSkipRequestWelcome =
+        this.inviteMode ||
+        hasActiveWorkspace ||
+        (nextRoute && nextRoute !== '/app/workspace-access');
+
+      if (shouldSkipRequestWelcome) {
+        await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
+        return;
+      }
+
+      const postAuthRedirect = this.auth.consumePostAuthRedirect('/dashboard');
       this.router.navigate(['/request-welcome'], {
         queryParams: {
           hasRequest: result.hasRequest ? '1' : '0',
@@ -194,23 +215,46 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         this.submitting = false;
         return of(null);
       })
-    ).subscribe((result) => {
+    ).subscribe(async (result) => {
       if (!result) {
         return;
       }
 
       this.submitting = false;
-      this.closeAuth();
-      this.router.navigateByUrl(this.auth.consumePostAuthRedirect('/dashboard'));
+      this.closeAuth(false);
+
+      const inviteToken = this.resolveInviteTokenFromContext();
+      if (inviteToken) {
+        await this.router.navigate(['/invites/claim'], {
+          queryParams: { token: inviteToken },
+          replaceUrl: true
+        });
+        return;
+      }
+
+      const nextRoute = await this.postLoginRouting.resolveDestination();
+      await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
     });
   }
 
   continueWithGoogle() {
+    const inviteToken = this.resolveInviteTokenFromContext();
+    if (inviteToken) {
+      this.invites.setPendingInviteToken(inviteToken);
+      this.auth.setPostAuthRedirect(`/invites/claim?token=${encodeURIComponent(inviteToken)}`);
+    }
     this.auth.loginWithGoogle();
   }
 
   private applyRouteAuthMode() {
     this.captureInviteFromQuery();
+
+    const hasInvite = this.route.snapshot.queryParamMap.has('invite');
+    const path = this.route.snapshot.routeConfig?.path;
+    if (hasInvite && path === 'login') {
+      this.openAuth('signup');
+      return;
+    }
 
     const dataMode = this.route.snapshot.data?.['authMode'];
     const queryMode = this.route.snapshot.queryParamMap.get('auth');
@@ -228,18 +272,79 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   }
 
   private captureInviteFromQuery() {
-    const inviteToken = this.route.snapshot.queryParamMap.get('invite')?.trim() ?? '';
-    if (!inviteToken) {
+    const tokenParam =
+      this.route.snapshot.queryParamMap.get('token')?.trim() ??
+      this.route.snapshot.queryParamMap.get('code')?.trim() ??
+      '';
+    const inviteParam = this.route.snapshot.queryParamMap.get('invite')?.trim() ?? '';
+    const inviteFlag = inviteParam === '1';
+    const inviteToken = tokenParam || (inviteParam && inviteParam !== '1' ? inviteParam : '');
+
+    if (inviteToken) {
+      try {
+        localStorage.setItem('pending_invite_token', inviteToken);
+      } catch {
+        // ignore storage errors
+      }
+
+      this.auth.setPostAuthRedirect(`/invites/claim?token=${encodeURIComponent(inviteToken)}`);
+    }
+
+    this.inviteMode = Boolean(inviteFlag || inviteToken || this.invites.getPendingInviteToken());
+
+    if (inviteToken && this.auth.isLoggedIn()) {
+      void this.router.navigate(['/invites/claim'], {
+        queryParams: { token: inviteToken },
+        replaceUrl: true
+      });
       return;
     }
 
-    try {
-      localStorage.setItem('pending_invite_token', inviteToken);
-    } catch {
-      // ignore storage errors
+    if (inviteFlag || inviteToken) {
+      const requestedMode = (this.route.snapshot.queryParamMap.get('auth') ?? '').trim().toLowerCase();
+      this.openAuth(requestedMode === 'login' ? 'login' : 'signup');
+    }
+  }
+
+  private hasInviteContext(): boolean {
+    const query = this.route.snapshot.queryParamMap;
+    if (query.has('token') || query.has('code')) {
+      return true;
     }
 
-    this.auth.setPostAuthRedirect('/requests');
+    const inviteParam = query.get('invite')?.trim() ?? '';
+    if (inviteParam && inviteParam !== '0') {
+      return true;
+    }
+
+    return Boolean(this.invites.getPendingInviteToken());
+  }
+
+  private resolveInviteTokenFromContext(): string | null {
+    const query = this.route.snapshot.queryParamMap;
+    const tokenParam = query.get('token')?.trim() ?? '';
+    const codeParam = query.get('code')?.trim() ?? '';
+    const inviteParam = query.get('invite')?.trim() ?? '';
+
+    const token = tokenParam || codeParam || (inviteParam && inviteParam !== '1' ? inviteParam : '');
+    if (token) {
+      return token;
+    }
+
+    return this.invites.getPendingInviteToken();
+  }
+
+  private hasActiveWorkspaceContext(): boolean {
+    if (typeof localStorage === 'undefined') {
+      return false;
+    }
+
+    const activeBusinessProfileId =
+      localStorage.getItem('active_business_profile_id')?.trim() ??
+      localStorage.getItem('active_business_profile')?.trim() ??
+      '';
+    const activeRole = (localStorage.getItem('active_member_role') ?? '').trim().toLowerCase();
+    return Boolean(activeBusinessProfileId && activeRole);
   }
 
   private resolveSignupError(err: any): string {
@@ -333,50 +438,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.textRotationInterval = setInterval(changeText, 3000);
   }
 
-  /* ===== SNOW PARTICLES ===== */
-  startSnow() {
-    const canvas = document.getElementById('snow') as HTMLCanvasElement | null;
-    if (!canvas) {
-      return;
-    }
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      return;
-    }
-    this.snowCanvas = canvas;
-    this.handleWindowResize();
-    window.addEventListener('resize', this.handleWindowResize);
-
-    const particles = Array.from({ length: 120 }).map(() => ({
-      x: Math.random() * canvas.width,
-      y: Math.random() * canvas.height,
-      r: Math.random() * 2 + 0.5,
-      vx: Math.random() * 0.3 - 0.15,
-      vy: Math.random() * 0.6 + 0.3
-    }));
-
-    const animate = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-
-      particles.forEach(p => {
-        p.x += p.vx;
-        p.y += p.vy;
-
-        if (p.y > canvas.height) p.y = 0;
-        if (p.x > canvas.width || p.x < 0) p.x = Math.random() * canvas.width;
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      this.snowAnimationFrame = requestAnimationFrame(animate);
-    };
-
-    animate();
-  }
-
   setupReveal() {
     if (typeof window === 'undefined') {
       return;
@@ -405,8 +466,8 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       { threshold: 0.2 }
     );
 
-    elements.forEach((el) => {
-      el.style.transitionDelay = '0s';
+    elements.forEach((el, index) => {
+      el.style.transitionDelay = `${Math.min(index * 90, 450)}ms`;
       this.revealObserver?.observe(el);
     });
   }

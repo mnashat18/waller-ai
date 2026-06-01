@@ -4,8 +4,8 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { Observable, of, throwError } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
-import { environment } from 'src/environments/environment';
+import { catchError, finalize, map, switchMap } from 'rxjs/operators';
+import { environment } from '../../../environments/environment';
 import { AuthService } from '../../services/auth';
 import { AdminTokenService } from '../../services/admin-token';
 
@@ -201,6 +201,13 @@ export class Profile implements OnInit {
           }),
           catchError(() => of({ user: null as ProfileUser | null, roleLabel: '', token }))
         );
+      })
+    ).pipe(
+      finalize(() => {
+        this.loading = false;
+        console.log('profile loading', this.loading);
+        console.log('profile data', this.profile);
+        this.cdr.detectChanges();
       })
     ).subscribe({
       next: ({ user, roleLabel, token }) => {
