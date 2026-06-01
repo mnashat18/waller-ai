@@ -1,0 +1,18 @@
+export const environment = {
+  production: false,
+  API_URL: 'https://dash.conntinuity.com',
+  authApiUrl: 'https://dash.conntinuity.com',
+  DIRECTUS_URL: 'https://dash.conntinuity.com',
+  FRONTEND_URL: 'http://localhost:4200',
+  AUTH_CALLBACK_URL: 'http://localhost:4200/auth-callback',
+  directusUrl: 'https://dash.conntinuity.com',
+  frontendUrl: 'http://localhost:4200',
+  authCallbackUrl: 'http://localhost:4200/auth-callback',
+  DIRECTUS_CLAIM_INVITE_FLOW_ID: '5bba9797-b6de-4819-a51b-6366d30a5bf0',
+  CLAIM_INVITE_FLOW_ENDPOINT: '',
+  ADMIN_TOKEN_ENDPOINT: 'http://127.0.0.1:3001/admin-token',
+  ADMIN_TOKEN_SECRET: '',
+  AUDIT_LOG_REVIEW_ROLE_IDS: [] as string[],
+  BUSINESS_ROLE_ID: '',
+  FREE_ROLE_ID: ''
+};
