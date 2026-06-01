@@ -180,7 +180,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
   }
 
   requestRecipient(req: any): string {
-    return req?.recipient || req?.requested_for_email || req?.requested_for_phone || '-';
+    return req?.recipient || req?.requested_for_phone || '-';
   }
 
   requestTarget(req: any): string {
@@ -201,17 +201,6 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     return `${datePart} ${timePart}`;
   }
 
-  accessBadgeLabel(): string {
-    if (this.loadingAccess) {
-      return 'Plan: Loading...';
-    }
-    if (!this.profile) {
-      return 'Plan: -';
-    }
-
-    const plan = (this.profile?.plan_code ?? 'free').toString().trim().toLowerCase();
-    return plan === 'business' ? 'Plan: Business' : 'Plan: Free';
-  }
 
   roleBadgeLabel(): string {
     if (this.loadingAccess) {
@@ -542,8 +531,9 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
     const requestCalls = uniqueEmails.map((email) =>
       this.businessCenter.createScanRequest({
-        requested_for_email: email,
-        required_state: requiredState
+        recipient_email: email,
+        request_type: 'manual',
+        status: 'pending'
       }, this.accessState?.orgId ?? null)
     );
 
@@ -980,11 +970,10 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
       id: optimisticId,
       target: 'scan',
       recipient: email,
-      requested_for_email: email,
       recipient_industry: null,
-      required_state: requiredState,
-      response_status: 'Pending',
-      timestamp: new Date().toISOString(),
+      request_type: 'manual',
+      status: 'pending',
+      requested_at: new Date().toISOString(),
       org_id: this.accessState?.orgId ?? null
     };
     this.optimisticRequests.set(optimisticId, row);
@@ -1040,17 +1029,17 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         continue;
       }
 
-      const optimisticEmail = this.normalizeEmail(optimistic.requested_for_email ?? optimistic.recipient ?? '');
-      const optimisticState = this.pickString(optimistic.required_state)?.toLowerCase() ?? '';
-      const optimisticTs = this.timestampMs(optimistic.timestamp);
+      const optimisticEmail = this.normalizeEmail(optimistic.recipient ?? '');
+      const optimisticState = this.pickString(optimistic['request_type'])?.toLowerCase() ?? '';
+      const optimisticTs = this.timestampMs(optimistic.requested_at);
 
       const matched = (remoteRows ?? []).some((row) => {
-        const remoteEmail = this.normalizeEmail(row?.requested_for_email ?? row?.recipient ?? '');
-        const remoteState = this.pickString(row?.required_state)?.toLowerCase() ?? '';
+        const remoteEmail = this.normalizeEmail(row?.recipient ?? '');
+        const remoteState = this.pickString(row?.['request_type'])?.toLowerCase() ?? '';
         if (!optimisticEmail || optimisticEmail !== remoteEmail || optimisticState !== remoteState) {
           return false;
         }
-        const remoteTs = this.timestampMs(row?.timestamp);
+        const remoteTs = this.timestampMs(row?.requested_at);
         return Math.abs(remoteTs - optimisticTs) <= 2 * 60 * 1000;
       });
 
@@ -1071,7 +1060,6 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         id,
         recipient:
           row?.recipient ??
-          row?.requested_for_email ??
           '-'
       } as RequestRecord;
 
@@ -1081,8 +1069,8 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
         return;
       }
 
-      const existingTs = this.timestampMs(existing.timestamp);
-      const nextTs = this.timestampMs(normalized.timestamp);
+      const existingTs = this.timestampMs(existing.requested_at);
+      const nextTs = this.timestampMs(normalized.requested_at);
       if (nextTs >= existingTs) {
         byId.set(id, { ...existing, ...normalized, id });
       }
@@ -1091,7 +1079,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
     for (const row of baseRows ?? []) push(row);
     for (const row of extraRows ?? []) push(row);
 
-    return Array.from(byId.values()).sort((a, b) => this.timestampMs(b.timestamp) - this.timestampMs(a.timestamp));
+    return Array.from(byId.values()).sort((a, b) => this.timestampMs(b.requested_at) - this.timestampMs(a.requested_at));
   }
 
   private reloadRequestsAndInvites(): void {
@@ -1196,7 +1184,7 @@ export class BusinessCenterComponent implements OnInit, OnDestroy {
 
   private calculateInviteMetrics(requests: any[], invites: any[]): InviteMetrics {
     const pendingRequests = (requests ?? []).reduce((count, row) => {
-      return count + (this.requestStatusLabel(row?.response_status) === 'Pending' ? 1 : 0);
+      return count + (this.requestStatusLabel(row?.status) === 'Pending' ? 1 : 0);
     }, 0);
 
     const metrics: InviteMetrics = {
