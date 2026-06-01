@@ -13,7 +13,7 @@
       <span *ngIf="!loadingBusinessProfile" class="chip">Role: {{ memberRoleLabel }}</span>
       <span *ngIf="!loadingBusinessProfile && isBusinessTrial" class="chip">{{ trialDaysLabel() }}</span>
       <a routerLink="/requests" class="chip">Back to Requests</a>
-      <a *ngIf="canCreateRequests" routerLink="/business-center" class="chip">Business Center</a>
+      <a *ngIf="canCreateRequests" routerLink="/app/dashboard" class="chip">Open Dashboard</a>
     </div>
   </div>
 
@@ -57,7 +57,7 @@
     </p>
     <div class="mt-5 flex gap-3">
       <a *ngIf="!businessAccessReason.toLowerCase().includes('viewer')" routerLink="/payment" class="btn-primary px-5 py-2 rounded-full">Open Billing</a>
-      <a routerLink="/business-center" class="chip">Open Business Center</a>
+      <a routerLink="/app/dashboard" class="chip">Open Dashboard</a>
       <a routerLink="/requests" class="chip">View Requests</a>
     </div>
   </div>
@@ -75,16 +75,15 @@
       </p>
 
       <form class="form-grid" (ngSubmit)="submitRequest()">
-        <label for="required-state">Required State</label>
+        <label for="request-type">Request Type</label>
         <select
-          id="required-state"
-          name="required_state"
-          [(ngModel)]="form.requiredState"
+          id="request-type"
+          name="request_type"
+          [(ngModel)]="form.requestType"
           class="input"
           required>
-          <option value="">Select required state</option>
-          <option *ngFor="let state of requiredStateOptions" [ngValue]="state">
-            {{ state }}
+          <option *ngFor="let type of requestTypeOptions" [ngValue]="type">
+            {{ type }}
           </option>
         </select>
 
@@ -114,8 +113,8 @@
           <p class="field-help">{{ recipientEntryHint() }}</p>
           <p *ngIf="recipientError" class="field-error">{{ recipientError }}</p>
           <p *ngIf="recipientInput.trim()" class="field-help invite-hint">
-            Hint: this email will receive a scan request with required state
-            "{{ form.requiredState || 'Select state first' }}".
+            Hint: this email will receive a scan request with type
+            "{{ form.requestType || 'manual' }}".
           </p>
           <p *ngIf="isBusinessTrial" class="section-note small">{{ businessInviteTrialNotice }}</p>
 
@@ -158,7 +157,7 @@
 
       <ul class="guide-list">
         <li>
-          <strong>Step 1:</strong> choose required state.
+            <strong>Step 1:</strong> choose request type.
         </li>
         <li>
           <strong>Step 2:</strong> add one or more recipients using + (email only).
