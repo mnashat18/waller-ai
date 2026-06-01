@@ -1,0 +1,299 @@
+<div class="space-y-6">
+  <app-page-action-bar>
+    <div actionBarMeta>
+      <p class="text-sm font-semibold text-slate-950">Departments</p>
+      <p class="mt-1 text-sm text-slate-500">
+        Department structure, manager assignment, shift coverage, and operational attention counts.
+      </p>
+    </div>
+
+    <div actionBarActions>
+      <button
+        type="button"
+        (click)="refresh()"
+        class="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700">
+        Refresh
+      </button>
+      <button
+        type="button"
+        (click)="openCreateModal()"
+        class="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+        Create Department
+      </button>
+    </div>
+  </app-page-action-bar>
+
+  <div *ngIf="feedbackMessage" class="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+    {{ feedbackMessage }}
+  </div>
+
+  <app-filter-bar-shell>
+    <input
+      [(ngModel)]="search"
+      name="departmentSearch"
+      placeholder="Search department or manager"
+      class="min-w-[15rem] rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-700" />
+    <select [(ngModel)]="statusFilter" name="departmentStatus" class="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-700">
+      <option value="">All statuses</option>
+      <option *ngFor="let option of statusOptions" [value]="option">{{ option | titlecase }}</option>
+    </select>
+    <button
+      type="button"
+      (click)="search = ''; statusFilter = ''"
+      class="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700">
+      Clear
+    </button>
+  </app-filter-bar-shell>
+
+  <ng-container *ngIf="loading">
+    <app-card-skeleton-loader [count]="4"></app-card-skeleton-loader>
+    <app-card-skeleton-loader [count]="4"></app-card-skeleton-loader>
+  </ng-container>
+
+  <app-error-state
+    *ngIf="!loading && errorMessage"
+    title="Departments page failed to load"
+    [message]="errorMessage"
+    (retry)="refresh()">
+  </app-error-state>
+
+  <app-empty-state-cta
+    *ngIf="!loading && !errorMessage && !pageData?.rows?.length"
+    title="No departments configured"
+    message="The active business profile does not have any departments yet."
+    ctaLabel="Refresh"
+    ctaRoute="/app/departments">
+  </app-empty-state-cta>
+
+  <ng-container *ngIf="!loading && !errorMessage && pageData">
+      <app-dashboard-section
+      eyebrow="Structure"
+      title="Department Summary"
+      description="Operational structure and coverage counts for the active company.">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <app-kpi-card
+          label="Departments"
+          [value]="pageData.rows.length.toString()"
+          helper="Total department records in the company."
+          tone="neutral"
+          toneLabel="Structure">
+        </app-kpi-card>
+        <app-kpi-card
+          label="Employees"
+          [value]="totalEmployees.toString()"
+          helper="Members assigned across all departments."
+          tone="neutral"
+          toneLabel="Roster">
+        </app-kpi-card>
+        <app-kpi-card
+          label="Shift Templates"
+          [value]="totalTemplates.toString()"
+          helper="Active shift templates across the company."
+          tone="neutral"
+          toneLabel="Templates">
+        </app-kpi-card>
+        <app-kpi-card
+          label="Open Alerts"
+          [value]="openAlerts.toString()"
+          helper="Alerts still operationally open across departments."
+          [tone]="openAlerts > 0 ? 'warning' : 'success'"
+          toneLabel="Attention">
+        </app-kpi-card>
+      </div>
+    </app-dashboard-section>
+
+    <app-dashboard-section
+      eyebrow="Directory"
+      title="Departments"
+      description="Review department ownership, staffing, readiness coverage, and current alert pressure.">
+      <div class="grid gap-4 xl:grid-cols-2">
+        <article
+          *ngFor="let row of filteredRows; trackBy: trackByDepartment"
+          class="rounded-[1.75rem] border border-slate-200 bg-white px-5 py-5 shadow-sm">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h3 class="text-xl font-semibold tracking-tight text-slate-950">{{ row.name }}</h3>
+            </div>
+            <app-status-badge [status]="departmentStatus(row)"></app-status-badge>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-2">
+            <div class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Manager</p>
+              <p class="mt-2 text-sm font-semibold text-slate-900">{{ row.manager_name || 'Unassigned' }}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Employees</p>
+              <p class="mt-2 text-sm font-semibold text-slate-900">{{ row.employee_count }}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Active</p>
+              <p class="mt-2 text-sm font-semibold text-slate-900">
+                {{ row.is_active ? 'Yes' : 'No' }}
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-6 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              (click)="openEditModal(row)"
+              class="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700">
+              Edit Department
+            </button>
+            <button
+              type="button"
+              (click)="openManagerModal(row)"
+              class="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700">
+              Assign Manager
+            </button>
+            <button
+              type="button"
+              (click)="reviewMembers(row)"
+              class="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+              Review Department Members
+            </button>
+          </div>
+        </article>
+      </div>
+    </app-dashboard-section>
+  </ng-container>
+
+  <div *ngIf="showCreateModal" class="fixed inset-0 z-40 bg-slate-950/40 px-4 py-10">
+    <div class="mx-auto max-w-2xl rounded-[2rem] bg-white px-6 py-6 shadow-2xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Create Department</p>
+          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Add Department</h2>
+        </div>
+        <button type="button" (click)="closeModal()" class="text-sm font-medium text-slate-500">Close</button>
+      </div>
+
+      <form class="mt-6 grid gap-4">
+        <label class="grid gap-2 text-sm font-medium text-slate-700">
+          Department Name
+          <input [(ngModel)]="form.name" name="departmentName" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm" />
+        </label>
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="grid gap-2 text-sm font-medium text-slate-700">
+            Active
+            <select [(ngModel)]="form.is_active" name="departmentActiveCreate" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+              <option [ngValue]="true">Active</option>
+              <option [ngValue]="false">Inactive</option>
+            </select>
+          </label>
+          <label class="grid gap-2 text-sm font-medium text-slate-700">
+            Manager
+            <select [(ngModel)]="form.manager_member" name="departmentManagerCreate" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+              <option value="">No manager</option>
+              <option *ngFor="let option of pageData?.managerOptions ?? []" [value]="option.id">{{ option.label }}</option>
+            </select>
+          </label>
+        </div>
+      </form>
+
+      <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <button
+          type="button"
+          (click)="closeModal()"
+          class="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700">
+          Cancel
+        </button>
+        <button
+          type="button"
+          (click)="createDepartment()"
+          [disabled]="saving"
+          class="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+          {{ saving ? 'Creating...' : 'Create Department' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showEditModal" class="fixed inset-0 z-40 bg-slate-950/40 px-4 py-10">
+    <div class="mx-auto max-w-2xl rounded-[2rem] bg-white px-6 py-6 shadow-2xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Edit Department</p>
+          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ selectedDepartment?.name }}</h2>
+        </div>
+        <button type="button" (click)="closeModal()" class="text-sm font-medium text-slate-500">Close</button>
+      </div>
+
+      <form class="mt-6 grid gap-4">
+        <label class="grid gap-2 text-sm font-medium text-slate-700">
+          Department Name
+          <input [(ngModel)]="form.name" name="departmentNameEdit" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm" />
+        </label>
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="grid gap-2 text-sm font-medium text-slate-700">
+            Active
+            <select [(ngModel)]="form.is_active" name="departmentActiveEdit" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+              <option [ngValue]="true">Active</option>
+              <option [ngValue]="false">Inactive</option>
+            </select>
+          </label>
+          <label class="grid gap-2 text-sm font-medium text-slate-700">
+            Manager
+            <select [(ngModel)]="form.manager_member" name="departmentManagerEdit" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+              <option value="">No manager</option>
+              <option *ngFor="let option of pageData?.managerOptions ?? []" [value]="option.id">{{ option.label }}</option>
+            </select>
+          </label>
+        </div>
+      </form>
+
+      <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <button
+          type="button"
+          (click)="closeModal()"
+          class="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700">
+          Cancel
+        </button>
+        <button
+          type="button"
+          (click)="saveDepartment()"
+          [disabled]="saving"
+          class="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+          {{ saving ? 'Saving...' : 'Save Department' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="showManagerModal" class="fixed inset-0 z-40 bg-slate-950/40 px-4 py-10">
+    <div class="mx-auto max-w-xl rounded-[2rem] bg-white px-6 py-6 shadow-2xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Assign Manager</p>
+          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ selectedDepartment?.name }}</h2>
+        </div>
+        <button type="button" (click)="closeModal()" class="text-sm font-medium text-slate-500">Close</button>
+      </div>
+
+      <label class="mt-6 grid gap-2 text-sm font-medium text-slate-700">
+        Manager
+        <select [(ngModel)]="form.manager_member" name="departmentManagerAssign" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+          <option value="">No manager</option>
+          <option *ngFor="let option of pageData?.managerOptions ?? []" [value]="option.id">{{ option.label }}</option>
+        </select>
+      </label>
+
+      <div class="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <button
+          type="button"
+          (click)="closeModal()"
+          class="inline-flex items-center rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700">
+          Cancel
+        </button>
+        <button
+          type="button"
+          (click)="assignManager()"
+          [disabled]="saving"
+          class="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+          {{ saving ? 'Saving...' : 'Assign Manager' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
