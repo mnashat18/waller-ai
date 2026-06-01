@@ -33,7 +33,7 @@ export class DashboardMobileComponent implements OnInit {
     high_risk: 6
   };
   hasBusinessAccess = false;
-  planLabel = 'Free';
+  workspaceLabel = 'No active company';
 
   private readonly cacheKey = 'dashboard_snapshot_v1';
   private readonly cacheTsKey = 'dashboard_snapshot_ts';
@@ -138,7 +138,7 @@ export class DashboardMobileComponent implements OnInit {
   private loadPlanState() {
     this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
       this.hasBusinessAccess = snapshot.hasBusinessAccess;
-      this.planLabel = snapshot.hasBusinessAccess ? 'Business' : 'Free';
+      this.workspaceLabel = snapshot.hasBusinessAccess ? 'Active company' : 'No active company';
     });
   }
 }
