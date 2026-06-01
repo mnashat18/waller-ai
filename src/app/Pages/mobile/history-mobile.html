@@ -58,7 +58,7 @@
       <div class="flex justify-between items-start">
         <div>
           <p class="text-xs text-slate-400">{{ scan.date }} - {{ scan.time }}</p>
-          <h2 class="text-lg font-semibold mt-1">Scan Details</h2>
+          <h2 class="text-lg font-semibold mt-1">Scan Summary</h2>
         </div>
         <button class="text-slate-400" (click)="closeScan()">x</button>
       </div>
@@ -77,7 +77,7 @@
       </div>
 
       <div class="mt-4">
-        <p class="text-xs text-slate-400">Medical Report</p>
+        <p class="text-xs text-slate-400">Readiness Summary</p>
         <p class="text-sm text-slate-200 mt-1">{{ scan.report }}</p>
       </div>
 
@@ -101,13 +101,14 @@
 
   <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2.5rem)] bg-slate-900/80 backdrop-blur border border-slate-800 rounded-2xl px-4 py-3 z-20">
     <div class="grid grid-cols-5 text-[10px] text-slate-400">
-      <a routerLink="/audit-logs" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
+      <a routerLink="/business-center" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M9 12h6"></path>
-          <path d="M9 16h6"></path>
-          <path d="M5 8h14v12H5z"></path>
+          <path d="M4 20V8l8-4 8 4v12"></path>
+          <path d="M8 20v-5h8v5"></path>
+          <path d="M9 10h.01"></path>
+          <path d="M15 10h.01"></path>
         </svg>
-        <span>Audit logs</span>
+        <span>Business</span>
       </a>
       <a routerLink="/requests" routerLinkActive="text-white" class="flex flex-col items-center gap-1">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
