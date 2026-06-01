@@ -30,6 +30,11 @@ yarn-error.log
 !.vscode/mcp.json
 .history/*
 
+.vs/
+backups/
+*.log
+_changed_files.txt
+app.routes.backup.ts
 # Miscellaneous
 /.angular/cache
 .sass-cache/
