@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { environment } from 'src/environments/environment';
+import { environment } from '../../environments/environment';
 import { Observable, of } from 'rxjs';
 import { catchError, finalize, map, tap, timeout } from 'rxjs/operators';
 
@@ -23,6 +23,10 @@ export class AdminTokenService {
   getToken(): Observable<string | null> {
     const endpoint = environment.ADMIN_TOKEN_ENDPOINT;
     if (!endpoint) {
+      return of(null);
+    }
+
+    if (endpoint.includes('127.0.0.1:3001') || endpoint.includes('localhost:3001')) {
       return of(null);
     }
 
