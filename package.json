@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve",
+    "start": "ng serve --host localhost --port 4200 --proxy-config proxy.conf.json",
     "start:admin-token-proxy": "node server/admin-token-proxy.js",
+    "fix:member-role-typo": "node server/fix-member-role-typo.js",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
@@ -31,6 +32,8 @@
     "@angular/platform-browser": "^21.1.0",
     "@angular/router": "^21.1.0",
     "chart.js": "^4.5.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },
