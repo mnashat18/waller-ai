@@ -1,78 +1,33 @@
-<div class="min-h-screen flex">
-
-  <!-- LEFT BRAND (Desktop only) -->
-  <div
-    class="hidden lg:flex w-1/2
-           bg-gradient-to-br from-indigo-600 to-blue-900
-           text-white items-center justify-center px-12">
-
-    <div class="max-w-md text-center space-y-6">
-
-      <!-- LOGO -->
-      <svg
-        class="mx-auto w-64"
-        viewBox="0 0 420 140"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#7C3AED"/>
-            <stop offset="100%" stop-color="#38BDF8"/>
-          </linearGradient>
-        </defs>
-
-        <g>
-          <polygon
-            points="40,20 80,45 80,85 40,110 0,85 0,45"
-            stroke="url(#brandGrad)"
-            stroke-width="4"
-            fill="none"
-          />
-          <path
-            d="M28 52 L28 78 M52 52 L52 78"
-            stroke="url(#brandGrad)"
-            stroke-width="4"
-            stroke-linecap="round"
-          />
-          <text x="120" y="92" fill="white" font-size="48">
-            Waller <tspan fill="#38BDF8">AI</tspan>
-          </text>
-        </g>
-      </svg>
-
-      <h1 class="text-3xl font-semibold">
-        Create your AI Health Profile
-      </h1>
-
-      <p class="text-white/80">
-        Join Waller AI and start proactive,
-        intelligent healthcare monitoring.
+<div class="auth-layout">
+  <section class="auth-brand">
+    <div class="brand-content">
+      <img class="brand-mark" src="assets/logo/waller-ai.png" alt="Wellar AI" />
+      <p class="brand-kicker">{{ inviteMode ? 'Workspace invite' : 'Enterprise readiness control' }}</p>
+      <h1>{{ inviteMode ? 'Create your account to join your workspace' : 'Create a premium workspace' }}</h1>
+      <p *ngIf="inviteMode">
+        You were invited to join a Wellar AI workspace. Sign in or create an account to continue.
       </p>
+      <p *ngIf="!inviteMode">
+        Sign up to unlock the dashboard, manage company scope, and present a stronger product story.
+      </p>
+      <div class="brand-points">
+        <span>Fast onboarding</span>
+        <span>Secure access</span>
+        <span>{{ inviteMode ? 'Invite-based access' : 'Operational clarity' }}</span>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <!-- RIGHT FORM -->
-  <div class="flex flex-1 items-center justify-center px-4">
+  <section class="auth-form">
+    <div class="auth-card animate-auth">
+      <p class="auth-eyebrow">Create account</p>
+      <h2>Sign up</h2>
+      <p class="auth-subtitle" *ngIf="!inviteMode">Start your workspace and move into the command center.</p>
+      <p class="auth-subtitle" *ngIf="inviteMode">You were invited to join a Wellar AI workspace. Sign in or create an account to continue.</p>
+      <p class="auth-subtitle" *ngIf="authNotice">{{ authNotice }}</p>
 
-    <div
-      class="w-full max-w-md bg-white dark:bg-slate-900
-             rounded-xl shadow-xl p-8 animate-auth">
-
-      <h2 class="text-2xl font-semibold mb-1">
-        Create account
-      </h2>
-
-      <p class="text-slate-500 mb-6">
-        Start your AI healthcare journey
-      </p>
-
-      <form #signupForm="ngForm"
-            (ngSubmit)="signup(signupForm)"
-            novalidate
-            class="space-y-4">
-
-        <!-- First Name -->
-        <div>
+      <form #signupForm="ngForm" (ngSubmit)="signup(signupForm)" novalidate class="auth-form-grid">
+        <div class="field">
           <label class="label">First Name</label>
           <input
             name="firstName"
@@ -82,16 +37,13 @@
             class="input"
             [(ngModel)]="firstName"
             #fn="ngModel"
-            placeholder="Enter your first name"
-          />
-          <small class="text-red-500 text-xs"
-                 *ngIf="fn.invalid && fn.touched">
+            placeholder="Enter your first name" />
+          <small class="error" *ngIf="fn.invalid && fn.touched">
             First name must be at least 2 characters
           </small>
         </div>
 
-        <!-- Last Name -->
-        <div>
+        <div class="field">
           <label class="label">Last Name</label>
           <input
             name="lastName"
@@ -101,16 +53,13 @@
             class="input"
             [(ngModel)]="lastName"
             #ln="ngModel"
-            placeholder="Enter your last name"
-          />
-          <small class="text-red-500 text-xs"
-                 *ngIf="ln.invalid && ln.touched">
+            placeholder="Enter your last name" />
+          <small class="error" *ngIf="ln.invalid && ln.touched">
             Last name must be at least 2 characters
           </small>
         </div>
 
-        <!-- Email -->
-        <div>
+        <div class="field">
           <label class="label">Email</label>
           <input
             name="email"
@@ -120,16 +69,13 @@
             class="input"
             [(ngModel)]="email"
             #em="ngModel"
-            placeholder="Enter your email"
-          />
-          <small class="text-red-500 text-xs"
-                 *ngIf="em.invalid && em.touched">
+            placeholder="Enter your email" />
+          <small class="error" *ngIf="em.invalid && em.touched">
             Please enter a valid email address
           </small>
         </div>
 
-        <!-- Password -->
-        <div>
+        <div class="field">
           <label class="label">Password</label>
           <input
             name="password"
@@ -139,16 +85,13 @@
             class="input"
             [(ngModel)]="password"
             #pw="ngModel"
-            placeholder="Enter your password"
-          />
-          <small class="text-red-500 text-xs"
-                 *ngIf="pw.invalid && pw.touched">
+            placeholder="Enter your password" />
+          <small class="error" *ngIf="pw.invalid && pw.touched">
             Password must be at least 6 characters
           </small>
         </div>
 
-        <!-- Confirm Password -->
-        <div>
+        <div class="field">
           <label class="label">Confirm Password</label>
           <input
             name="confirmPassword"
@@ -156,26 +99,19 @@
             required
             class="input"
             [(ngModel)]="confirmPassword"
-            placeholder="Confirm password"
-          />
-          <small class="text-red-500 text-xs"
-                 *ngIf="passwordMismatch && confirmPassword">
+            placeholder="Confirm password" />
+          <small class="error" *ngIf="passwordMismatch && confirmPassword">
             Passwords do not match
           </small>
         </div>
 
-        <button
-          class="btn-primary w-full"
-          type="submit"
-          [disabled]="signupForm.invalid || passwordMismatch || loading">
-          {{ loading ? 'Creating account...' : 'Create Account' }}
+        <button class="btn-primary" type="submit" [disabled]="signupForm.invalid || passwordMismatch || loading">
+          {{ loading ? 'Creating account...' : (inviteMode ? 'Create account and join workspace' : 'Create Account') }}
         </button>
       </form>
 
-      <div class="flex items-center gap-3 my-6 text-xs text-slate-500">
-        <span class="flex-1 h-px bg-slate-200/20"></span>
-        OR
-        <span class="flex-1 h-px bg-slate-200/20"></span>
+      <div class="auth-divider">
+        <span>OR</span>
       </div>
 
       <button type="button" class="google-btn" (click)="continueWithGoogle()">
@@ -188,16 +124,10 @@
         Continue with Google
       </button>
 
-      <p class="text-sm text-center text-slate-500 mt-6">
+      <p class="auth-note">
         Already have an account?
-        <a
-          routerLink="/login"
-          class="text-primary font-medium hover:underline">
-          Login
-        </a>
+        <a routerLink="/login">Login</a>
       </p>
-
     </div>
-  </div>
-
+  </section>
 </div>
