@@ -101,8 +101,8 @@
           </span>
         </div>
         <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
-          <span>{{ req.required_state }}</span>
-          <span>{{ req.timestamp }}</span>
+          <span>{{ req.request_type }}</span>
+          <span>{{ req.requestedAtLabel }}</span>
         </div>
         <a
           *ngIf="req.status === 'Pending'"
@@ -125,7 +125,7 @@
     [allowRoleSelection]="canAssignMemberRole"
     [memberRoleOptions]="assignableMemberRoleOptions"
     [defaultMemberRole]="defaultInviteMemberRole"
-    [requiredStateOptions]="requiredStateOptions"
+    [requestTypeOptions]="requestTypeOptions"
     (submitRequest)="handleCreateRequest($event)"
     (close)="showCreateModal = false">
   </app-create-request-modal>
