@@ -424,16 +424,18 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     const fields = [
       'id',
       'business_profile',
-      'requested_by_user',
-      'target_member',
-      'requested_by_user',
-      'request_type',
-      'status',
-      'cancelled',
-      'requested_at'
+      'scan_id',
+      'required_state',
+      'response_status',
+      'response_payload',
+      'timestamp',
+      'requested_for_user',
+      'requested_for_email',
+      'requested_for_phone',
+      'Target'
     ].join(',');
     const params = new URLSearchParams({
-      sort: '-requested_at',
+      sort: '-timestamp',
       limit: '50',
       fields
     });
@@ -445,12 +447,10 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     if (filters?.businessProfileId) {
       params.set('filter[business_profile][_eq]', filters.businessProfileId);
       if (filters?.requestedForUserId) {
-        params.set('filter[_and][1][_or][0][target_member][_eq]', filters.requestedForUserId);
-        params.set('filter[_and][1][_or][1][requested_by_user][_eq]', filters.requestedForUserId);
+        params.set('filter[_and][1][_or][0][requested_for_user][_eq]', filters.requestedForUserId);
       }
     } else if (filters?.requestedForUserId) {
-      params.set('filter[_or][0][target_member][_eq]', filters.requestedForUserId);
-      params.set('filter[_or][1][requested_by_user][_eq]', filters.requestedForUserId);
+      params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
     }
 
     if (
@@ -461,11 +461,11 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
     }
 
     if (filters?.requestedForUserId && filters?.businessProfileId) {
-      params.set('filter[target_member][_eq]', filters.requestedForUserId);
+      params.set('filter[requested_for_user][_eq]', filters.requestedForUserId);
     }
 
     return this.http.get<{ data?: RequestRecord[] }>(
-      `${environment.API_URL}/items/scan_requests?${params.toString()}`,
+      `${environment.API_URL}/items/requests?${params.toString()}`,
       { headers, withCredentials: true }
     ).pipe(
       map(res => res.data ?? [])
@@ -545,12 +545,12 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
   }
 
   private mapToRequestRow(request: RequestRecord): RequestRow {
-    const requestedAtRaw = request.requested_at ?? '';
+    const requestedAtRaw = request.requested_at ?? request.timestamp ?? '';
     return {
       id: this.normalizeId(request.id) ?? this.newTempRequestId(),
       target: this.formatRequestTarget(request),
-      request_type: request.request_type ?? 'unknown',
-      status: this.normalizeStatus(request.status),
+      request_type: request.request_type ?? request.required_state ?? 'unknown',
+      status: this.normalizeStatus(request.status ?? request.response_status ?? request.status),
       requestedAtLabel: this.formatTimestamp(requestedAtRaw),
       requestedAtRaw
     };
@@ -818,8 +818,11 @@ export class RequestsMobileComponent implements OnInit, OnDestroy {
 
   private formatRequestTarget(request: RequestRecord): string {
     if (request['target_member'] && typeof request['target_member'] === 'string') return request['target_member'] as string;
+    if (typeof request.requested_for_email === 'string' && request.requested_for_email.trim()) return request.requested_for_email.trim();
     if (typeof request.target === 'string' && request.target.trim()) return request.target.trim();
     if (typeof request.Target === 'string' && request.Target.trim()) return request.Target.trim();
+    if (typeof request.requested_for_user === 'string' && request.requested_for_user.trim()) return request.requested_for_user.trim();
+    if (typeof request.timestamp === 'string' && request.timestamp.trim()) return request.timestamp.trim();
     return 'scan';
   }
 
@@ -1168,6 +1171,14 @@ type RequestRecord = {
   request_type?: string;
   status?: string;
   requested_at?: string;
+  scan_id?: unknown;
+  required_state?: string;
+  response_status?: string;
+  response_payload?: unknown;
+  timestamp?: string;
+  requested_for_user?: unknown;
+  requested_for_email?: string;
+  requested_for_phone?: string;
 };
 
 type RequestRow = {

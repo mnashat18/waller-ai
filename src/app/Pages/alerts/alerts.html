@@ -292,6 +292,20 @@
         </header>
 
         <div class="alerts-center-modal__content">
+          @if (selectedAlertLoading) {
+            <section class="alerts-center-modal__card">
+              <h4 class="alerts-center-modal__card-title">Loading</h4>
+              <p class="alerts-summary-note">Fetching the latest alert details.</p>
+            </section>
+          }
+
+          @if (selectedAlertError) {
+            <section class="alerts-center-modal__card">
+              <h4 class="alerts-center-modal__card-title">Alert Details</h4>
+              <p class="alerts-summary-note">{{ selectedAlertError }}</p>
+            </section>
+          }
+
           <section class="alerts-center-modal__card">
             <h4 class="alerts-center-modal__card-title">Alert Summary</h4>
             <p class="alerts-summary-note">{{ row.message }}</p>
@@ -300,6 +314,7 @@
               <div class="alerts-detail-item"><span>Created</span><strong>{{ row.createdLabel }}</strong></div>
               <div class="alerts-detail-item"><span>Status</span><strong>{{ row.statusLabel }}</strong></div>
               <div class="alerts-detail-item"><span>Severity</span><strong>{{ row.severity }}</strong></div>
+              <div class="alerts-detail-item"><span>Readiness / Risk</span><strong>{{ row.readinessLabel || '-' }}</strong></div>
             </div>
           </section>
 
@@ -309,6 +324,7 @@
               <div class="alerts-detail-item"><span>Employee</span><strong>{{ row.employeeName }}</strong></div>
               <div class="alerts-detail-item"><span>Email</span><strong>{{ row.employeeEmail }}</strong></div>
               <div class="alerts-detail-item"><span>Department</span><strong>{{ row.departmentName }}</strong></div>
+              <div class="alerts-detail-item"><span>Target Member Department</span><strong>{{ row.targetMemberDepartmentName || row.departmentName }}</strong></div>
               <div class="alerts-detail-item"><span>Member Role</span><strong>{{ row.memberRole }}</strong></div>
             </div>
           </section>
@@ -331,11 +347,32 @@
             } @else {
               <p class="alerts-summary-note">No related scan attached.</p>
             }
+            @if (row.relationWarnings.length || row.permissionWarnings.length) {
+              <div class="mt-3 grid gap-2">
+                @for (warning of row.relationWarnings; track warning) {
+                  <p class="alerts-summary-note">{{ warning }}</p>
+                }
+                @for (warning of row.permissionWarnings; track warning) {
+                  <p class="alerts-summary-note">{{ warning }}</p>
+                }
+              </div>
+            }
+          </section>
+
+          <section class="alerts-center-modal__card">
+            <h4 class="alerts-center-modal__card-title">Explanation</h4>
+            <p class="alerts-summary-note">{{ row.explanation || 'No explanation is available for this alert.' }}</p>
+          </section>
+
+          <section class="alerts-center-modal__card">
+            <h4 class="alerts-center-modal__card-title">Recommended Action</h4>
+            <p class="alerts-summary-note">{{ row.recommendedAction || 'No recommended action is available for this alert.' }}</p>
           </section>
 
           <section class="alerts-center-modal__card">
             <h4 class="alerts-center-modal__card-title">Review</h4>
             <div class="grid gap-2">
+              <div class="alerts-detail-item"><span>Review Status</span><strong>{{ row.reviewedStatusLabel }}</strong></div>
               <div class="alerts-detail-item"><span>Reviewed By</span><strong>{{ row.reviewedByLabel }}</strong></div>
               <div class="alerts-detail-item"><span>Reviewed At</span><strong>{{ row.reviewedAtLabel }}</strong></div>
               <div class="alerts-detail-item"><span>Resolved Date</span><strong>{{ row.status === 'resolved' ? row.reviewedAtLabel : '-' }}</strong></div>

@@ -719,13 +719,6 @@ export class SettingsPageComponent implements OnInit {
       'provider',
       'external_identifier',
       'phone',
-      'active_business_profile',
-      'active_business_profile.id',
-      'active_business_profile.company_name',
-      'active_department',
-      'active_department.id',
-      'active_department.name',
-      'active_member_role',
       'role',
       'role.id',
       'role.name'

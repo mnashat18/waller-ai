@@ -186,7 +186,18 @@ export type AlertRow = {
   reviewed_at: string | null;
   action_note: string | null;
   action_type: string | null;
+  explanation: string | null;
+  recommended_action: string | null;
+  readiness_label: string | null;
   notification_count: number;
+};
+
+export type AlertDetailsRow = AlertRow & {
+  target_member_department_id: string | null;
+  target_member_department_name: string | null;
+  reviewed_status_label: string;
+  relationWarnings: string[];
+  permissionWarnings: string[];
 };
 
 export type AlertsPageData = {
@@ -255,7 +266,7 @@ type ScanRequestRecord = {
     | null;
   department?: DepartmentRecord | string | number | null;
   requested_by_user?: UserRecord | string | number | null;
-  target_member?: MemberRecord | string | number | null;
+  target_member?: MemberRecord | UserRecord | string | number | null;
   request_type?: string | null;
   status?: string | null;
   cancelled?: string | null;
@@ -267,6 +278,19 @@ type ScanRequestRecord = {
     status?: string | null;
     completed_at?: string | null;
   } | string | number | null;
+  scan_id?: {
+    id?: string | number;
+    status?: string | null;
+    completed_at?: string | null;
+  } | string | number | null;
+  required_state?: string | null;
+  response_status?: string | null;
+  response_payload?: unknown;
+  timestamp?: string | null;
+  requested_for_user?: UserRecord | string | number | null;
+  requested_for_email?: string | null;
+  requested_for_phone?: string | null;
+  Target?: string | null;
 };
 
 type WellnessScanRecord = {
@@ -335,11 +359,31 @@ type AlertRecord = {
   severity?: string | null;
   title?: string | null;
   message?: string | null;
+  body?: string | null;
+  summary?: string | null;
   status?: string | null;
+  alert_type?: string | null;
   reviewed_by?: UserRecord | string | number | null;
   reviewed_at?: string | null;
   action_note?: string | null;
   action_type?: string | null;
+  recommended_action?: string | null;
+  explanation?: string | null;
+  readiness_label?: string | null;
+  risk_label?: string | null;
+  scan_id?: { id?: string | number; date_created?: string | null; status?: string | null } | string | number | null;
+  scan_request?: { id?: string | number } | string | number | null;
+};
+
+type AlertScanResultRecord = {
+  id?: string | number;
+  scan_id?: string | number | { id?: string | number } | null;
+  risk_level?: string | null;
+  overall_state?: string | null;
+  explanation?: string | null;
+  suggested_action?: string | null;
+  readiness_score?: string | number | null;
+  date_created?: string | null;
 };
 
 type ScopedContext = {
@@ -377,7 +421,7 @@ export class OperationsWorkflowsService {
           ),
           members: this.queryItems<MemberRecord>(
             'business_profile_members',
-            ['id', 'status', 'department.id', 'department.name', 'user.id', 'user.email', 'user.first_name', 'user.last_name'],
+            ['id', 'status', 'department', 'user.id', 'user.email', 'user.first_name', 'user.last_name'],
             context.token,
             { filters: this.scopeFilters(context, ['business_profile'], ['department']), sort: '-id', limit: 400 }
           ),
@@ -388,23 +432,22 @@ export class OperationsWorkflowsService {
             { filters: this.scopeFilters(context, ['business_profile']), sort: 'name', limit: 200 }
           ),
           requests: this.queryItems<ScanRequestRecord>(
-            'scan_requests',
+            'requests',
             [
               'id',
               'business_profile',
-              'department',
-              'requested_by_user',
-              'target_member',
-              'request_type',
-              'status',
-              'cancelled',
-              'requested_at',
-              'due_at',
-              'completed_at',
-              'completed_scan'
+              'scan_id',
+              'required_state',
+              'response_status',
+              'response_payload',
+              'timestamp',
+              'requested_for_user',
+              'requested_for_email',
+              'requested_for_phone',
+              'Target'
             ],
             context.token,
-            { filters: this.scopeFilters(context, ['business_profile'], ['department']), sort: '-requested_at', limit: 800 }
+            { filters: this.scopeFilters(context, ['business_profile']), sort: '-timestamp', limit: 800 }
           ),
           scans: this.queryItems<WellnessScanRecord>(
             'wellness_scans',
@@ -510,7 +553,7 @@ export class OperationsWorkflowsService {
 
                 const userId = context.userId;
                 const employeeRows = pageData.rows.filter(
-                  (row) => row.target_member_id === context.activeMembershipId || row.requested_by_user_id === userId
+                  (row) => row.target_member_id === context.activeMembershipId || row.target_member_id === userId || row.requested_by_user_id === userId
                 );
 
                 const filteredDepartments = pageData.departments.filter((department) =>
@@ -550,9 +593,9 @@ export class OperationsWorkflowsService {
       requests = await firstValueFrom(this.loadScanRequestsForPage(context).pipe(take(1), timeout(8000)));
       console.log('[ScanRequests] scan requests result', Array.isArray(requests) ? requests.length : 0);
     } catch (error) {
-      console.error('[OperationsWorkflows] scan_requests failed', error);
+      console.error('[OperationsWorkflows] requests failed', error);
       requests = [];
-      warning = 'scan_requests_load_failed';
+      warning = 'requests_load_failed';
     }
 
     const [departmentsResult, membersResult, scansResult, notificationsResult] = await Promise.allSettled([
@@ -592,7 +635,7 @@ export class OperationsWorkflowsService {
 
     const userId = context.userId;
     const employeeRows = pageData.rows.filter(
-      (row) => row.target_member_id === context.activeMembershipId || row.requested_by_user_id === userId
+      (row) => row.target_member_id === context.activeMembershipId || row.target_member_id === userId || row.requested_by_user_id === userId
     );
     const filteredDepartments = pageData.departments.filter((department) =>
       employeeRows.some((row) => row.department_id === department.id)
@@ -685,6 +728,71 @@ export class OperationsWorkflowsService {
     );
   }
 
+  fetchAlertDetails(alertId: string): Observable<AlertDetailsRow> {
+    return this.ensureScopedContext().pipe(
+      switchMap((context) => {
+        const normalizedAlertId = this.normalizeId(alertId);
+        if (!normalizedAlertId) {
+          return throwError(() => new Error('Alert id is missing.'));
+        }
+
+        console.info('[ALERT_DETAIL_FETCH_START]', { alertId: normalizedAlertId });
+
+        return this.fetchAlertRecordWithFallback(context, normalizedAlertId).pipe(
+          switchMap((alert) => {
+            const warnings: string[] = [];
+            const permissionWarnings: string[] = [];
+            const relatedScanId = this.normalizeId(alert.scan ?? alert.scan_id);
+
+            if (!relatedScanId && (alert.scan || alert.scan_id)) {
+              warnings.push('Alert has a scan relation, but the linked scan id could not be resolved.');
+              console.warn('[ALERT_DETAIL_RELATION_MISSING]', {
+                alertId: normalizedAlertId,
+                relation: 'scan'
+              });
+            }
+
+            return this.fetchAlertScanResult(context, relatedScanId, normalizedAlertId).pipe(
+              map((scanResult) => {
+                if (relatedScanId && !scanResult) {
+                  const message = 'Alert exists, but related scan result is missing or inaccessible.';
+                  warnings.push(message);
+                  console.warn('[ALERT_DETAIL_RELATION_MISSING]', {
+                    alertId: normalizedAlertId,
+                    relation: 'scan_result',
+                    scanId: relatedScanId
+                  });
+                }
+
+                if (relatedScanId && scanResult === null) {
+                  permissionWarnings.push('Alert exists, but related scan result is missing or inaccessible.');
+                }
+
+                const detail = this.mapAlertDetailsRow(alert, scanResult, warnings, permissionWarnings);
+                console.info('[ALERT_DETAIL_FETCH_SUCCESS]', {
+                  alertId: normalizedAlertId,
+                  scanId: detail.scan_id,
+                  targetMemberId: detail.target_member_id
+                });
+                return detail;
+              })
+            );
+          }),
+          catchError((error) => {
+            const status = (error as { status?: number } | null)?.status ?? 0;
+            if (status === 403) {
+              console.warn('[ALERT_DETAIL_PERMISSION_BLOCKED]', {
+                alertId: normalizedAlertId,
+                status
+              });
+            }
+            return throwError(() => error);
+          })
+        );
+      })
+    );
+  }
+
   createShiftTemplate(input: CreateShiftTemplateInput): Observable<void> {
     return this.ensureScopedContext().pipe(
       switchMap((context) =>
@@ -712,26 +820,24 @@ export class OperationsWorkflowsService {
           return throwError(() => new Error('Your workspace role cannot create scan requests.'));
         }
 
-        const hasDepartmentInput = Object.prototype.hasOwnProperty.call(input, 'department');
         const now = new Date().toISOString();
         const payload: Record<string, unknown> = {
           business_profile: context.businessProfileId,
-          department: hasDepartmentInput ? (input.department ?? null) : (context.activeDepartmentId ?? null),
-          target_member: input.target_member ?? null,
-          request_type: input.request_type ?? 'manual',
-          status: input.status ?? 'pending',
-          cancelled: input.cancelled ?? null,
-          requested_at: now,
-          completed_scan: input.completed_scan ?? null,
-          due_at: input.due_at ?? null,
-          requested_by_user: input.requested_by_user ?? context.userId
+          requested_for_user: input.target_member ?? null,
+          requested_for_email: null,
+          requested_for_phone: null,
+          Target: null,
+          required_state: input.request_type ?? 'manual',
+          response_status: input.status ?? 'pending',
+          timestamp: now,
+          response_payload: input.completed_scan ? { completed_scan: input.completed_scan } : null
         };
 
-        if (!this.normalizeId(payload['target_member'])) {
+        if (!this.normalizeId(payload['requested_for_user'])) {
           return throwError(() => new Error('Target member is required.'));
         }
 
-        return this.postWithFallback('scan_requests', context.token, [payload]).pipe(
+        return this.postWithFallback('requests', context.token, [payload]).pipe(
           map(() => void 0),
           switchMap(() =>
             this.logActivityEvent(
@@ -883,11 +989,11 @@ export class OperationsWorkflowsService {
     return this.ensureScopedContext().pipe(
       switchMap((context) => {
         const payloads: Array<Record<string, unknown>> = [
-          { status: 'cancelled', cancelled: 'Cancelled by workspace operator' },
-          { status: 'cancelled' }
+          { response_status: 'cancelled', response_payload: { cancelled: 'Cancelled by workspace operator' } },
+          { response_status: 'cancelled' }
         ];
 
-        return this.patchWithFallback('scan_requests', requestId, context.token, payloads).pipe(
+        return this.patchWithFallback('requests', requestId, context.token, payloads).pipe(
           switchMap(() =>
             this.logActivityEvent(context, 'scan_request_cancelled', requestId, null).pipe(
               map(() => ({
@@ -1046,14 +1152,13 @@ export class OperationsWorkflowsService {
       'id',
       'status',
       'member_role',
-      'department.id',
-      'department.name',
+      'department',
       'user.id',
       'user.email',
       'user.first_name',
       'user.last_name'
     ];
-    const fallbackFields = ['id', 'status', 'member_role', 'department.id', 'department.name', 'user'];
+    const fallbackFields = ['id', 'status', 'member_role', 'department', 'user'];
 
     return this.queryItemsStrict<MemberRecord>(
       'business_profile_members',
@@ -1090,53 +1195,31 @@ export class OperationsWorkflowsService {
       [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
       [{ path: ['business_profile', 'id'], operator: '_eq', value: context.businessProfileId }]
     ];
-    const sortVariants = ['-requested_at', '-id'];
+    const sortVariants = ['-timestamp', '-id'];
     const expandedFields = [
       'id',
-      'status',
-      'request_type',
-      'requested_at',
-      'due_at',
-      'completed_at',
-      'cancelled',
       'business_profile',
-      'business_profile.id',
-      'business_profile.company_name',
-      'department',
-      'department.id',
-      'department.name',
-      'requested_by_user',
-      'requested_by_user.id',
-      'requested_by_user.email',
-      'requested_by_user.first_name',
-      'requested_by_user.last_name',
-      'target_member',
-      'target_member.id',
-      'target_member.member_role',
-      'target_member.department.id',
-      'target_member.department.name',
-      'target_member.user.id',
-      'target_member.user.email',
-      'target_member.user.first_name',
-      'target_member.user.last_name',
-      'completed_scan',
-      'completed_scan.id',
-      'completed_scan.status',
-      'completed_scan.completed_at'
+      'scan_id',
+      'required_state',
+      'response_status',
+      'response_payload',
+      'timestamp',
+      'requested_for_user',
+      'requested_for_email',
+      'requested_for_phone',
+      'Target'
     ];
     const baseFields = [
       'id',
       'business_profile',
-      'department',
-      'requested_by_user',
-      'target_member',
-      'status',
-      'cancelled',
-      'requested_at',
-      'due_at',
-      'completed_scan',
-      'completed_at',
-      'request_type'
+      'scan_id',
+      'required_state',
+      'response_status',
+      'timestamp',
+      'requested_for_user',
+      'requested_for_email',
+      'requested_for_phone',
+      'Target'
     ];
     const fieldVariants: string[][] = [expandedFields, baseFields];
     let failureLogged = false;
@@ -1154,7 +1237,7 @@ export class OperationsWorkflowsService {
       for (const filter of filters) {
         this.setFilter(params, filter.path, filter.operator, filter.value);
       }
-      return `${this.api}/items/scan_requests?${params.toString()}`;
+      return `${this.api}/items/requests?${params.toString()}`;
     };
 
     const run = (
@@ -1168,12 +1251,12 @@ export class OperationsWorkflowsService {
         { headers: this.headers(context.token), withCredentials: true }
       ).pipe(
         timeout(25000),
-        map((response) => response.data ?? []),
+        map((response) => (response.data ?? []).map((row) => this.normalizeRequestRecord(row))),
         catchError((error) => {
           const status = (error as { status?: number } | null)?.status ?? 0;
           if ((status === 403 || status === 400) && !failureLogged) {
             failureLogged = true;
-            console.error('[OperationsWorkflows] scan_requests failing request', {
+            console.error('[OperationsWorkflows] requests failing request', {
               url,
               fields,
               filters,
@@ -1242,15 +1325,10 @@ export class OperationsWorkflowsService {
     };
 
     if (context.activeRole === 'employee' && context.userId) {
-      const membershipId = context.activeMembershipId;
       const userId = context.userId;
-      const withTargetMemberFilterVariants = filterVariants.map((base) => [
+      const withRequestedForUserFilterVariants = filterVariants.map((base) => [
         ...base,
-        { path: ['target_member'], operator: '_eq', value: membershipId }
-      ]);
-      const withRequestedByUserFilterVariants = filterVariants.map((base) => [
-        ...base,
-        { path: ['requested_by_user'], operator: '_eq', value: userId }
+        { path: ['requested_for_user'], operator: '_eq', value: userId }
       ]);
 
       const tryFilterSet = (sets: Array<Array<{ path: string[]; operator: string; value: string }>>, index = 0): Observable<ScanRequestRecord[]> => {
@@ -1267,27 +1345,41 @@ export class OperationsWorkflowsService {
         );
       };
 
-      return forkJoin({
-        memberRows: tryFilterSet(withTargetMemberFilterVariants).pipe(
-          catchError((error) => this.isFieldCompatibilityError(error) ? of([] as ScanRequestRecord[]) : throwError(() => error))
-        ),
-        requesterRows: tryFilterSet(withRequestedByUserFilterVariants).pipe(
-          catchError((error) => {
-            if (!this.isFieldCompatibilityError(error)) {
-              return throwError(() => error);
-            }
-            return of([] as ScanRequestRecord[]);
-          })
-        )
-      }).pipe(
-        map(({ memberRows, requesterRows }) =>
-          this.uniqueById([...(memberRows ?? []), ...(requesterRows ?? [])], (item) => this.normalizeId(item.id) ?? '')
-        ),
-        timeout(25000)
-      );
+      return tryFilterSet(withRequestedForUserFilterVariants).pipe(timeout(25000));
     }
 
     return tryFilters().pipe(timeout(25000));
+  }
+
+  private normalizeRequestRecord(raw: ScanRequestRecord): ScanRequestRecord {
+    const responsePayload = raw.response_payload && typeof raw.response_payload === 'object'
+      ? raw.response_payload as Record<string, unknown>
+      : null;
+    const requestedAt = raw.requested_at ?? raw.timestamp ?? null;
+    const responseStatus = this.normalizeText(raw.response_status ?? raw.status ?? null);
+    const requestType = this.pickString(raw.required_state ?? raw.request_type ?? null);
+    const scanId = this.normalizeId(raw.scan_id ?? raw.completed_scan);
+    return {
+      ...raw,
+      requested_by_user: raw.requested_by_user ?? null,
+      target_member: raw.target_member ?? raw.requested_for_user ?? null,
+      request_type: requestType,
+      status: this.pickString(raw.status ?? raw.response_status) ?? 'pending',
+      cancelled: raw.cancelled ?? (responseStatus === 'cancelled' ? 'Cancelled' : null),
+      requested_at: requestedAt,
+      due_at: raw.due_at ?? this.pickString(responsePayload?.['due_at']) ?? null,
+      completed_at: raw.completed_at ?? this.pickString(responsePayload?.['completed_at']) ?? null,
+      completed_scan: raw.completed_scan ?? scanId,
+      scan_id: raw.scan_id ?? scanId,
+      required_state: raw.required_state ?? requestType,
+      response_status: raw.response_status ?? raw.status ?? null,
+      response_payload: raw.response_payload ?? responsePayload,
+      timestamp: requestedAt,
+      requested_for_user: raw.requested_for_user ?? raw.target_member ?? null,
+      requested_for_email: raw.requested_for_email ?? this.pickString(responsePayload?.['requested_for_email']) ?? null,
+      requested_for_phone: raw.requested_for_phone ?? this.pickString(responsePayload?.['requested_for_phone']) ?? null,
+      Target: raw.Target ?? this.pickString(responsePayload?.['Target']) ?? null
+    };
   }
 
   private loadAlertsForPage(context: ScopedContext, forceRefresh = false): Observable<AlertRecord[]> {
@@ -1313,11 +1405,17 @@ export class OperationsWorkflowsService {
       'severity',
       'title',
       'message',
+      'body',
+      'summary',
       'status',
       'reviewed_by',
       'reviewed_at',
       'action_note',
-      'action_type'
+      'action_type',
+      'recommended_action',
+      'explanation',
+      'readiness_label',
+      'risk_label'
     ];
     const expandedFields = [
       ...baseFields,
@@ -1328,6 +1426,9 @@ export class OperationsWorkflowsService {
       'target_member.id',
       'target_member.status',
       'target_member.member_role',
+      'target_member.department',
+      'target_member.department.id',
+      'target_member.department.name',
       'target_member.user.id',
       'target_member.user.first_name',
       'target_member.user.last_name',
@@ -1380,7 +1481,10 @@ export class OperationsWorkflowsService {
         map((response) => response.data ?? []),
         catchError((error) => {
           const status = (error as { status?: number } | null)?.status ?? 0;
-          if ((status === 403 || status === 400) && !failureLogged) {
+          if (status === 403) {
+            return of([] as AlertRecord[]);
+          }
+          if (status === 400 && !failureLogged) {
             failureLogged = true;
             console.error('[OperationsWorkflows] alerts failing request', {
               url,
@@ -1696,13 +1800,22 @@ export class OperationsWorkflowsService {
     scans: WellnessScanRecord[],
     notifications: NotificationRecord[]
   ): RequestsPageData {
+    const departmentNameById = new Map<string, string>();
+    for (const department of departments ?? []) {
+      const id = this.normalizeId(department.id);
+      if (!id) continue;
+      departmentNameById.set(id, formatDepartment(department, 'Unnamed Department'));
+    }
+
     const memberOptions = (members ?? []).map((member) => ({
       member_id: this.normalizeId(member.id) ?? '',
       user_id: this.normalizeId(member.user),
       label: formatMember(member, 'Unknown member'),
       email: sanitizeDisplayValue(this.objectRecord(member.user)?.['email'], ''),
       department_id: this.normalizeId(member.department),
-      department_name: formatDepartment(member.department, 'Unassigned'),
+      department_name:
+        departmentNameById.get(this.normalizeId(member.department) ?? '') ??
+        formatDepartment(member.department, 'Unassigned'),
       status: member.status ?? null
     })).filter((item) => item.member_id);
     const memberByUserId = new Map<string, WorkflowMemberOption>();
@@ -1715,13 +1828,6 @@ export class OperationsWorkflowsService {
         memberByMemberId.set(member.member_id, member);
       }
     }
-    const departmentNameById = new Map<string, string>();
-    for (const department of departments ?? []) {
-      const id = this.normalizeId(department.id);
-      if (!id) continue;
-      departmentNameById.set(id, formatDepartment(department, 'Unnamed Department'));
-    }
-
     const completedScanByRequest = new Map<string, { id: string | null; completedAt: string | null }>();
     for (const scan of scans ?? []) {
       const requestId = this.normalizeId(scan.scan_request?.id);
@@ -1740,12 +1846,15 @@ export class OperationsWorkflowsService {
     const rows = (requests ?? []).map((request) => {
       const requestId = this.normalizeId(request.id) ?? '';
       const completedScan = completedScanByRequest.get(requestId);
-      const completedScanDate = this.pickString(this.objectRecord(request.completed_scan)?.['completed_at']);
-      const targetMemberRecord = this.objectRecord(request.target_member);
+      const completedScanDate = this.pickString(this.objectRecord(request.completed_scan ?? request.scan_id)?.['completed_at']) ?? this.pickString(request.timestamp);
+      const targetMemberRecord = this.objectRecord(request.target_member ?? request.requested_for_user);
       const targetMemberUser = this.objectRecord(targetMemberRecord?.['user']);
       const requestedByUser = this.objectRecord(request.requested_by_user) as UserRecord | null;
-      const targetEmail = sanitizeDisplayValue(targetMemberUser?.['email'], '');
-      const targetMemberId = this.normalizeId(request.target_member);
+      const targetEmail = sanitizeDisplayValue(
+        this.pickString(request.requested_for_email) ?? targetMemberUser?.['email'] ?? request.Target,
+        ''
+      );
+      const targetMemberId = this.normalizeId(request.target_member ?? request.requested_for_user);
       const requestedById = this.normalizeId(request.requested_by_user);
       const targetMemberDirectory =
         (targetMemberId ? memberByMemberId.get(targetMemberId) : undefined) ??
@@ -1756,7 +1865,8 @@ export class OperationsWorkflowsService {
       const targetMemberName = this.firstReadableLabel([
         formatMember(targetMemberRecord, ''),
         targetMemberDirectory?.label ?? '',
-        targetEmail
+        targetEmail,
+        this.pickString(request.Target) ?? ''
       ], 'Unknown member');
       const requestedByName = this.firstReadableLabel([
         formatUserName(requestedByUser, ''),
@@ -1768,7 +1878,6 @@ export class OperationsWorkflowsService {
         formatBusinessProfile(this.objectRecord(request.business_profile), '')
       ], 'Unknown workspace');
       const targetDepartmentId =
-        this.normalizeId(request.department) ??
         this.normalizeId(targetMemberRecord?.['department']) ??
         targetMemberDirectory?.department_id ??
         null;
@@ -1786,7 +1895,7 @@ export class OperationsWorkflowsService {
         id: requestId,
         status: requestStatus,
         request_type: requestType,
-        requested_at: request.requested_at ?? null,
+        requested_at: request.requested_at ?? request.timestamp ?? null,
         due_at: request.due_at ?? null,
         completed_at: request.completed_at ?? completedScanDate ?? completedScan?.completedAt ?? null,
         cancelled_note: request.cancelled ?? null,
@@ -1799,7 +1908,7 @@ export class OperationsWorkflowsService {
         business_profile_name: businessProfileName,
         department_id: targetDepartmentId,
         department_name: targetDepartmentName,
-        completed_scan_id: this.normalizeId(request.completed_scan) ?? completedScan?.id ?? null,
+        completed_scan_id: this.normalizeId(request.completed_scan ?? request.scan_id) ?? completedScan?.id ?? null,
         completed_scan_at: completedScanDate ?? completedScan?.completedAt ?? null,
         notification_count: notificationReminderCount
       } satisfies RequestRow;
@@ -1837,6 +1946,7 @@ export class OperationsWorkflowsService {
       const alertId = this.normalizeId(alert.id) ?? '';
       const targetMemberRecord = this.objectRecord(alert.target_member);
       const targetMemberUser = this.objectRecord(targetMemberRecord?.['user']);
+      const targetMemberDepartment = this.objectRecord(targetMemberRecord?.['department']);
       const targetUserRecord = this.objectRecord(alert.target_user);
       const reviewedByRecord = this.objectRecord(alert.reviewed_by);
       const scanRecord = this.objectRecord(alert.scan);
@@ -1864,9 +1974,9 @@ export class OperationsWorkflowsService {
         status: alert.status?.trim() || null,
         severity: alert.severity?.trim() || null,
         title: alert.title?.trim() || 'Alert',
-        message: alert.message?.trim() || null,
-        department_id: this.normalizeId(alert.department),
-        department_name: formatDepartment(alert.department, 'Unassigned'),
+        message: alert.message?.trim() || alert.body?.trim() || alert.summary?.trim() || null,
+        department_id: this.normalizeId(alert.department) ?? this.normalizeId(targetMemberDepartment),
+        department_name: formatDepartment(alert.department ?? targetMemberDepartment, 'Unassigned'),
         target_member_id: targetMemberId,
         target_member_status: targetMemberStatus,
         target_member_role: targetMemberRole,
@@ -1886,6 +1996,9 @@ export class OperationsWorkflowsService {
         reviewed_at: alert.reviewed_at ?? null,
         action_note: alert.action_note?.trim() || null,
         action_type: alert.action_type?.trim() || null,
+        explanation: alert.explanation?.trim() || null,
+        recommended_action: alert.recommended_action?.trim() || null,
+        readiness_label: alert.readiness_label?.trim() || alert.risk_label?.trim() || null,
         notification_count: notificationCountByLink.get(`alert:${alertId}`) ?? 0,
       } satisfies AlertRow;
     }).filter((row) => row.id);
@@ -1934,6 +2047,251 @@ export class OperationsWorkflowsService {
       map((response) => response.data ?? []),
       catchError(() => of([]))
     );
+  }
+
+  private fetchAlertRecordWithFallback(context: ScopedContext, alertId: string): Observable<AlertRecord> {
+    const fieldVariants: string[][] = [
+      [
+        'id',
+        'title',
+        'status',
+        'severity',
+        'business_profile',
+        'business_profile.id',
+        'business_profile.company_name',
+        'department',
+        'department.id',
+        'department.name',
+        'target_member',
+        'target_member.id',
+        'target_member.status',
+        'target_member.member_role',
+        'target_member.department',
+        'target_member.department.id',
+        'target_member.department.name',
+        'target_member.user.id',
+        'target_member.user.email',
+        'target_member.user.first_name',
+        'target_member.user.last_name',
+        'target_user',
+        'target_user.id',
+        'target_user.email',
+        'target_user.first_name',
+        'target_user.last_name',
+        'scan',
+        'scan.id',
+        'scan.date_created',
+        'scan.status',
+        'date_created',
+        'reviewed_by',
+        'reviewed_by.id',
+        'reviewed_by.email',
+        'reviewed_by.first_name',
+        'reviewed_by.last_name',
+        'reviewed_at',
+        'recommended_action',
+        'explanation',
+        'readiness_label',
+        'risk_label',
+        'message',
+        'body',
+        'summary',
+        'action_note',
+        'action_type',
+        'scan_id',
+        'scan_request',
+        'alert_type'
+      ],
+      [
+        'id',
+        'title',
+        'status',
+        'severity',
+        'business_profile',
+        'department',
+        'target_member',
+        'target_user',
+        'scan',
+        'date_created',
+        'reviewed_by',
+        'reviewed_at',
+        'recommended_action',
+        'explanation',
+        'message',
+        'body',
+        'summary',
+        'action_note',
+        'action_type',
+        'scan_id',
+        'scan_request',
+        'alert_type'
+      ]
+    ];
+
+    const tryFields = (variants: string[][]): Observable<AlertRecord> => {
+      const [fields, ...rest] = variants;
+      if (!fields) {
+        return throwError(() => new Error('Alert details could not be loaded.'));
+      }
+
+      const params = new URLSearchParams({ fields: fields.join(',') });
+      return this.http.get<{ data?: AlertRecord }>(
+        `${this.api}/items/alerts/${encodeURIComponent(alertId)}?${params.toString()}`,
+        { headers: this.headers(context.token), withCredentials: true }
+      ).pipe(
+        timeout(25000),
+        map((response) => response.data ?? {}),
+        catchError((error) => {
+          if (!rest.length || !this.isFieldCompatibilityError(error)) {
+            return throwError(() => error);
+          }
+          console.warn('[ALERT_DETAIL_PARSE_FALLBACK]', {
+            alertId,
+            droppedToFallbackFields: true
+          });
+          return tryFields(rest);
+        })
+      );
+    };
+
+    return tryFields(fieldVariants);
+  }
+
+  private fetchAlertScanResult(
+    context: ScopedContext,
+    scanId: string | null,
+    alertId: string
+  ): Observable<AlertScanResultRecord | null> {
+    if (!scanId) {
+      return of(null);
+    }
+
+    const fieldVariants = [
+      ['id', 'scan_id', 'risk_level', 'overall_state', 'explanation', 'suggested_action', 'readiness_score', 'date_created'],
+      ['id', 'scan_id', 'risk_level', 'explanation', 'suggested_action', 'date_created'],
+      ['id', 'scan_id', 'risk_level', 'date_created']
+    ];
+
+    const tryFields = (variants: string[][]): Observable<AlertScanResultRecord | null> => {
+      const [fields, ...rest] = variants;
+      if (!fields) {
+        return of(null);
+      }
+
+      return this.queryItemsStrict<AlertScanResultRecord>('scan_results', fields, context.token, {
+        filters: [{ path: ['scan_id'], operator: '_eq', value: scanId }],
+        sort: '-date_created',
+        limit: 1
+      }).pipe(
+        map((rows) => rows[0] ?? null),
+        catchError((error) => {
+          const status = (error as { status?: number } | null)?.status ?? 0;
+          if (status === 403) {
+            console.warn('[ALERT_DETAIL_PERMISSION_BLOCKED]', {
+              alertId,
+              relation: 'scan_result',
+              scanId
+            });
+            return of(null);
+          }
+          if (!rest.length || !this.isFieldCompatibilityError(error)) {
+            return throwError(() => error);
+          }
+          console.warn('[ALERT_DETAIL_PARSE_FALLBACK]', {
+            alertId,
+            relation: 'scan_result'
+          });
+          return tryFields(rest);
+        })
+      );
+    };
+
+    return tryFields(fieldVariants);
+  }
+
+  private mapAlertDetailsRow(
+    alert: AlertRecord,
+    scanResult: AlertScanResultRecord | null,
+    relationWarnings: string[],
+    permissionWarnings: string[]
+  ): AlertDetailsRow {
+    const targetMemberRecord = this.objectRecord(alert.target_member);
+    const targetMemberUser = this.objectRecord(targetMemberRecord?.['user']);
+    const targetMemberDepartment = this.objectRecord(targetMemberRecord?.['department']);
+    const targetUserRecord = this.objectRecord(alert.target_user) ?? targetMemberUser;
+    const reviewedByRecord = this.objectRecord(alert.reviewed_by);
+    const businessProfileRecord = this.objectRecord(alert.business_profile);
+    const departmentRecord = this.objectRecord(alert.department) ?? targetMemberDepartment;
+    const scanRecord = this.objectRecord(alert.scan) ?? this.objectRecord(alert.scan_id);
+
+    const targetUserName = this.firstReadableLabel([
+      formatUserName(targetUserRecord, ''),
+      formatUserName(targetMemberUser, '')
+    ], '') || null;
+    const targetUserEmail = sanitizeDisplayValue(
+      targetUserRecord?.['email'] ?? targetMemberUser?.['email'],
+      ''
+    ) || null;
+
+    const normalizedScanId =
+      this.normalizeId(alert.scan) ??
+      this.normalizeId(alert.scan_id) ??
+      this.normalizeId(alert.scan_request);
+
+    return {
+      id: this.normalizeId(alert.id) ?? '',
+      date_created: alert.date_created ?? null,
+      business_profile_id: this.normalizeId(alert.business_profile),
+      business_profile_name: formatBusinessProfile(businessProfileRecord ?? alert.business_profile, 'Unknown workspace'),
+      status: alert.status?.trim() || null,
+      severity: alert.severity?.trim() || null,
+      title: alert.title?.trim() || 'Alert',
+      message:
+        alert.message?.trim() ||
+        alert.body?.trim() ||
+        alert.summary?.trim() ||
+        scanResult?.explanation?.trim() ||
+        null,
+      department_id: this.normalizeId(departmentRecord ?? alert.department),
+      department_name: formatDepartment(departmentRecord ?? alert.department, 'Unassigned'),
+      target_member_id: this.normalizeId(alert.target_member),
+      target_member_status: this.pickString(targetMemberRecord?.['status']),
+      target_member_role: this.pickString(targetMemberRecord?.['member_role']),
+      target_member_label: this.firstReadableLabel([
+        targetUserName ?? '',
+        targetUserEmail ?? '',
+        formatMember(targetMemberRecord, '')
+      ], 'Assigned member'),
+      target_user_id: this.normalizeId(alert.target_user) ?? this.normalizeId(targetMemberUser),
+      target_user_name: targetUserName,
+      target_user_email: targetUserEmail,
+      scan_id: normalizedScanId,
+      scan_date_created: this.pickString(scanRecord?.['date_created']) ?? scanResult?.date_created ?? null,
+      scan_status: this.pickString(scanRecord?.['status']) ?? null,
+      reviewed_by_id: this.normalizeId(alert.reviewed_by),
+      reviewed_by_name: this.firstReadableLabel([
+        formatUserName(reviewedByRecord, ''),
+        formatUserName(alert.reviewed_by, '')
+      ], ''),
+      reviewed_by_email: sanitizeDisplayValue(reviewedByRecord?.['email'], ''),
+      reviewed_at: alert.reviewed_at ?? null,
+      action_note: alert.action_note?.trim() || null,
+      action_type: alert.action_type?.trim() || alert.alert_type?.trim() || null,
+      explanation: alert.explanation?.trim() || scanResult?.explanation?.trim() || null,
+      recommended_action: alert.recommended_action?.trim() || scanResult?.suggested_action?.trim() || null,
+      readiness_label:
+        alert.readiness_label?.trim() ||
+        alert.risk_label?.trim() ||
+        scanResult?.risk_level?.trim() ||
+        scanResult?.overall_state?.trim() ||
+        null,
+      notification_count: 0,
+      target_member_department_id: this.normalizeId(targetMemberDepartment),
+      target_member_department_name: formatDepartment(targetMemberDepartment, 'Unassigned'),
+      reviewed_status_label: alert.reviewed_at ? 'Reviewed' : 'Not reviewed',
+      relationWarnings,
+      permissionWarnings
+    };
   }
 
   private queryItemsStrict<T>(

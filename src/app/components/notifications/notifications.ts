@@ -72,6 +72,13 @@ export class NotificationsComponent implements OnInit, OnDestroy {
 
   openDetails(notification: NotificationItem): void {
     this.markAsRead(notification);
+    if (this.isAlertNotification(notification)) {
+      this.open = false;
+      void this.router.navigate(['/app/alerts'], {
+        queryParams: { alert: notification.linkId }
+      });
+      return;
+    }
     this.selectedNotification = notification;
     this.open = false;
   }
@@ -117,8 +124,15 @@ export class NotificationsComponent implements OnInit, OnDestroy {
       message: row.message || 'No additional details.',
       status: row.status || 'new',
       dateCreated: row.dateCreated,
-      iconKey: row.iconKey || 'general'
+      iconKey: row.iconKey || 'general',
+      linkType: row.linkType,
+      linkId: row.linkId
     };
+  }
+
+  private isAlertNotification(notification: NotificationItem): boolean {
+    const linkType = this.normalize(notification.linkType);
+    return Boolean(notification.linkId) && linkType.includes('alert');
   }
 
   private markAsRead(notification: NotificationItem): void {
@@ -165,4 +179,6 @@ type NotificationItem = {
   status: string;
   dateCreated: string | null;
   iconKey: string;
+  linkType: string | null;
+  linkId: string | null;
 };

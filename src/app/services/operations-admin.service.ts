@@ -479,6 +479,15 @@ type ScanRequestRecord = {
   business_profile?: string | number | { id?: string | number } | null;
   department?: string | number | { id?: string | number; name?: string | null } | null;
   completed_scan?: { id?: string | number; status?: string | null; completed_at?: string | null } | string | number | null;
+  scan_id?: { id?: string | number; status?: string | null; completed_at?: string | null } | string | number | null;
+  required_state?: string | null;
+  response_status?: string | null;
+  response_payload?: unknown;
+  timestamp?: string | null;
+  requested_for_user?: string | number | { id?: string | number; email?: string | null; first_name?: string | null; last_name?: string | null } | null;
+  requested_for_email?: string | null;
+  requested_for_phone?: string | null;
+  Target?: string | null;
 };
 
 type ScanResultRecord = {
@@ -851,8 +860,7 @@ export class OperationsAdminService {
           'member_role',
           'joined_at',
           'business_profile',
-          'department.id',
-          'department.name',
+          'department',
           'user.id',
           'user.first_name',
           'user.last_name',
@@ -874,15 +882,28 @@ export class OperationsAdminService {
             limit: 250
           }
         ).pipe(
-          map((rows) =>
-            rows
+          map((rows) => ({
+            departments: rows
               .map((row) => ({
                 id: this.normalizeId(row.id) ?? '',
                 name: this.pickString(row.name) ?? 'Unnamed Department'
               }))
-              .filter((row) => row.id)
-          ),
-          switchMap((scopedDepartments) =>
+              .filter((row) => row.id),
+            departmentWarning: null as string | null
+          })),
+          catchError((error) => {
+            const status = (error as HttpErrorResponse | null)?.status ?? 0;
+            if (status === 401 || status === 403) {
+              console.warn('[DEPARTMENTS_PERMISSION_BLOCKED]', {
+                requiredFields: ['id', 'name', 'business_profile']
+              });
+            }
+            return of({
+              departments: [] as DepartmentOption[],
+              departmentWarning: 'Department metadata is unavailable for this workspace.'
+            });
+          }),
+          switchMap(({ departments: scopedDepartments, departmentWarning }) =>
             this.queryItemsStrict<WorkforceMemberRecord>(
               'business_profile_members',
               safeFields,
@@ -904,14 +925,16 @@ export class OperationsAdminService {
                     limit: 500
                   }
                 ).pipe(
-                  map((expandedMembers) => this.buildWorkforcePageData(expandedMembers, null, scopedDepartments)),
+                  map((expandedMembers) => this.buildWorkforcePageData(expandedMembers, departmentWarning, scopedDepartments)),
                   catchError((error) => {
                     if (!this.isRelationPermissionError(error)) {
                       return throwError(() => error);
                     }
 
                     const relationWarning =
-                      'Workforce data could not be loaded. Your role does not have permission to read member profile fields.';
+                      [departmentWarning, 'Workforce data could not be loaded. Your role does not have permission to read member profile fields.']
+                        .filter((value): value is string => Boolean(value))
+                        .join(' ');
                     return of(this.buildWorkforcePageData(safeMembers, relationWarning, scopedDepartments));
                   })
                 )
@@ -969,7 +992,7 @@ export class OperationsAdminService {
               );
             }
             if (acceptedInvitesResult.failed) warningParts.push('accepted invite mappings');
-            if (scanRequestsResult.failed) warningParts.push('Scan request status could not be loaded. Check scan_requests read permission.');
+            if (scanRequestsResult.failed) warningParts.push('Scan request status could not be loaded. Check requests read permission.');
             if (todaysScansResult.failed) warningParts.push("today's scans");
             if (departmentsResult.failed) warningParts.push('departments');
             const relationWarning =
@@ -1059,7 +1082,7 @@ export class OperationsAdminService {
           ),
           members: this.queryItems<MemberRecord>(
             'business_profile_members',
-            ['id', 'member_role', 'status', 'department.id', 'department.name', 'user.id', 'user.email', 'user.first_name', 'user.last_name', 'last_scan_at', 'last_readiness_score', 'last_risk_level'],
+            ['id', 'member_role', 'status', 'department', 'user.id', 'user.email', 'user.first_name', 'user.last_name', 'last_scan_at', 'last_readiness_score', 'last_risk_level'],
             context.token,
             {
               filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
@@ -1174,8 +1197,7 @@ export class OperationsAdminService {
               'id',
               'member_role',
               'status',
-              'department.id',
-              'department.name',
+              'department',
               'user.id',
               'user.email',
               'user.first_name',
@@ -1402,8 +1424,7 @@ export class OperationsAdminService {
       'user.first_name',
       'user.last_name',
       'business_profile',
-      'department.id',
-      'department.name',
+      'department',
       'shift_template.id',
       'shift_template.name',
       'employee_code',
@@ -1526,8 +1547,7 @@ export class OperationsAdminService {
       'business_profile',
       'business_profile.id',
       'business_profile.company_name',
-      'department.id',
-      'department.name',
+      'department',
       'shift_template',
       'shift_template.id',
       'shift_template.name',
@@ -1601,8 +1621,6 @@ export class OperationsAdminService {
       'business_profile.company_name',
       'member_role',
       'department',
-      'department.id',
-      'department.name',
       'accepted_user',
       'accepted_user.id',
       'accepted_user.email',
@@ -1678,8 +1696,6 @@ export class OperationsAdminService {
       'business_profile.company_name',
       'member_role',
       'department',
-      'department.id',
-      'department.name',
       'accepted_user',
       'accepted_user.id',
       'accepted_user.email',
@@ -1735,76 +1751,52 @@ export class OperationsAdminService {
 
     const expandedFields = [
       'id',
-      'status',
-      'request_type',
       'business_profile',
-      'business_profile.id',
-      'business_profile.company_name',
-      'department',
-      'department.id',
-      'department.name',
-      'requested_by_user',
-      'requested_by_user.id',
-      'requested_by_user.email',
-      'requested_by_user.first_name',
-      'requested_by_user.last_name',
-      'target_member',
-      'target_member.id',
-      'target_member.status',
-      'target_member.member_role',
-      'target_member.user',
-      'target_member.user.id',
-      'target_member.user.email',
-      'target_member.user.first_name',
-      'target_member.user.last_name',
-      'target_member.department',
-      'target_member.department.id',
-      'target_member.department.name',
-      'completed_scan',
-      'completed_scan.id',
-      'completed_scan.status',
-      'completed_scan.completed_at',
-      'requested_at',
-      'due_at',
-      'completed_at',
-      'cancelled'
+      'scan_id',
+      'required_state',
+      'response_status',
+      'response_payload',
+      'timestamp',
+      'requested_for_user',
+      'requested_for_email',
+      'requested_for_phone',
+      'Target'
     ];
     const fallbackFields = [
       'id',
-      'status',
-      'request_type',
       'business_profile',
-      'department',
-      'requested_by_user',
-      'target_member',
-      'completed_scan',
-      'cancelled',
-      'requested_at',
-      'due_at',
-      'completed_at'
+      'scan_id',
+      'required_state',
+      'response_status',
+      'timestamp',
+      'requested_for_user',
+      'requested_for_email',
+      'requested_for_phone',
+      'Target'
     ];
 
     return this.queryItemsStrict<ScanRequestRecord>(
-      'scan_requests',
+      'requests',
       expandedFields,
       context.token,
       {
         filters,
-        sort: '-requested_at',
+        sort: '-timestamp',
         limit: 800
       }
     ).pipe(
+      map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))),
       catchError(() =>
         this.queryItemsStrict<ScanRequestRecord>(
-          'scan_requests',
+          'requests',
           fallbackFields,
           context.token,
           {
             filters,
-            sort: '-requested_at',
+            sort: '-timestamp',
             limit: 800
           }
-        )
+        ).pipe(map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))))
       )
     );
   }
@@ -1835,6 +1827,36 @@ export class OperationsAdminService {
         limit: 800
       }
     );
+  }
+
+  private normalizeScanRequestRecord(row: ScanRequestRecord): ScanRequestRecord {
+    const responsePayload = row.response_payload && typeof row.response_payload === 'object'
+      ? row.response_payload as Record<string, unknown>
+      : null;
+    const timestamp = this.pickString(row.timestamp ?? row.requested_at);
+    const status = this.pickString(row.response_status ?? row.status) ?? 'pending';
+    const requestType = this.pickString(row.required_state ?? row.request_type);
+    const scanId = this.normalizeId(row.scan_id ?? row.completed_scan);
+    return {
+      ...row,
+      target_member: row.target_member ?? row.requested_for_user ?? null,
+      requested_by_user: row.requested_by_user ?? null,
+      request_type: requestType,
+      status,
+      requested_at: timestamp,
+      due_at: row.due_at ?? this.pickString(responsePayload?.['due_at']) ?? null,
+      completed_at: row.completed_at ?? this.pickString(responsePayload?.['completed_at']) ?? null,
+      completed_scan: row.completed_scan ?? scanId,
+      scan_id: row.scan_id ?? scanId,
+      required_state: row.required_state ?? requestType,
+      response_status: row.response_status ?? status,
+      response_payload: row.response_payload ?? responsePayload,
+      timestamp,
+      requested_for_user: row.requested_for_user ?? row.target_member ?? null,
+      requested_for_email: row.requested_for_email ?? this.pickString(responsePayload?.['requested_for_email']) ?? null,
+      requested_for_phone: row.requested_for_phone ?? this.pickString(responsePayload?.['requested_for_phone']) ?? null,
+      Target: row.Target ?? this.pickString(responsePayload?.['Target']) ?? null
+    };
   }
 
   private getActiveDepartmentsForWorkforce(context: ScopedContext): Observable<DepartmentOption[]> {
@@ -2519,11 +2541,19 @@ export class OperationsAdminService {
     relationWarning: string | null,
     scopedDepartments: DepartmentOption[]
   ): WorkforcePageData {
+    const departmentNameById = new Map(
+      (scopedDepartments ?? [])
+        .filter((department) => Boolean(department.id))
+        .map((department) => [department.id, department.name] as const)
+    );
+
     const rows = (members ?? []).map((member) => {
       const status = this.pickString(member.status)?.toLowerCase() ?? 'active';
       const memberRole = this.normalizeMemberRole(member.member_role);
       const lastScanAt = this.pickString(member.last_scan_at);
       const todaysScan = this.isToday(lastScanAt);
+      const departmentId = this.normalizeId(member.department);
+      const departmentName = this.departmentName(member.department) ?? (departmentId ? departmentNameById.get(departmentId) ?? null : null);
 
       return {
         id: this.normalizeId(member.id) ?? '',
@@ -2531,8 +2561,8 @@ export class OperationsAdminService {
         member_role: memberRole,
         joined_at: this.pickString(member.joined_at),
         business_profile: this.normalizeId(member.business_profile),
-        department_id: this.normalizeId(member.department),
-        department_name: this.departmentName(member.department),
+        department_id: departmentId,
+        department_name: departmentName,
         user_id: this.normalizeId(member.user),
         user_first_name: this.pickString((member.user as Record<string, unknown> | null)?.['first_name']),
         user_last_name: this.pickString((member.user as Record<string, unknown> | null)?.['last_name']),
@@ -2641,8 +2671,8 @@ export class OperationsAdminService {
     }
 
     const url = `${this.api}/items/${collection}?${params.toString()}`;
-    if (collection === 'scan_requests') {
-      console.log('[ScanRequestsDebug] final scan_requests query URL', url);
+    if (collection === 'requests') {
+      console.log('[ScanRequestsDebug] final requests query URL', url);
     }
 
     return this.http.get<{ data?: T[] }>(
@@ -2655,10 +2685,17 @@ export class OperationsAdminService {
       timeout(15000),
       map((response) => {
         const rows = response.data ?? [];
-        if (collection === 'scan_requests') {
+        if (collection === 'requests') {
           console.log('[ScanRequestsDebug] raw API response count', Array.isArray(rows) ? rows.length : 0);
         }
         return rows;
+      }),
+      catchError((error) => {
+        const status = (error as { status?: number } | null)?.status ?? 0;
+        if (status === 403) {
+          return of([] as T[]);
+        }
+        return throwError(() => error);
       })
     );
   }

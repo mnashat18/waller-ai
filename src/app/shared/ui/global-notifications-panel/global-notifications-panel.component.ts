@@ -1,5 +1,6 @@
 import { CommonModule, DatePipe } from '@angular/common';
 import { Component, HostListener, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
 import { EmptyStateComponent } from '../empty-state/empty-state.component';
 import { StatusBadgeComponent } from '../status-badge/status-badge.component';
 import { NotificationsService, type WorkspaceNotification } from '../../../services/notifications.service';
@@ -14,7 +15,10 @@ export class GlobalNotificationsPanelComponent implements OnInit {
   open = false;
   readonly notificationsState$;
 
-  constructor(private notifications: NotificationsService) {
+  constructor(
+    private notifications: NotificationsService,
+    private router: Router
+  ) {
     this.notificationsState$ = this.notifications.state$;
   }
 
@@ -37,6 +41,16 @@ export class GlobalNotificationsPanelComponent implements OnInit {
 
   viewAll(event: MouseEvent): void {
     event.stopPropagation();
+  }
+
+  openNotification(item: WorkspaceNotification, event: MouseEvent): void {
+    event.stopPropagation();
+    if (this.isAlertNotification(item)) {
+      this.open = false;
+      void this.router.navigate(['/app/alerts'], {
+        queryParams: { alert: item.linkId }
+      });
+    }
   }
 
   statusLabel(item: WorkspaceNotification): string {
@@ -67,5 +81,10 @@ export class GlobalNotificationsPanelComponent implements OnInit {
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ');
+  }
+
+  private isAlertNotification(item: WorkspaceNotification): boolean {
+    const linkType = (item.linkType ?? '').trim().toLowerCase();
+    return Boolean(item.linkId) && linkType.includes('alert');
   }
 }

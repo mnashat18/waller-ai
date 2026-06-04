@@ -8,6 +8,7 @@ import { CompanyContextService } from '../../core/context/company-context.servic
 import {
   OperationsWorkflowsService,
   type AlertActionInput,
+  type AlertDetailsRow,
   type AlertRow,
   type WorkflowDepartmentOption
 } from '../../services/operations-workflows.service';
@@ -73,6 +74,13 @@ type AlertViewModel = {
   createdLabel: string;
   operationalAttention: string;
   scopeLabel: string;
+  explanation: string;
+  recommendedAction: string;
+  readinessLabel: string;
+  targetMemberDepartmentName: string;
+  reviewedStatusLabel: string;
+  relationWarnings: string[];
+  permissionWarnings: string[];
 };
 
 type FollowUpDuePreset = 'end_of_today' | 'in_2_hours' | 'custom';
@@ -120,6 +128,8 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
   };
   departments: WorkflowDepartmentOption[] = [];
   selectedAlert: AlertViewModel | null = null;
+  selectedAlertLoading = false;
+  selectedAlertError = '';
   errorMessage = '';
   feedbackMessage = '';
   warningMessage = '';
@@ -182,17 +192,21 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
       const alertId = params.get('alert');
       if (!alertId) {
         this.selectedAlert = null;
+        this.selectedAlertLoading = false;
+        this.selectedAlertError = '';
         this.togglePageScrollLock(false);
         return;
       }
 
       const selected = this.filteredAlerts.find((row) => row.id === alertId) ?? this.alerts.find((row) => row.id === alertId) ?? null;
       this.selectedAlert = selected;
+      this.selectedAlertError = '';
+      this.togglePageScrollLock(true);
       if (selected) {
         this.reviewNoteDraft = selected.actionNote;
         this.reviewActionTypeDraft = selected.actionType || 'none';
       }
-      this.togglePageScrollLock(Boolean(selected));
+      this.loadSelectedAlertDetails(alertId);
     });
 
     void this.loadAlerts();
@@ -271,6 +285,8 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   viewAlert(row: AlertViewModel): void {
     this.selectedAlert = row;
+    this.selectedAlertError = '';
+    this.selectedAlertLoading = true;
     this.reviewNoteDraft = row.actionNote;
     this.reviewActionTypeDraft = row.actionType || 'none';
     this.togglePageScrollLock(true);
@@ -284,6 +300,8 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   closeAlertDetails(): void {
     this.selectedAlert = null;
+    this.selectedAlertLoading = false;
+    this.selectedAlertError = '';
     this.reviewNoteDraft = '';
     this.reviewActionTypeDraft = 'none';
     this.togglePageScrollLock(false);
@@ -514,6 +532,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
           this.reviewActionTypeDraft = this.selectedAlert.actionType || 'none';
           this.togglePageScrollLock(true);
         }
+        void this.loadSelectedAlertDetails(alertId);
       }
 
       this.pageState = 'ready';
@@ -582,7 +601,58 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
       createdTs,
       createdLabel: this.formatDateTime(raw.date_created),
       operationalAttention: this.operationalAttentionForSeverity(normalizedSeverity),
-      scopeLabel: this.scopeChipLabel
+      scopeLabel: this.scopeChipLabel,
+      explanation: raw.explanation || '',
+      recommendedAction: raw.recommended_action || '',
+      readinessLabel: raw.readiness_label || '',
+      targetMemberDepartmentName: raw.department_name || departmentName,
+      reviewedStatusLabel: raw.reviewed_at ? 'Reviewed' : 'Not reviewed',
+      relationWarnings: [],
+      permissionWarnings: []
+    };
+  }
+
+  private loadSelectedAlertDetails(alertId: string): void {
+    this.selectedAlertLoading = true;
+    this.selectedAlertError = '';
+
+    this.workflows.fetchAlertDetails(alertId).pipe(timeout(15000)).subscribe({
+      next: (detail) => {
+        const normalized = this.normalizeAlertDetails(detail);
+        const index = this.alerts.findIndex((item) => item.id === normalized.id);
+        if (index >= 0) {
+          this.alerts[index] = normalized;
+          this.applyFilters();
+        }
+        this.selectedAlert = normalized;
+        this.reviewNoteDraft = normalized.actionNote;
+        this.reviewActionTypeDraft = normalized.actionType || 'none';
+        this.selectedAlertLoading = false;
+        this.cdr.markForCheck();
+      },
+      error: (error: unknown) => {
+        const status = (error as { status?: number } | null)?.status ?? 0;
+        this.selectedAlertLoading = false;
+        this.selectedAlertError = status === 403
+          ? 'Alert details are permission blocked for the current workspace role.'
+          : 'Alert details could not be loaded.';
+        this.cdr.markForCheck();
+      }
+    });
+  }
+
+  private normalizeAlertDetails(raw: AlertDetailsRow): AlertViewModel {
+    const base = this.normalizeAlert(raw);
+    return {
+      ...base,
+      departmentName: sanitizeDisplayValue(raw.department_name || raw.target_member_department_name, base.departmentName),
+      targetMemberDepartmentName: sanitizeDisplayValue(raw.target_member_department_name || raw.department_name, base.departmentName),
+      explanation: raw.explanation || '',
+      recommendedAction: raw.recommended_action || '',
+      readinessLabel: raw.readiness_label || '',
+      reviewedStatusLabel: raw.reviewed_status_label || (raw.reviewed_at ? 'Reviewed' : 'Not reviewed'),
+      relationWarnings: [...raw.relationWarnings],
+      permissionWarnings: [...raw.permissionWarnings]
     };
   }
 

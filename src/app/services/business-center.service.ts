@@ -91,6 +91,15 @@ export type RequestRecord = {
   due_at?: string | null;
   completed_at?: string | null;
   completed_scan?: string | null;
+  scan_id?: string | null;
+  required_state?: string | null;
+  response_status?: string | null;
+  response_payload?: unknown;
+  timestamp?: string | null;
+  requested_for_user?: string | null;
+  requested_for_email?: string | null;
+  requested_for_phone?: string | null;
+  Target?: string | null;
   [key: string]: unknown;
 };
 
@@ -638,10 +647,10 @@ export class BusinessCenterService {
         }
 
         const params = this.buildRequestsParams(1);
-        params.set('filter[target_member][_eq]', requestedForUserId);
+        params.set('filter[requested_for_user][_eq]', requestedForUserId);
 
         return this.http.get<{ data?: any[] }>(
-          `${this.api}/items/scan_requests?${params.toString()}`,
+          `${this.api}/items/requests?${params.toString()}`,
           this.requestOptions(access.token)
         ).pipe(
           map((res) => (res.data ?? []).length > 0),
@@ -719,17 +728,14 @@ export class BusinessCenterService {
             }
 
             const body: Record<string, unknown> = {
-              target_member: requestedForUserId,
-              requested_by_user: requestedByUser,
-              request_type: requestType,
-              status: this.pickString(payload.status) ?? 'pending'
+              business_profile: scope.businessProfileId,
+              requested_for_user: requestedForUserId,
+              requested_for_email: requestedForEmail,
+              Target: requestedForEmail,
+              required_state: requestType,
+              response_status: this.pickString(payload.status) ?? 'pending',
+              timestamp: new Date().toISOString()
             };
-            if (scope.hasBusinessAccess) {
-              body['business_profile'] = scope.businessProfileId;
-            }
-            if (payload.due_at) {
-              body['due_at'] = payload.due_at;
-            }
 
             this.debug('createScanRequest:payload', {
               requestedByUser,
@@ -754,7 +760,7 @@ export class BusinessCenterService {
     params.set('filter[business_profile][_eq]', businessProfileId);
 
     return this.http.get<{ data?: any[] }>(
-      `${this.api}/items/scan_requests?${params.toString()}`,
+      `${this.api}/items/requests?${params.toString()}`,
       this.requestOptions(token)
     ).pipe(
       map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
@@ -768,10 +774,10 @@ export class BusinessCenterService {
     token: string | null
   ): Observable<RequestRecord[]> {
     const params = this.buildRequestsParams(limit);
-    params.set('filter[target_member][_eq]', userId);
+    params.set('filter[requested_for_user][_eq]', userId);
 
     return this.http.get<{ data?: any[] }>(
-      `${this.api}/items/scan_requests?${params.toString()}`,
+      `${this.api}/items/requests?${params.toString()}`,
       this.requestOptions(token)
     ).pipe(
       map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
@@ -785,10 +791,10 @@ export class BusinessCenterService {
     token: string | null
   ): Observable<RequestRecord[]> {
     const params = this.buildRequestsParams(limit);
-    params.set('filter[requested_by_user][_eq]', userId);
+    params.set('filter[requested_for_user][_eq]', userId);
 
     return this.http.get<{ data?: any[] }>(
-      `${this.api}/items/scan_requests?${params.toString()}`,
+      `${this.api}/items/requests?${params.toString()}`,
       this.requestOptions(token)
     ).pipe(
       map((res) => (res.data ?? []).map((row) => this.normalizeRequest(row))),
@@ -814,21 +820,20 @@ export class BusinessCenterService {
 
   private buildRequestsParams(limit: number): URLSearchParams {
     return new URLSearchParams({
-      sort: '-requested_at',
+      sort: '-timestamp',
       limit: String(limit),
       fields: [
         'id',
         'business_profile',
-        'department',
-        'requested_by_user',
-        'target_member',
-        'request_type',
-        'status',
-        'cancelled',
-        'requested_at',
-        'due_at',
-        'completed_at',
-        'completed_scan'
+        'scan_id',
+        'required_state',
+        'response_status',
+        'response_payload',
+        'timestamp',
+        'requested_for_user',
+        'requested_for_email',
+        'requested_for_phone',
+        'Target'
       ].join(',')
     });
   }
@@ -870,7 +875,7 @@ export class BusinessCenterService {
     token: string | null
   ): Observable<CreateScanRequestResult> {
     return this.http.post<{ data?: { id?: unknown } }>(
-      `${this.api}/items/scan_requests`,
+      `${this.api}/items/requests`,
       body,
       this.requestOptions(token)
     ).pipe(
@@ -889,7 +894,7 @@ export class BusinessCenterService {
         }
 
         return this.http.post<{ data?: { id?: unknown } }>(
-          `${this.api}/items/scan_requests`,
+          `${this.api}/items/requests`,
           body,
           this.requestOptions(token)
         ).pipe(
@@ -901,7 +906,7 @@ export class BusinessCenterService {
           })),
           catchError(() =>
             this.http.post<{ data?: { id?: unknown } }>(
-              `${this.api}/items/scan_requests`,
+              `${this.api}/items/requests`,
               body,
               this.requestOptions(token)
             ).pipe(
@@ -1146,9 +1151,9 @@ export class BusinessCenterService {
 
         const linkCalls = requestIds.map((requestId) =>
           this.http.patch(
-            `${this.api}/items/scan_requests/${encodeURIComponent(requestId)}`,
+            `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
             {
-              target_member: userId
+              requested_for_user: userId
             },
             this.requestOptions(token)
           ).pipe(
@@ -1159,8 +1164,8 @@ export class BusinessCenterService {
               }
 
               return this.http.patch(
-                `${this.api}/items/scan_requests/${encodeURIComponent(requestId)}`,
-                { target_member: userId },
+                `${this.api}/items/requests/${encodeURIComponent(requestId)}`,
+                { requested_for_user: userId },
                 this.requestOptions(token)
               ).pipe(
                 map(() => true),
@@ -1730,16 +1735,17 @@ export class BusinessCenterService {
 
   private normalizeRequest(raw: any): RequestRecord {
     const targetMember = this.normalizeId(raw?.target_member ?? raw?.requested_for_user);
-    const requestType = this.pickString(raw?.request_type) ?? this.pickString(raw?.status) ?? 'pending';
+    const requestType = this.pickString(raw?.request_type) ?? this.pickString(raw?.required_state) ?? 'pending';
     const status = this.pickString(raw?.status) ?? this.pickString(raw?.response_status) ?? 'pending';
-    const completedScan = this.normalizeId(raw?.completed_scan);
+    const completedScan = this.normalizeId(raw?.completed_scan ?? raw?.scan_id);
+    const requestedAt = this.pickString(raw?.requested_at) ?? this.pickString(raw?.timestamp);
     return {
       id: this.normalizeId(raw?.id) ?? '',
-      target: 'scan',
+      target: this.pickString(raw?.Target) ?? 'scan',
       recipient: this.requestRecipient(raw),
       requested_by_user: this.normalizeId(raw?.requested_by_user),
       target_member: targetMember,
-      requested_for_user: targetMember,
+      requested_for_user: this.normalizeId(raw?.requested_for_user) ?? targetMember,
       business_profile: this.normalizeId(raw?.business_profile),
       department: this.normalizeId(raw?.department),
       recipient_industry: null,
@@ -1748,10 +1754,16 @@ export class BusinessCenterService {
       response_status: status,
       required_state: requestType,
       cancelled: this.pickString(raw?.cancelled),
-      requested_at: this.pickString(raw?.requested_at),
+      requested_at: requestedAt,
       due_at: this.pickString(raw?.due_at),
       completed_at: this.pickString(raw?.completed_at),
-      completed_scan: completedScan
+      completed_scan: completedScan,
+      scan_id: this.normalizeId(raw?.scan_id),
+      response_payload: raw?.response_payload,
+      timestamp: requestedAt,
+      requested_for_email: this.pickString(raw?.requested_for_email),
+      requested_for_phone: this.pickString(raw?.requested_for_phone),
+      Target: this.pickString(raw?.Target)
     };
   }
 
@@ -1862,6 +1874,10 @@ export class BusinessCenterService {
     const userName = this.userLabel(user);
     if (userName) {
       return userName;
+    }
+    const email = this.pickString(raw?.requested_for_email) ?? this.pickString(raw?.Target);
+    if (email) {
+      return email;
     }
     return '-';
   }
@@ -2101,24 +2117,15 @@ export class BusinessCenterService {
     const stored = this.readStoredAccessContext();
 
     return this.http.get<any>(
-      `${this.api}/users/me?fields=id,email,active_business_profile,active_member_role,active_department`,
+      `${this.api}/users/me?fields=id,email,first_name,last_name`,
       this.requestOptions(token)
     ).pipe(
       switchMap((res) => {
         const user = res?.data ?? res ?? {};
         const userId = this.normalizeId(user?.id) ?? stored.userId;
-        const hasActiveBusinessProfileField = Object.prototype.hasOwnProperty.call(user, 'active_business_profile');
-        const hasActiveMemberRoleField = Object.prototype.hasOwnProperty.call(user, 'active_member_role');
-        const hasActiveDepartmentField = Object.prototype.hasOwnProperty.call(user, 'active_department');
-        const activeBusinessProfileId = this.normalizeId(
-          hasActiveBusinessProfileField ? user?.active_business_profile : stored.activeBusinessProfileId
-        );
-        const activeDepartmentId = this.normalizeId(
-          hasActiveDepartmentField ? user?.active_department : stored.activeDepartmentId
-        );
-        const activeMemberRole = this.pickString(
-          hasActiveMemberRoleField ? user?.active_member_role : stored.activeMemberRole
-        );
+        const activeBusinessProfileId = stored.activeBusinessProfileId;
+        const activeDepartmentId = stored.activeDepartmentId;
+        const activeMemberRole = stored.activeMemberRole;
 
         return forkJoin({
           companyName: this.resolveBusinessProfileName(activeBusinessProfileId, token),
@@ -2126,20 +2133,12 @@ export class BusinessCenterService {
         }).pipe(
           map(({ companyName, departmentName }) => ({
             userId,
-            hasActiveBusinessProfileField,
-            hasActiveDepartmentField,
+            hasActiveBusinessProfileField: false,
+            hasActiveDepartmentField: false,
             activeBusinessProfileId,
-            activeBusinessProfileName:
-              companyName ??
-              this.pickString(hasActiveBusinessProfileField ? user?.active_business_profile?.company_name : null) ??
-              stored.activeBusinessProfileName,
+            activeBusinessProfileName: companyName ?? stored.activeBusinessProfileName,
             activeDepartmentId,
-            activeDepartmentName:
-              departmentName ??
-              this.pickString(
-                hasActiveDepartmentField ? user?.active_department?.name : null
-              ) ??
-              stored.activeDepartmentName,
+            activeDepartmentName: departmentName ?? stored.activeDepartmentName,
             activeMemberRole
           })),
           tap((resolved) => {

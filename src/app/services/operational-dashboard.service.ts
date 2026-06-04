@@ -203,6 +203,16 @@ type RequestRecord = {
   due_at?: string | null;
   completed_at?: string | null;
   cancelled?: string | null;
+  completed_scan?: string | number | Record<string, unknown> | null;
+  scan_id?: string | number | Record<string, unknown> | null;
+  required_state?: string | null;
+  response_status?: string | null;
+  response_payload?: unknown;
+  timestamp?: string | null;
+  requested_for_user?: string | number | Record<string, unknown> | null;
+  requested_for_email?: string | null;
+  requested_for_phone?: string | null;
+  Target?: string | null;
 };
 
 type DirectusUserRecord = {
@@ -299,8 +309,7 @@ export class OperationalDashboardService {
                       'last_scan_at',
                       'last_readiness_score',
                       'last_risk_level',
-                      'department.id',
-                      'department.name',
+                      'department',
                       'user.id',
                       'user.first_name',
                       'user.last_name',
@@ -372,34 +381,24 @@ export class OperationalDashboardService {
                     departmentFilterPath: ['department']
                   }, token, 'Alerts could not be loaded.'),
                   requests: this.querySection<RequestRecord>({
-                    collection: 'scan_requests',
+                    collection: 'requests',
                     fields: [
                       'id',
-                      'status',
-                      'requested_at',
-                      'due_at',
-                      'request_type',
-                      'department.id',
-                      'department.name',
-                      'target_member.id',
-                      'target_member.department.id',
-                      'target_member.department.name',
-                      'target_member.user.id',
-                      'target_member.user.first_name',
-                      'target_member.user.last_name',
-                      'target_member.user.email',
-                      'requested_by_user.id',
-                      'requested_by_user.first_name',
-                      'requested_by_user.last_name',
-                      'completed_at',
-                      'cancelled'
+                      'business_profile',
+                      'scan_id',
+                      'required_state',
+                      'response_status',
+                      'response_payload',
+                      'timestamp',
+                      'requested_for_user',
+                      'requested_for_email',
+                      'requested_for_phone',
+                      'Target'
                     ],
                     limit: 80,
-                    sort: '-requested_at',
+                    sort: '-timestamp',
                     businessProfileId: resolvedBusinessProfileId,
                     businessProfileFilterPath: ['business_profile'],
-                    departmentId: resolvedDepartmentId,
-                    departmentFilterPath: ['department']
                   }, token, 'Scan requests could not be loaded.')
                 }).pipe(
                   switchMap((sources) => {
@@ -456,9 +455,9 @@ export class OperationalDashboardService {
   ): OperationalDashboardViewModel {
     const profile = this.businessCenter.getCachedHubAccessState()?.profile ?? null;
     const timezone = profile?.timezone?.trim() || null;
-    const member = this.findCurrentMember(sources.members.items, userId);
     const departmentMap = this.buildDepartmentMap(sources.departments.items);
-    const memberMap = this.buildMemberMap(sources.members.items, departmentMap);
+    const member = this.findCurrentMember(sources.members.items, userId, departmentMap, sources.departments.error);
+    const memberMap = this.buildMemberMap(sources.members.items, departmentMap, sources.departments.error);
     const scanRows = this.buildScanResultRows(sources.scans.items, scanResults.items, memberMap, departmentMap, timezone);
     const completedToday = scanRows.filter((row) => row.isToday);
     const latestByMember = this.latestByMember(completedToday);
@@ -471,7 +470,7 @@ export class OperationalDashboardService {
     const latestResultsByMember = this.latestResultsByMember(latestByMember, scanResults.items, memberMap, timezone);
     const readinessBuckets = this.buildReadinessBuckets(latestResultsByMember);
     const avgReadiness = this.averageReadiness(latestResultsByMember);
-    const highRiskToday = latestResultsByMember.filter((item) => item.riskLevel === 'high_risk').length;
+    const highRiskToday = latestResultsByMember.filter((item) => this.normalizeRisk(item.riskLevel) === 'high_risk').length;
     const openAlerts = this.buildAlertRows(sources.alerts.items, memberMap, departmentMap, timezone);
     const requestRows = this.buildRequestRows(sources.requests.items, memberMap, departmentMap, timezone);
     const attentionItems = this.buildAttentionItems(
@@ -486,7 +485,8 @@ export class OperationalDashboardService {
     const departmentCompliance = this.buildDepartmentCompliance(
       activeMembers,
       completedMemberIds,
-      departmentMap
+      departmentMap,
+      sources.departments.error
     );
 
     const kpis: DashboardKpiCardData[] = [
@@ -520,16 +520,16 @@ export class OperationalDashboardService {
       },
       {
         label: 'Avg Readiness',
-        value: avgReadiness,
-        description: "Average readiness score from today's completed scans.",
-        tone: 'neutral',
+        value: scanResults.error ? '--' : avgReadiness,
+        description: scanResults.error ? 'Readiness data unavailable.' : "Average readiness score from today's completed scans.",
+        tone: scanResults.error ? 'warning' : 'neutral',
         toneLabel: 'Readiness'
       },
       {
         label: 'High Risk Today',
-        value: String(highRiskToday),
-        description: 'Completed scans marked High Risk today.',
-        tone: highRiskToday > 0 ? 'danger' : 'success',
+        value: scanResults.error ? '--' : String(highRiskToday),
+        description: scanResults.error ? 'Readiness data unavailable.' : 'Completed scans marked High Risk today.',
+        tone: scanResults.error ? 'warning' : highRiskToday > 0 ? 'danger' : 'success',
         toneLabel: 'Review'
       },
       {
@@ -558,7 +558,7 @@ export class OperationalDashboardService {
 
     const complianceState: DashboardSectionState<DashboardDepartmentCompliance> = {
       items: departmentCompliance,
-      error: sources.departments.error || sources.members.error || scanResults.error
+      error: sources.members.error || sources.scans.error
     };
 
     const recentScansState: DashboardSectionState<DashboardScanActivityItem> = {
@@ -628,51 +628,54 @@ export class OperationalDashboardService {
   }
 
   private querySection<T>(config: QueryConfig, token: string, fallbackError: string): Observable<DashboardSectionState<T>> {
-    if (config.collection === 'scan_requests') {
-      return this.queryScanRequestsSection<T>(config, token, fallbackError);
+    if (config.collection === 'requests') {
+      return this.queryRequestsSection<T>(config, token, fallbackError);
     }
     return this.querySectionSingle<T>(config, token, fallbackError);
   }
 
-  private queryScanRequestsSection<T>(config: QueryConfig, token: string, fallbackError: string): Observable<DashboardSectionState<T>> {
+  private queryRequestsSection<T>(config: QueryConfig, token: string, fallbackError: string): Observable<DashboardSectionState<T>> {
     const layeredConfigs: QueryConfig[] = [
       config,
       {
         ...config,
         fields: [
           'id',
-          'status',
-          'requested_at',
-          'due_at',
-          'request_type',
-          'completed_at',
-          'cancelled',
           'business_profile',
-          'department.id',
-          'department.name',
-          'target_member',
-          'requested_by_user'
+          'scan_id',
+          'required_state',
+          'response_status',
+          'response_payload',
+          'timestamp',
+          'requested_for_user',
+          'requested_for_email',
+          'requested_for_phone',
+          'Target'
         ]
       },
       {
         ...config,
         fields: [
           'id',
-          'status',
-          'requested_at',
-          'due_at',
-          'request_type',
-          'completed_at',
-          'cancelled',
           'business_profile',
-          'department',
-          'target_member',
-          'requested_by_user'
+          'scan_id',
+          'required_state',
+          'response_status',
+          'timestamp',
+          'requested_for_user',
+          'requested_for_email',
+          'requested_for_phone',
+          'Target'
         ]
       }
     ];
 
-    return this.queryWithFallback<T>(layeredConfigs, token, fallbackError);
+    return this.queryWithFallback<RequestRecord>(layeredConfigs, token, fallbackError).pipe(
+      map((state) => ({
+        ...state,
+        items: (state.items ?? []).map((item) => this.normalizeRequestRecord(item)) as unknown as T[]
+      }))
+    );
   }
 
   private queryWithFallback<T>(configs: QueryConfig[], token: string, fallbackError: string): Observable<DashboardSectionState<T>> {
@@ -688,7 +691,7 @@ export class OperationalDashboardService {
         }
 
         if (!environment.production) {
-          console.warn('[dashboard] retrying scan_requests with safer fields');
+          console.warn('[dashboard] retrying requests with safer fields');
         }
         return this.queryWithFallback<T>(rest, token, fallbackError);
       })
@@ -730,6 +733,13 @@ export class OperationalDashboardService {
       })),
       timeout(15000),
       catchError((error) => {
+        const status = (error as { status?: number } | null)?.status ?? 0;
+        if (config.collection === 'departments' && (status === 401 || status === 403)) {
+          console.warn('[DEPARTMENTS_PERMISSION_BLOCKED]', {
+            requiredFields: ['id', 'name', 'business_profile'],
+            collection: config.collection
+          });
+        }
         this.logSectionFailure(config.collection, error);
         return of({
           items: [] as T[],
@@ -738,6 +748,37 @@ export class OperationalDashboardService {
         });
       })
     );
+  }
+
+  private normalizeRequestRecord(request: RequestRecord): RequestRecord {
+    const responsePayload = request.response_payload && typeof request.response_payload === 'object'
+      ? request.response_payload as Record<string, unknown>
+      : null;
+    const timestamp = request.timestamp ?? request.requested_at ?? null;
+    const status = this.pickString(request.response_status ?? request.status) ?? 'pending';
+    const requestType = this.pickString(request.required_state ?? request.request_type ?? null);
+    const completedScanId = this.normalizeId(request.scan_id ?? request.completed_scan);
+    return {
+      ...request,
+      target_member: request.target_member ?? request.requested_for_user ?? null,
+      requested_by_user: request.requested_by_user ?? null,
+      request_type: requestType,
+      status,
+      requested_at: timestamp,
+      due_at: request.due_at ?? this.pickString(responsePayload?.['due_at']) ?? null,
+      completed_at: request.completed_at ?? this.pickString(responsePayload?.['completed_at']) ?? null,
+      cancelled: request.cancelled ?? (this.normalizeText(status) === 'cancelled' ? 'cancelled' : null),
+      completed_scan: request.completed_scan ?? completedScanId,
+      scan_id: request.scan_id ?? completedScanId,
+      required_state: request.required_state ?? requestType,
+      response_status: request.response_status ?? status,
+      response_payload: request.response_payload ?? responsePayload,
+      timestamp,
+      requested_for_user: request.requested_for_user ?? request.target_member ?? null,
+      requested_for_email: request.requested_for_email ?? this.pickString(responsePayload?.['requested_for_email']) ?? null,
+      requested_for_phone: request.requested_for_phone ?? this.pickString(responsePayload?.['requested_for_phone']) ?? null,
+      Target: request.Target ?? this.pickString(responsePayload?.['Target']) ?? null
+    };
   }
 
   private logSectionFailure(collection: string, error: unknown): void {
@@ -817,7 +858,8 @@ export class OperationalDashboardService {
 
   private buildMemberMap(
     members: MembershipRecord[],
-    departmentMap: Map<string, string>
+    departmentMap: Map<string, string>,
+    departmentsError: string | null
   ): Map<string, DashboardMemberSummary> {
     const mapByUser = new Map<string, DashboardMemberSummary>();
     for (const row of members ?? []) {
@@ -833,7 +875,12 @@ export class OperationalDashboardService {
         status: this.pickString(row.status),
         joinedAt: this.pickString(row.joined_at) ?? this.pickString(row.date_created),
         departmentId,
-        departmentName: departmentId ? departmentMap.get(departmentId) ?? this.pickDepartmentName(row.department) : this.pickDepartmentName(row.department)
+        departmentName: this.resolveDepartmentLabel(
+          departmentId,
+          this.pickDepartmentName(row.department),
+          departmentMap,
+          departmentsError
+        )
       });
     }
     return mapByUser;
@@ -866,7 +913,12 @@ export class OperationalDashboardService {
         return {
           id: this.normalizeId(scan.id) ?? `scan-${Math.random().toString(16).slice(2)}`,
           employeeName: member ? this.memberName(memberId, memberMap) : this.memberNameFromScan(scan),
-          department: member?.departmentName ?? this.pickDepartmentName(scan.department) ?? 'Unassigned',
+          department: member?.departmentName ?? this.resolveDepartmentLabel(
+            this.normalizeId(scan.department),
+            this.pickDepartmentName(scan.department),
+            departmentMap,
+            null
+          ),
           completedLabel: this.formatDateTime(completedAt, timezone),
           readinessScore: '0',
           riskLevel: 'Stable',
@@ -960,24 +1012,43 @@ export class OperationalDashboardService {
   private buildDepartmentCompliance(
     members: Array<DashboardMemberSummary & { userId: string; isActive: boolean }>,
     completedMemberIds: Set<string>,
-    departments: Map<string, string>
+    departments: Map<string, string>,
+    departmentsError: string | null
   ): DashboardDepartmentCompliance[] {
+    const buckets = new Map<string, { id: string; name: string; note: string | null }>();
+    for (const member of members) {
+      if (!member.isActive || member.memberRole !== 'employee' || !member.departmentId) {
+        continue;
+      }
+      const name = this.resolveDepartmentLabel(member.departmentId, member.departmentName, departments, departmentsError);
+      const note = (!member.departmentName && !departments.get(member.departmentId))
+        ? (departmentsError
+            ? 'Department metadata is unavailable for this workspace.'
+            : 'Department id exists on members, but metadata was not returned.')
+        : null;
+      buckets.set(member.departmentId, {
+        id: member.departmentId,
+        name,
+        note
+      });
+    }
+
     const rows: DashboardDepartmentCompliance[] = [];
-    for (const [departmentId, departmentName] of departments.entries()) {
-      const departmentMembers = members.filter((member) => member.departmentId === departmentId && member.isActive && member.memberRole === 'employee');
+    for (const bucket of buckets.values()) {
+      const departmentMembers = members.filter((member) => member.departmentId === bucket.id && member.isActive && member.memberRole === 'employee');
       const completedToday = departmentMembers.filter((member) => completedMemberIds.has(member.userId)).length;
       const activeEligibleMembers = departmentMembers.length;
       const missingToday = Math.max(0, activeEligibleMembers - completedToday);
       const complianceRate = activeEligibleMembers > 0 ? Math.round((completedToday / activeEligibleMembers) * 100) : 0;
       rows.push({
-        id: departmentId,
-        name: departmentName,
+        id: bucket.id,
+        name: bucket.name,
         activeEligibleMembers,
         completedToday,
         missingToday,
         complianceRate,
         progress: complianceRate,
-        note: activeEligibleMembers > 0 ? null : 'No scan-eligible members yet'
+        note: activeEligibleMembers > 0 ? bucket.note : 'No scan-eligible members yet'
       });
     }
 
@@ -1017,7 +1088,7 @@ export class OperationalDashboardService {
   ): DashboardRequestItem[] {
     return (requests ?? [])
       .filter((request) => this.isOpenRequest(request.status, request.cancelled, request.completed_at))
-      .sort((left, right) => this.toTimestamp(right.requested_at) - this.toTimestamp(left.requested_at))
+      .sort((left, right) => this.toTimestamp(right.requested_at ?? right.timestamp) - this.toTimestamp(left.requested_at ?? left.timestamp))
       .map((request) => {
         const memberId = this.relatedUserId(request.target_member);
         const requesterId = this.relatedUserId(request.requested_by_user);
@@ -1026,12 +1097,17 @@ export class OperationalDashboardService {
         const departmentId = this.normalizeId(request.department);
         return {
           id: this.normalizeId(request.id) ?? 'request',
-          employeeName: member ? this.memberName(memberId, memberMap) : this.relatedUserLabel(request.target_member) ?? 'Unassigned',
+          employeeName: member ? this.memberName(memberId, memberMap) : (this.relatedUserLabel(request.target_member) ?? this.pickString(request.requested_for_email) ?? this.pickString(request.Target) ?? 'Unassigned'),
           requestedBy: requester ? this.memberName(requesterId, memberMap) : this.relatedUserLabel(request.requested_by_user) ?? 'System',
-          requestedAtLabel: this.formatDateTime(request.requested_at, timezone),
+          requestedAtLabel: this.formatDateTime(request.requested_at ?? request.timestamp, timezone),
           dueAtLabel: request.due_at ? this.formatDateTime(request.due_at, timezone) : 'No due time',
           statusLabel: this.requestStatusLabel(request.status, request.due_at),
-          department: departmentId ? departmentMap.get(departmentId) ?? this.pickDepartmentName(request.department) ?? 'Unassigned' : this.pickDepartmentName(request.department) ?? 'Unassigned',
+          department: this.resolveDepartmentLabel(
+            departmentId,
+            this.pickDepartmentName(request.department),
+            departmentMap,
+            null
+          ),
           route: '/app/scan-requests'
         };
       })
@@ -1085,7 +1161,7 @@ export class OperationalDashboardService {
       items.push({
         id: `missing-${member.userId}`,
         employeeName: this.memberName(member.userId, memberMap),
-        department: member.departmentName ?? 'Unassigned',
+        department: member.departmentName ?? this.resolveDepartmentLabel(member.departmentId, null, departmentMap, null),
         reason: 'Missing scan',
         detail: `No completed scan today`,
         timeLabel: 'Today',
@@ -1162,7 +1238,12 @@ export class OperationalDashboardService {
     return (scores.reduce((sum, value) => sum + value, 0) / scores.length).toFixed(1);
   }
 
-  private findCurrentMember(members: MembershipRecord[], userId: string | null): DashboardMemberSummary | null {
+  private findCurrentMember(
+    members: MembershipRecord[],
+    userId: string | null,
+    departmentMap: Map<string, string>,
+    departmentsError: string | null
+  ): DashboardMemberSummary | null {
     const normalizedUserId = this.normalizeId(userId);
     if (!normalizedUserId) {
       return null;
@@ -1171,7 +1252,12 @@ export class OperationalDashboardService {
     if (!row) {
       return null;
     }
-    const departmentName = this.pickDepartmentName(row.department);
+    const departmentName = this.resolveDepartmentLabel(
+      this.normalizeId(row.department),
+      this.pickDepartmentName(row.department),
+      departmentMap,
+      departmentsError
+    );
     return {
       memberId: this.normalizeId(row.id),
       employeeName: this.pickDisplayName(row.user) ?? 'Team member',
@@ -1536,15 +1622,37 @@ export class OperationalDashboardService {
   }
 
   private memberLabelForDepartment(member: DashboardMemberSummary, departmentMap: Map<string, string>): string {
-    return member.departmentName ?? (member.departmentId ? departmentMap.get(member.departmentId) ?? 'Unassigned' : 'Unassigned');
+    return this.resolveDepartmentLabel(member.departmentId, member.departmentName, departmentMap, null);
   }
 
   private buildDepartmentLabel(value: unknown, departmentMap: Map<string, string>): string {
-    const departmentId = this.normalizeId(value);
-    if (!departmentId) {
+    return this.resolveDepartmentLabel(
+      this.normalizeId(value),
+      this.pickDepartmentName(value),
+      departmentMap,
+      null
+    );
+  }
+
+  private resolveDepartmentLabel(
+    departmentId: string | null | undefined,
+    departmentName: string | null | undefined,
+    departmentMap: Map<string, string>,
+    departmentsError: string | null
+  ): string {
+    const normalizedDepartmentId = this.normalizeId(departmentId);
+    const directName = this.pickString(departmentName);
+    if (!normalizedDepartmentId) {
       return 'Unassigned';
     }
-    return departmentMap.get(departmentId) ?? this.pickDepartmentName(value) ?? 'Unassigned';
+    if (directName) {
+      return directName;
+    }
+    const mappedName = departmentMap.get(normalizedDepartmentId);
+    if (mappedName) {
+      return mappedName;
+    }
+    return departmentsError ? 'Department unavailable' : 'Unknown department';
   }
 
   private buildScanResultRows(
