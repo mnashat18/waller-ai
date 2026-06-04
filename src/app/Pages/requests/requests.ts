@@ -8,7 +8,6 @@ import { CompanyContextService } from '../../core/context/company-context.servic
 import {
   OperationsWorkflowsService,
   type CreateScanRequestInput,
-  type RequestModalOptions,
   type RequestActionResult,
   type RequestRow,
   type RequestsPageData,
@@ -149,8 +148,6 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   hasMembers = false;
   availableDepartments: Array<{ id: string; name: string }> = [];
   hasDepartments = false;
-  modalMembers: WorkflowMemberOption[] = [];
-  modalDepartments: Array<{ id: string; name: string }> = [];
   requestForm: NewRequestForm = this.defaultRequestForm();
   formErrors: NewRequestFormErrors = this.emptyFormErrors();
   private loadRunId = 0;
@@ -357,9 +354,11 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     this.formErrors = this.emptyFormErrors();
     this.memberSearch = '';
     this.modalOptionsError = '';
+    this.modalOptionsLoading = false;
+    this.modalOptionsLoaded = true;
+    this.syncModalOptionsFromPageData();
     this.showCreateModal = true;
     this.togglePageScrollLock(true);
-    void this.loadModalOptions(memberId);
   }
 
   closeCreateModal(): void {
@@ -711,8 +710,8 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
       members.push({
         member_id: member.member_id,
         user_id: member.user_id,
-        label: sanitizeDisplayValue(member.name, 'Unknown member'),
-        email: sanitizeDisplayValue(member.email, '') || null,
+        label: member.name || member.email || 'Member',
+        email: member.email || null,
         department_id: member.department_id,
         department_name: sanitizeDisplayValue(member.department_name, 'Unassigned'),
         status: member.status
@@ -732,46 +731,6 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
         overdue: rows.filter((row) => this.isOverdue({ ...row } as RequestRow)).length
       }
     };
-  }
-
-  private async loadModalOptions(preselectedMemberId: string | null): Promise<void> {
-    this.modalOptionsLoading = true;
-    this.modalOptionsLoaded = false;
-    this.modalOptionsError = '';
-
-    try {
-      const options: RequestModalOptions = await firstValueFrom(this.workflows.getRequestModalOptions());
-      if (!this.showCreateModal) {
-        return;
-      }
-
-      this.modalMembers = options.members ?? [];
-      this.modalDepartments = options.departments ?? [];
-      this.modalOptionsLoaded = true;
-      this.applyModalOptions();
-
-      if (preselectedMemberId) {
-        const matchedMember = this.availableMembers.find(
-          (member) => member.member_id === preselectedMemberId || member.user_id === preselectedMemberId
-        );
-        if (matchedMember) {
-          this.requestForm.targetType = 'individual';
-          this.requestForm.memberId = matchedMember.member_id;
-        }
-      }
-    } catch (error) {
-      console.warn('[ScanRequests] modal options load failed', error);
-      this.modalOptionsError = 'Workspace members and departments are unavailable right now.';
-      this.modalMembers = this.pageData?.members ?? [];
-      this.modalDepartments = (this.pageData?.departments ?? []).map((department) => ({
-        id: department.id,
-        name: department.name
-      }));
-      this.modalOptionsLoaded = true;
-      this.applyModalOptions();
-    } finally {
-      this.modalOptionsLoading = false;
-    }
   }
 
   private buildRows(rows: RequestRow[]): ScanRequestRow[] {
@@ -1011,16 +970,28 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     this.recomputeMemberOptions();
   }
 
-  private applyModalOptions(): void {
-    this.availableDepartments = this.modalDepartments;
-    this.hasDepartments = this.availableDepartments.length > 0;
+  private syncModalOptionsFromPageData(): void {
+    if (!this.pageData) {
+      this.availableMembers = [];
+      this.availableDepartments = [];
+      this.hasMembers = false;
+      this.hasDepartments = false;
+      this.filteredMemberOptions = [];
+      return;
+    }
 
-    this.availableMembers = this.modalMembers.filter((member) => {
-      const status = this.normalizeText(member.status);
-      return status !== 'inactive' && status !== 'suspended';
-    });
-    this.hasMembers = this.availableMembers.length > 0;
-    this.recomputeMemberOptions();
+    this.applyStaticOptionsFromPageData();
+
+    if (this.requestForm.targetType === 'individual' && this.requestForm.memberId) {
+      const matchedMember = this.availableMembers.find(
+        (member) => member.member_id === this.requestForm.memberId || member.user_id === this.requestForm.memberId
+      );
+      if (!matchedMember) {
+        this.requestForm.memberId = '';
+      }
+    }
+
+    this.modalOptionsError = '';
   }
 
   private recomputeMemberOptions(): void {
