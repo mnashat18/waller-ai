@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, forkJoin, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, firstValueFrom, forkJoin, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, timeout } from 'rxjs/operators';
 
 import { environment } from '../../environments/environment';
@@ -23,22 +23,22 @@ export type ScanResult = {
   scan_id: string | null;
   risk_level?: string | null;
   readiness_score?: number | string | null;
+  readiness_summary?: string | null;
+  operational_summary?: string | null;
+  recommended_action?: string | null;
   explanation?: string | null;
   task_performance_score?: number | string | null;
   confidence?: number | string | null;
-  camera_confidence?: number | string | null;
-  voice_confidence?: number | string | null;
-  confidence_drift?: number | string | null;
-  baseline_used?: string | null;
   suggested_action?: string | null;
-  face_metrics?: unknown;
-  voice_metrics?: unknown;
-  reaction_metrics?: unknown;
-  internal_analysis?: unknown;
-  ai_model_version?: string | null;
   overall_state?: string;
   overall_state_label?: string;
   overall_state_key?: 'stable' | 'low_focus' | 'fatigue' | 'high_risk' | 'unknown';
+};
+
+export type ScanResultsAccessInfo = {
+  state: 'available' | 'permission_blocked' | 'degraded';
+  message: string | null;
+  missingFields: string[];
 };
 
 export type DashboardStats = {
@@ -52,6 +52,7 @@ export type DashboardSnapshot = {
   scans: ScanResult[];
   stats: DashboardStats;
   latest: ScanResult | null;
+  resultsAccess: ScanResultsAccessInfo;
 };
 
 export type DashboardMetricCount = {
@@ -180,6 +181,15 @@ type ScopedRequestRecord = {
   completed_at?: string | null;
   completed_scan?: string | number | Record<string, unknown> | null;
   date_created?: string | null;
+  scan_id?: string | number | Record<string, unknown> | null;
+  required_state?: string | null;
+  response_status?: string | null;
+  response_payload?: unknown;
+  timestamp?: string | null;
+  requested_for_user?: string | number | Record<string, unknown> | null;
+  requested_for_email?: string | null;
+  requested_for_phone?: string | null;
+  Target?: string | null;
 };
 
 type WellnessScanRecord = {
@@ -321,6 +331,48 @@ export class DashboardService {
 
   private readonly api = environment.API_URL;
   private readonly alertClosedStatuses = new Set(['closed', 'resolved', 'dismissed', 'completed']);
+  private readonly scanResultsAccessSubject = new BehaviorSubject<ScanResultsAccessInfo>({
+    state: 'available',
+    message: null,
+    missingFields: []
+  });
+  private readonly scanResultsFieldVariants: string[][] = [
+    [
+      'id',
+      'scan_id',
+      'date_created',
+      'risk_level',
+      'readiness_score',
+      'confidence',
+      'task_performance_score',
+      'readiness_summary',
+      'operational_summary',
+      'recommended_action',
+      'explanation',
+      'suggested_action'
+    ],
+    [
+      'id',
+      'scan_id',
+      'date_created',
+      'risk_level',
+      'readiness_score',
+      'confidence',
+      'task_performance_score',
+      'explanation',
+      'suggested_action'
+    ],
+    [
+      'id',
+      'scan_id',
+      'date_created',
+      'risk_level',
+      'readiness_score',
+      'confidence',
+      'explanation'
+    ],
+    ['id', 'scan_id', 'date_created', 'risk_level']
+  ];
 
   constructor(
     private http: HttpClient,
@@ -334,7 +386,8 @@ export class DashboardService {
       map((scans) => ({
         scans,
         stats: this.buildStats(scans),
-        latest: scans[0] ?? null
+        latest: scans[0] ?? null,
+        resultsAccess: this.scanResultsAccessSubject.value
       }))
     );
   }
@@ -365,6 +418,10 @@ export class DashboardService {
 
   getScanResults(limit = 20): Observable<ScanResult[]> {
     return this.getRecentScans(limit);
+  }
+
+  getScanResultsAccessInfo(): Observable<ScanResultsAccessInfo> {
+    return this.scanResultsAccessSubject.asObservable();
   }
 
   getOperationalDashboardSummary(): Observable<OperationalDashboardSummary> {
@@ -432,27 +489,59 @@ export class DashboardService {
     void activeRole;
     void activeDepartmentId;
     return this.queryItems<ScopedRequestRecord>({
-      collection: 'scan_requests',
+      collection: 'requests',
       fields: [
         'id',
         'business_profile',
-        'department',
-        'requested_by_user',
-        'target_member',
-        'status',
-        'cancelled',
-        'requested_at',
-        'due_at',
-        'completed_scan',
-        'completed_at',
-        'request_type'
+        'scan_id',
+        'required_state',
+        'response_status',
+        'response_payload',
+        'timestamp',
+        'requested_for_user',
+        'requested_for_email',
+        'requested_for_phone',
+        'Target'
       ],
       limit,
-      sort: '-requested_at',
+      sort: '-timestamp',
       businessProfileId,
       businessFilterPath: ['business_profile'],
       extraFilters
-    }, token);
+    }, token).pipe(
+      map((rows) => rows.map((row) => this.normalizeRequestRecord(row)))
+    );
+  }
+
+  private normalizeRequestRecord(request: ScopedRequestRecord): ScopedRequestRecord {
+    const responsePayload = request.response_payload && typeof request.response_payload === 'object'
+      ? request.response_payload as Record<string, unknown>
+      : null;
+    const timestamp = request.timestamp ?? request.requested_at ?? request.date_created ?? null;
+    const status = this.pickString(request.response_status ?? request.status) ?? 'pending';
+    const requestType = this.pickString(request.required_state ?? request.request_type ?? null);
+    const completedScan = this.normalizeId(request.scan_id ?? request.completed_scan);
+    return {
+      ...request,
+      target_member: request.target_member ?? request.requested_for_user ?? null,
+      requested_by_user: request.requested_by_user ?? null,
+      request_type: requestType,
+      status,
+      cancelled: request.cancelled ?? (this.normalizeText(status) === 'cancelled' ? 'cancelled' : null),
+      requested_at: timestamp,
+      completed_scan: request.completed_scan ?? completedScan,
+      completed_at: request.completed_at ?? this.pickString(responsePayload?.['completed_at']) ?? null,
+      due_at: request.due_at ?? this.pickString(responsePayload?.['due_at']) ?? null,
+      scan_id: request.scan_id ?? completedScan,
+      required_state: request.required_state ?? requestType,
+      response_status: request.response_status ?? status,
+      response_payload: request.response_payload ?? responsePayload,
+      timestamp,
+      requested_for_user: request.requested_for_user ?? request.target_member ?? null,
+      requested_for_email: request.requested_for_email ?? this.pickString(responsePayload?.['requested_for_email']) ?? null,
+      requested_for_phone: request.requested_for_phone ?? this.pickString(responsePayload?.['requested_for_phone']) ?? null,
+      Target: request.Target ?? this.pickString(responsePayload?.['Target']) ?? null
+    };
   }
 
   private fetchWellnessScans(
@@ -498,37 +587,111 @@ export class DashboardService {
   private fetchScanResultsForScans(wellnessScans: WellnessScanRecord[], token: string): Observable<ScanResult[]> {
     const scanIds = this.uniqueScanIds(wellnessScans);
     if (!scanIds.length) {
+      this.updateScanResultsAccess({
+        state: 'available',
+        message: null,
+        missingFields: []
+      });
       return of([]);
     }
 
-    return this.queryItems<ScanResult>({
-      collection: 'scan_results',
-      fields: [
-        'id',
-        'date_created',
-        'scan_id',
-        'confidence',
-        'camera_confidence',
-        'voice_confidence',
-        'task_performance_score',
-        'explanation',
-        'ai_model_version',
-        'confidence_drift',
-        'baseline_used',
-        'suggested_action',
-        'risk_level',
-        'face_metrics',
-        'voice_metrics',
-        'reaction_metrics',
-        'internal_analysis',
-        'readiness_score'
-      ],
-      limit: scanIds.length,
-      sort: '-date_created',
-      extraFilters: [{ path: ['scan_id'], operator: '_in', value: scanIds.join(',') }]
-    }, token).pipe(
+    return of(null).pipe(
+      switchMap(() => this.loadScanResultsForScans(scanIds, token)),
       map((rows) => this.normalizeScans(rows))
     );
+  }
+
+  private async loadScanResultsForScans(scanIds: string[], token: string): Promise<ScanResult[]> {
+    const missingFields = new Set<string>();
+    console.info('[SCAN_RESULTS_FETCH_START]', {
+      scanCount: scanIds.length,
+      fields: this.scanResultsFieldVariants[0].join(',')
+    });
+
+    for (let index = 0; index < this.scanResultsFieldVariants.length; index += 1) {
+      const fields = this.scanResultsFieldVariants[index];
+
+      try {
+        const rows = await firstValueFrom(this.queryItemsStrict<ScanResult>({
+          collection: 'scan_results',
+          fields,
+          limit: scanIds.length,
+          sort: '-date_created',
+          extraFilters: [{ path: ['scan_id'], operator: '_in', value: scanIds.join(',') }]
+        }, token).pipe(timeout(15000)));
+
+        const degradedFields = Array.from(missingFields);
+        if (degradedFields.length) {
+          console.warn('[SCAN_RESULTS_DEGRADED_STATE]', {
+            reason: 'optional_fields_unavailable',
+            missingFields: degradedFields
+          });
+        }
+
+        this.updateScanResultsAccess({
+          state: degradedFields.length ? 'degraded' : 'available',
+          message: degradedFields.length ? 'Some scan result enrichment fields are unavailable.' : null,
+          missingFields: degradedFields
+        });
+        console.info('[SCAN_RESULTS_FETCH_SUCCESS]', {
+          scanCount: scanIds.length,
+          resultCount: rows.length,
+          fields: fields.join(',')
+        });
+        return rows;
+      } catch (error) {
+        const status = this.httpStatus(error);
+
+        if (status === 401 || status === 403) {
+          console.warn('[SCAN_RESULTS_PERMISSION_BLOCKED]', {
+            status,
+            fields: fields.join(',')
+          });
+          this.updateScanResultsAccess({
+            state: 'permission_blocked',
+            message: 'Result data is unavailable due to permissions',
+            missingFields: []
+          });
+          return [];
+        }
+
+        if (this.isFieldCompatibilityError(error)) {
+          const nextFields = this.scanResultsFieldVariants[index + 1] ?? [];
+          const removedFields = fields.filter((field) => !nextFields.includes(field));
+          removedFields.forEach((field) => missingFields.add(field));
+          console.warn('[SCAN_RESULTS_FIELD_MISSING]', {
+            status,
+            fields: fields.join(','),
+            removedFields: removedFields.join(','),
+            message: this.httpMessage(error)
+          });
+          continue;
+        }
+
+        console.warn('[SCAN_RESULTS_DEGRADED_STATE]', {
+          status,
+          fields: fields.join(','),
+          message: this.httpMessage(error)
+        });
+        this.updateScanResultsAccess({
+          state: 'degraded',
+          message: 'Some scan result enrichment fields are unavailable.',
+          missingFields: Array.from(missingFields)
+        });
+        return [];
+      }
+    }
+
+    console.warn('[SCAN_RESULTS_DEGRADED_STATE]', {
+      reason: 'no_compatible_field_set',
+      missingFields: Array.from(missingFields)
+    });
+    this.updateScanResultsAccess({
+      state: 'degraded',
+      message: 'Some scan result enrichment fields are unavailable.',
+      missingFields: Array.from(missingFields)
+    });
+    return [];
   }
 
   private fetchAlerts(
@@ -745,6 +908,32 @@ export class DashboardService {
     );
   }
 
+  private queryItemsStrict<T>(config: QueryConfig, token: string): Observable<T[]> {
+    const params = new URLSearchParams({
+      limit: String(config.limit),
+      fields: config.fields.join(','),
+      sort: config.sort ?? '-id'
+    });
+
+    if (config.businessProfileId && config.businessFilterPath?.length) {
+      this.setFilter(params, config.businessFilterPath, '_eq', config.businessProfileId);
+    }
+
+    for (const filter of config.extraFilters ?? []) {
+      this.setFilter(params, filter.path, filter.operator, filter.value);
+    }
+
+    return this.http.get<{ data?: T[] }>(
+      `${this.api}/items/${config.collection}?${params.toString()}`,
+      {
+        headers: this.buildHeaders(token),
+        withCredentials: true
+      }
+    ).pipe(
+      map((response) => response.data ?? [])
+    );
+  }
+
   private buildOperationalSummary(
     hubState: { profile: BusinessProfile | null; hasPaidAccess: boolean },
     activeRole: ActiveMemberRole,
@@ -816,16 +1005,16 @@ export class DashboardService {
         id: this.normalizeId(request.id) ?? 'request',
         target:
           this.pickString(
-            typeof request.target_member === 'object' && request.target_member
+            request.Target ??
+            request.requested_for_email ??
+            (typeof request.target_member === 'object' && request.target_member
               ? (request.target_member as Record<string, unknown>)['email']
-              : typeof request.requested_by_user === 'object' && request.requested_by_user
-                ? (request.requested_by_user as Record<string, unknown>)['email']
-                : null
+              : null)
           )?.trim() ||
           'Pending request',
         requestType: request.request_type?.trim() || 'Unspecified type',
         status: request.status?.trim() || 'Unknown',
-        timestamp: request.requested_at ?? null
+        timestamp: request.requested_at ?? request.timestamp ?? null
       }))
     };
 
@@ -933,17 +1122,17 @@ export class DashboardService {
       kind: 'request' as const,
       title:
         this.pickString(
-          typeof request.target_member === 'object' && request.target_member
+          request.Target ??
+          request.requested_for_email ??
+          (typeof request.target_member === 'object' && request.target_member
             ? (request.target_member as Record<string, unknown>)['email']
-            : typeof request.requested_by_user === 'object' && request.requested_by_user
-              ? (request.requested_by_user as Record<string, unknown>)['email']
-              : null
+            : null)
         )?.trim() ||
         'Pending request',
       subtitle: `Request type: ${request.request_type?.trim() || 'Unspecified'}`,
       status: request.status?.trim() || null,
       risk: request.request_type?.trim() || null,
-      timestamp: request.requested_at ?? null,
+      timestamp: request.requested_at ?? request.timestamp ?? null,
       route: '/app/scan-requests'
     }));
 
@@ -1000,9 +1189,13 @@ export class DashboardService {
     return scans.map((scan) => ({
       ...scan,
       overall_state: scan.risk_level ?? scan.overall_state,
-      overall_state_key: this.toStateKey(scan.overall_state),
-      overall_state_label: this.toDisplayState(scan.overall_state)
+      overall_state_key: this.toStateKey(scan.risk_level ?? scan.overall_state),
+      overall_state_label: this.toDisplayState(scan.risk_level ?? scan.overall_state)
     }));
+  }
+
+  private updateScanResultsAccess(access: ScanResultsAccessInfo): void {
+    this.scanResultsAccessSubject.next(access);
   }
 
   private uniqueScanIds(scans: WellnessScanRecord[]): string[] {
@@ -1031,6 +1224,52 @@ export class DashboardService {
       return nestedMessage || `Server error (${status}) while loading dashboard data.`;
     }
     return nestedMessage || fallback;
+  }
+
+  private httpStatus(error: unknown): number {
+    if (!error || typeof error !== 'object') {
+      return 0;
+    }
+    return Number((error as { status?: number }).status ?? 0);
+  }
+
+  private httpMessage(error: unknown): string {
+    return this.normalizeText(
+      (error as {
+        error?: {
+          errors?: Array<{ message?: string; extensions?: { reason?: string } }>;
+          message?: string;
+        };
+        message?: string;
+      } | null)?.error?.errors?.[0]?.extensions?.reason ??
+      (error as {
+        error?: {
+          errors?: Array<{ message?: string }>;
+          message?: string;
+        };
+        message?: string;
+      } | null)?.error?.errors?.[0]?.message ??
+      (error as { error?: { message?: string }; message?: string } | null)?.error?.message ??
+      (error as { message?: string } | null)?.message
+    );
+  }
+
+  private isFieldCompatibilityError(error: unknown): boolean {
+    const status = this.httpStatus(error);
+    const message = this.httpMessage(error);
+
+    if (status !== 400 && status !== 422) {
+      return false;
+    }
+
+    return (
+      message.includes('field') ||
+      message.includes('payload') ||
+      message.includes('invalid') ||
+      message.includes('unknown') ||
+      message.includes('does not exist') ||
+      message.includes('not allowed')
+    );
   }
 
   private notificationRoute(linkType?: string | null, linkId?: string | number | null): string {

@@ -254,6 +254,15 @@ type ScanRequestRecord = {
   completed_scan?: string | number | { id?: string | number } | null;
   completed_at?: string | null;
   request_type?: string | null;
+  scan_id?: string | number | { id?: string | number } | null;
+  required_state?: string | null;
+  response_status?: string | null;
+  response_payload?: unknown;
+  timestamp?: string | null;
+  requested_for_user?: string | number | { id?: string | number } | null;
+  requested_for_email?: string | null;
+  requested_for_phone?: string | null;
+  Target?: string | null;
 };
 
 type AlertRecord = {
@@ -429,7 +438,7 @@ export class ReportsService {
       const scansRaw = this.resolveSettled('wellness_scans', scansSettled, warnings, () => {
         forbiddenSources += 1;
       });
-      const requestsRaw = this.resolveSettled('scan_requests', requestsSettled, warnings, () => {
+      const requestsRaw = this.resolveSettled('requests', requestsSettled, warnings, () => {
         forbiddenSources += 1;
       });
       const alertsRaw = this.resolveSettled('alerts', alertsSettled, warnings, () => {
@@ -456,7 +465,7 @@ export class ReportsService {
       const normalizedDepartments = this.normalizeDepartments(departmentsRaw, normalizedMembers);
       const normalizedScans = this.normalizeScans(scansRaw, normalizedMembers);
       const normalizedResults = this.normalizeResults(scanResultsRaw);
-      const normalizedRequests = this.normalizeRequests(requestsRaw);
+      const normalizedRequests = this.normalizeRequests(requestsRaw, normalizedMembers);
       const normalizedAlerts = this.normalizeAlerts(alertsRaw);
 
       raw = {
@@ -477,7 +486,7 @@ export class ReportsService {
     }
 
     const computed = this.computeAll(raw, filters);
-    if (warnings.has('scan_requests')) {
+    if (warnings.has('requests')) {
       computed.scanRequestPerformance.available = false;
     }
     const hasAnyData =
@@ -1116,7 +1125,7 @@ export class ReportsService {
       [
         [
           'id', 'status', 'user', 'user.id', 'user.first_name', 'user.last_name', 'user.email',
-          'business_profile', 'member_role', 'department', 'department.id', 'department.name',
+          'business_profile', 'member_role', 'department',
           'shift_template', 'employee_code', 'job_title', 'joined_at', 'deactivated_at', 'last_scan_at',
           'last_readiness_score', 'last_risk_level', 'date_created', 'date_updated'
         ],
@@ -1256,24 +1265,21 @@ export class ReportsService {
   ): Promise<ScanRequestRecord[]> {
     const filters: Array<{ path: string[]; operator: string; value: string }> = [
       { path: ['business_profile'], operator: '_eq', value: workspaceId },
-      { path: ['requested_at'], operator: '_gte', value: startIso }
+      { path: ['timestamp'], operator: '_gte', value: startIso }
     ];
-    if (activeDepartmentId) {
-      filters.push({ path: ['department'], operator: '_eq', value: activeDepartmentId });
-    }
 
     return this.queryWithFieldFallback<ScanRequestRecord>(
-      'scan_requests',
+      'requests',
       [
         [
-          'id', 'business_profile', 'department', 'requested_by_user', 'target_member',
-          'status', 'cancelled', 'requested_at', 'due_at', 'completed_scan', 'completed_at', 'request_type'
+          'id', 'business_profile', 'scan_id', 'required_state', 'response_status', 'response_payload',
+          'timestamp', 'requested_for_user', 'requested_for_email', 'requested_for_phone', 'Target'
         ],
-        ['id', 'department', 'target_member', 'status', 'cancelled', 'requested_at', 'due_at', 'completed_at', 'request_type'],
-        ['id', 'status', 'requested_at', 'due_at', 'completed_at', 'cancelled']
+        ['id', 'business_profile', 'scan_id', 'required_state', 'response_status', 'timestamp', 'requested_for_user', 'Target'],
+        ['id', 'response_status', 'timestamp', 'requested_for_user']
       ],
       token,
-      { filters, sort: '-requested_at', limit: 2500 }
+      { filters, sort: '-timestamp', limit: 2500 }
     );
   }
 
@@ -1291,22 +1297,29 @@ export class ReportsService {
       filters.push({ path: ['department'], operator: '_eq', value: activeDepartmentId });
     }
 
-    return this.queryWithFieldFallback<AlertRecord>(
-      'alerts',
-      [
+    try {
+      return await this.queryWithFieldFallback<AlertRecord>(
+        'alerts',
         [
-          'id', 'date_created', 'business_profile', 'department', 'target_member', 'target_user',
-          'scan', 'severity', 'title', 'message', 'status', 'reviewed_by', 'reviewed_at', 'action_note', 'action_type'
+          [
+            'id', 'date_created', 'business_profile', 'department', 'target_member', 'target_user',
+            'scan', 'severity', 'title', 'message', 'status', 'reviewed_by', 'reviewed_at', 'action_note', 'action_type'
+          ],
+          [
+            'id', 'date_created', 'department', 'target_member', 'severity', 'title', 'message',
+            'status', 'reviewed_at', 'action_type'
+          ],
+          ['id', 'date_created', 'severity', 'title', 'status']
         ],
-        [
-          'id', 'date_created', 'department', 'target_member', 'severity', 'title', 'message',
-          'status', 'reviewed_at', 'action_type'
-        ],
-        ['id', 'date_created', 'severity', 'title', 'status']
-      ],
-      token,
-      { filters, sort: '-date_created', limit: 2500 }
-    );
+        token,
+        { filters, sort: '-date_created', limit: 2500 }
+      );
+    } catch (error) {
+      if ((error as { status?: number } | null)?.status === 403) {
+        return [];
+      }
+      throw error;
+    }
   }
 
   private normalizeMembers(rows: BusinessMemberRecord[]): NormalizedMember[] {
@@ -1414,23 +1427,35 @@ export class ReportsService {
       .filter((row): row is NormalizedResult => Boolean(row));
   }
 
-  private normalizeRequests(rows: ScanRequestRecord[]): NormalizedRequest[] {
+  private normalizeRequests(rows: ScanRequestRecord[], members: NormalizedMember[]): NormalizedRequest[] {
+    const memberByUserId = new Map<string, NormalizedMember>();
+    const memberByMemberId = new Map<string, NormalizedMember>();
+    for (const member of members ?? []) {
+      if (member.userId) {
+        memberByUserId.set(member.userId, member);
+      }
+      if (member.id) {
+        memberByMemberId.set(member.id, member);
+      }
+    }
+
     return (rows ?? [])
       .map((row) => {
         const id = this.normalizeId(row.id);
         if (!id) return null;
-        const departmentRecord = this.objectRecord(row.department);
-        const targetMemberRecord = this.objectRecord(row.target_member);
+        const responsePayload = this.objectRecord(row.response_payload);
+        const targetMemberId = this.normalizeId(row.requested_for_user ?? row.target_member);
+        const member = (targetMemberId ? memberByUserId.get(targetMemberId) : null) ?? (targetMemberId ? memberByMemberId.get(targetMemberId) : null);
         return {
           id,
-          departmentId: this.normalizeId(departmentRecord?.['id'] ?? row.department),
-          targetMemberId: this.normalizeId(targetMemberRecord?.['id'] ?? row.target_member),
-          status: this.normalizeText(row.status),
-          cancelled: this.toBoolean(row.cancelled),
-          requestedAt: row.requested_at ?? null,
-          dueAt: row.due_at ?? null,
-          completedAt: row.completed_at ?? null,
-          requestType: this.pickString(row.request_type)
+          departmentId: member?.departmentId ?? this.normalizeId(row.department),
+          targetMemberId,
+          status: this.normalizeText(row.response_status ?? row.status),
+          cancelled: this.toBoolean(row.cancelled) || this.normalizeText(row.response_status ?? row.status) === 'cancelled',
+          requestedAt: row.requested_at ?? row.timestamp ?? null,
+          dueAt: row.due_at ?? this.pickString(responsePayload?.['due_at']) ?? null,
+          completedAt: row.completed_at ?? this.pickString(responsePayload?.['completed_at']) ?? null,
+          requestType: this.pickString(row.required_state ?? row.request_type)
         } satisfies NormalizedRequest;
       })
       .filter((row): row is NormalizedRequest => Boolean(row));

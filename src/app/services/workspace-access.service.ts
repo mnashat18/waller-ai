@@ -388,8 +388,7 @@ export class WorkspaceAccessService {
         'business_profile.is_active',
         'business_profile.plan_code',
         'business_profile.billing_status',
-        'department.id',
-        'department.name'
+        'department'
       ].join(',')
     });
     params.set('filter[user][_eq]', userId);
@@ -468,8 +467,7 @@ export class WorkspaceAccessService {
         'business_profile.id',
         'business_profile.company_name',
         'member_role',
-        'department.id',
-        'department.name',
+        'department',
         'status',
         'token',
         'sent_at',

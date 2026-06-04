@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { NotificationsComponent } from '../../components/notifications/notifications';
-import { DashboardService, DashboardSnapshot, DashboardStats, ScanResult } from '../../services/dashboard.service';
+import { DashboardService, DashboardSnapshot, DashboardStats, ScanResult, type ScanResultsAccessInfo } from '../../services/dashboard.service';
 import { SubscriptionService } from '../../services/subscription.service';
 import { of } from 'rxjs';
 import { catchError, delay, finalize, timeout } from 'rxjs/operators';
@@ -34,6 +34,11 @@ export class DashboardMobileComponent implements OnInit {
   };
   hasBusinessAccess = false;
   workspaceLabel = 'No active company';
+  scanResultsAccess: ScanResultsAccessInfo = {
+    state: 'available',
+    message: null,
+    missingFields: []
+  };
 
   private readonly cacheKey = 'dashboard_snapshot_v1';
   private readonly cacheTsKey = 'dashboard_snapshot_ts';
@@ -49,6 +54,9 @@ export class DashboardMobileComponent implements OnInit {
     if (cached) {
       this.applySnapshot(cached);
     }
+    this.dashboardService.getScanResultsAccessInfo().subscribe((access) => {
+      this.scanResultsAccess = access;
+    });
     this.loadDashboard(!cached);
     this.loadPlanState();
   }
@@ -76,6 +84,11 @@ export class DashboardMobileComponent implements OnInit {
   }
 
   private applySnapshot(snapshot: DashboardSnapshot) {
+    this.scanResultsAccess = snapshot.resultsAccess ?? {
+      state: 'available',
+      message: null,
+      missingFields: []
+    };
     this.recentScans = snapshot.scans;
     this.stats = snapshot.stats;
     this.totalScans = Object.values(snapshot.stats).reduce((sum, value) => sum + value, 0);

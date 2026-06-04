@@ -3,7 +3,7 @@ import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { RouterModule } from '@angular/router';
 
 import { NotificationsComponent } from '../../components/notifications/notifications';
-import { DashboardService, ScanResult } from '../../services/dashboard.service';
+import { DashboardService, ScanResult, type ScanResultsAccessInfo } from '../../services/dashboard.service';
 import { SubscriptionService } from '../../services/subscription.service';
 
 @Component({
@@ -23,6 +23,11 @@ export class HistoryMobileComponent implements OnInit {
   scans: HistoryScan[] = [];
   selectedScan: HistoryScan | null = null;
   hasBusinessAccess = false;
+  scanResultsAccess: ScanResultsAccessInfo = {
+    state: 'available',
+    message: null,
+    missingFields: []
+  };
 
   constructor(
     private dashboardService: DashboardService,
@@ -33,6 +38,11 @@ export class HistoryMobileComponent implements OnInit {
   ngOnInit() {
     this.subscriptions.getBusinessAccessSnapshot().subscribe((snapshot) => {
       this.hasBusinessAccess = snapshot.hasBusinessAccess;
+      this.cdr.detectChanges();
+    });
+
+    this.dashboardService.getScanResultsAccessInfo().subscribe((access) => {
+      this.scanResultsAccess = access;
       this.cdr.detectChanges();
     });
 
@@ -59,8 +69,16 @@ export class HistoryMobileComponent implements OnInit {
       ? createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
       : '';
     const result = this.coerceState(scan.overall_state);
-      const report = scan.explanation ?? 'No readiness summary available';
-      const recommendation = scan.explanation ?? 'No next-step guidance available';
+    const report =
+      scan.readiness_summary ??
+      scan.operational_summary ??
+      scan.explanation ??
+      'No readiness summary available';
+    const recommendation =
+      scan.recommended_action ??
+      scan.suggested_action ??
+      scan.explanation ??
+      'No next-step guidance available';
 
     return {
       id: scan.id ?? '',

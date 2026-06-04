@@ -32,7 +32,7 @@ export type ComplianceSummaryCardData = {
   completedScans: number;
   missingScans: number;
   openAlerts: number;
-  highAttention: number;
+  highAttention: number | null;
   overdueRequests: number;
   scanEligibleMembersToday: number;
 };
@@ -47,6 +47,7 @@ export type DepartmentComplianceRow = {
   missingScans: number;
   complianceRate: number;
   openAlerts: number;
+  note?: string | null;
 };
 
 export type ComplianceExceptionRow = {
@@ -105,6 +106,10 @@ export type ComplianceOverviewData = {
   activityRows: RecentComplianceActivityItem[];
   departmentOptions: Array<{ id: string; name: string }>;
   partialWarning: string | null;
+  departmentGroupingWarning: string | null;
+  readinessWarning: string | null;
+  departmentMetadataBlocked: boolean;
+  scanResultsAccess: 'available' | 'permission_blocked' | 'degraded';
   permissionDenied: boolean;
   hasAnyData: boolean;
   sourceCounts: {
@@ -150,19 +155,21 @@ type ScanResultRecord = {
   risk_level?: string | null;
   readiness_score?: number | string | null;
   confidence?: number | string | null;
-  camera_confidence?: number | string | null;
-  voice_confidence?: number | string | null;
   task_performance_score?: number | string | null;
-  confidence_drift?: number | string | null;
+  readiness_summary?: string | null;
+  operational_summary?: string | null;
+  recommended_action?: string | null;
   explanation?: string | null;
-  internal_analysis?: string | null;
-  ai_model_version?: string | null;
-  baseline_used?: string | null;
   suggested_action?: string | null;
-  face_metrics?: unknown;
-  voice_metrics?: unknown;
-  reaction_metrics?: unknown;
   date_created?: string | null;
+};
+
+type ScanResultsLoadState = 'available' | 'permission_blocked' | 'degraded';
+
+type ScanResultsLoadResult = {
+  rows: ScanResultRecord[];
+  state: ScanResultsLoadState;
+  missingFields: string[];
 };
 
 type MemberRiskRecord = {
@@ -187,6 +194,16 @@ type NormalizedSource = {
   scanResults: ScanResultRecord[];
   memberLastRiskById: Map<string, string>;
   filters: ComplianceFilters;
+  departmentMetadataBlocked: boolean;
+  departmentMetadataUnreadable: boolean;
+  scanResultsAccess: ScanResultsLoadState;
+};
+
+type ResolvedDepartmentGroup = {
+  key: string;
+  departmentId: string | null;
+  departmentName: string;
+  note: string | null;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -202,6 +219,9 @@ export class ComplianceService {
         alerts: AlertRow[];
         wellnessScans: WellnessScanRecord[];
         scanResults: ScanResultRecord[];
+        departmentMetadataBlocked: boolean;
+        departmentMetadataUnreadable: boolean;
+        scanResultsAccess: ScanResultsLoadState;
         memberLastRiskByIdEntries: Array<[string, string]>;
       }
     | null = null;
@@ -236,6 +256,9 @@ export class ComplianceService {
     let departments: Array<{ id: string; name: string }> = [];
     let wellnessScans: WellnessScanRecord[] = [];
     let scanResults: ScanResultRecord[] = [];
+    let departmentMetadataBlocked = false;
+    let departmentMetadataUnreadable = false;
+    let scanResultsAccess: ScanResultsLoadState = 'available';
     let memberLastRiskById = new Map<string, string>();
     const warnings = new Set<string>();
     let forbiddenSources = 0;
@@ -247,6 +270,9 @@ export class ComplianceService {
       departments = this.cache?.departments ?? [];
       wellnessScans = this.cache?.wellnessScans ?? [];
       scanResults = this.cache?.scanResults ?? [];
+      departmentMetadataBlocked = this.cache?.departmentMetadataBlocked ?? false;
+      departmentMetadataUnreadable = this.cache?.departmentMetadataUnreadable ?? false;
+      scanResultsAccess = this.cache?.scanResultsAccess ?? 'available';
       memberLastRiskById = new Map(this.cache?.memberLastRiskByIdEntries ?? []);
     } else {
       const token = this.auth.getStoredAccessToken() ?? '';
@@ -287,11 +313,27 @@ export class ComplianceService {
       ]);
 
       members = this.resolveSettled('members', membersSettled, warnings, () => { forbiddenSources += 1; });
-      scanRequests = this.resolveSettled('scan_requests', requestsSettled, warnings, () => { forbiddenSources += 1; });
+      scanRequests = this.resolveSettled('requests', requestsSettled, warnings, () => { forbiddenSources += 1; });
       alerts = this.resolveSettled('alerts', alertsSettled, warnings, () => { forbiddenSources += 1; });
       departments = this.resolveSettled('departments', departmentsSettled, warnings, () => { forbiddenSources += 1; });
+      departmentMetadataBlocked = this.isPermissionBlocked(departmentsSettled);
+      departmentMetadataUnreadable = departmentsSettled.status === 'rejected';
+      if (departmentMetadataBlocked) {
+        console.warn('[DEPARTMENTS_PERMISSION_BLOCKED]', {
+          workspaceId,
+          requiredFields: ['id', 'name', 'business_profile']
+        });
+      }
       wellnessScans = this.resolveSettled('wellness_scans', wellnessScansSettled, warnings, () => { forbiddenSources += 1; });
-      scanResults = this.resolveSettled('scan_results', scanResultsSettled, warnings, () => { forbiddenSources += 1; });
+      const scanResultsLoad = this.resolveScanResultsSettled(scanResultsSettled, warnings, () => { forbiddenSources += 1; });
+      scanResults = scanResultsLoad.rows;
+      scanResultsAccess = scanResultsLoad.state;
+      if (scanResultsAccess !== 'available') {
+        console.warn('[COMPLIANCE_STATS_DEGRADED]', {
+          reason: scanResultsAccess,
+          workspaceId
+        });
+      }
       const memberRiskRows = this.resolveSettled('business_profile_members', memberRiskSettled, warnings, () => { forbiddenSources += 1; });
       memberLastRiskById = this.buildMemberLastRiskMap(memberRiskRows);
 
@@ -304,6 +346,9 @@ export class ComplianceService {
         alerts,
         wellnessScans,
         scanResults,
+        departmentMetadataBlocked,
+        departmentMetadataUnreadable,
+        scanResultsAccess,
         memberLastRiskByIdEntries: Array.from(memberLastRiskById.entries())
       };
     }
@@ -316,7 +361,10 @@ export class ComplianceService {
       wellnessScans,
       scanResults,
       memberLastRiskById,
-      filters
+      filters,
+      departmentMetadataBlocked,
+      departmentMetadataUnreadable,
+      scanResultsAccess
     };
 
     const summary = this.buildComplianceSummary(normalized);
@@ -343,9 +391,11 @@ export class ComplianceService {
       profileLinkageIssues,
       activityRows,
       departmentOptions: this.buildDepartmentOptions(normalized),
-      partialWarning: warnings.size
-        ? 'Some compliance sources are unavailable due to workspace permissions.'
-        : null,
+      partialWarning: this.buildPartialWarning(warnings, scanResultsAccess),
+      departmentGroupingWarning: this.buildDepartmentGroupingWarning(normalized),
+      readinessWarning: scanResultsAccess === 'available' ? null : 'Readiness data unavailable',
+      departmentMetadataBlocked,
+      scanResultsAccess,
       permissionDenied: forbiddenSources >= 3 && !hasAnyData,
       hasAnyData,
       sourceCounts: {
@@ -374,21 +424,9 @@ export class ComplianceService {
         .map((scan) => this.normalizeId(scan.member))
         .filter((id): id is string => Boolean(id))
     );
-    const memberRiskLevelById = this.memberRiskLevelById(data);
-
     const openAlerts = this.applyDepartmentFilterToAlerts(data.alerts, data.filters.department).filter((alert) =>
       this.isOpenAlertStatus(alert.status)
     );
-
-    const highAttentionAlerts = openAlerts.filter((alert) => {
-      const severity = this.normalizeText(alert.severity);
-      return severity === 'high' || severity === 'critical';
-    });
-
-    const highRiskMembersToday = members.filter((member) => {
-      if (!member.todays_scan) return false;
-      return this.resolveMemberReadiness(member, memberRiskLevelById) === 'High Risk';
-    }).length;
 
     const overdueRequests = this.applyDepartmentFilterToRequests(data.scanRequests, data.filters.department).filter((request) =>
       this.isOverdueRequest(request.status, request.due_at)
@@ -397,19 +435,33 @@ export class ComplianceService {
     const scanEligibleMembers = members.length;
     const completedInRange = members.filter((member) => completedMemberIdsInRange.has(member.id)).length;
     const missingScans = Math.max(scanEligibleMembers - completedInRange, 0);
+    const highAttention = data.scanResultsAccess === 'available'
+      ? this.buildComplianceExceptions(data).filter((row) =>
+          row.readiness === 'High Risk' ||
+          row.readiness === 'Elevated Fatigue' ||
+          row.alertStatus === 'Open'
+        ).length
+      : null;
 
     return {
       complianceRate: scanEligibleMembers > 0 ? Math.round((completedInRange / scanEligibleMembers) * 100) : 0,
       completedScans: completedInRange,
       missingScans,
       openAlerts: openAlerts.length,
-      highAttention: highAttentionAlerts.length + highRiskMembersToday,
+      highAttention,
       overdueRequests: overdueRequests.length,
       scanEligibleMembersToday: scanEligibleMembers
     };
   }
 
   buildDepartmentCompliance(data: NormalizedSource): DepartmentComplianceRow[] {
+    console.info('[COMPLIANCE_GROUPING_START]', {
+      memberCount: data.members.length,
+      departmentCount: data.departments.length,
+      departmentMetadataBlocked: data.departmentMetadataBlocked,
+      departmentMetadataUnreadable: data.departmentMetadataUnreadable
+    });
+
     const members = data.members.filter((member) => this.normalizeText(member.status) === 'active');
     const alerts = data.alerts.filter((alert) => this.isOpenAlertStatus(alert.status));
     const range = this.resolveDateRange(data.filters.dateRange);
@@ -424,58 +476,48 @@ export class ComplianceService {
         .filter((id): id is string => Boolean(id))
     );
 
-    const departmentMap = new Map<string, { id: string | null; name: string }>();
-    for (const department of data.departments) {
-      if (!department.id) continue;
-      departmentMap.set(department.id, { id: department.id, name: department.name || 'Unnamed Department' });
-    }
-
-    for (const member of members) {
-      if (member.department_id) {
-        departmentMap.set(member.department_id, {
-          id: member.department_id,
-          name: member.department_name || departmentMap.get(member.department_id)?.name || 'Unnamed Department'
-        });
-      }
-    }
-
-    const includeUnassigned = members.some((member) => !member.department_id);
-    if (includeUnassigned) {
-      departmentMap.set('unassigned', { id: null, name: 'Unassigned members' });
-    }
+    const groups = this.resolveDepartmentGroups(data, members);
 
     const rows: DepartmentComplianceRow[] = [];
-    for (const [key, department] of departmentMap.entries()) {
+    for (const department of groups) {
       const departmentMembers = members.filter((member) =>
-        department.id ? member.department_id === department.id : !member.department_id
+        department.departmentId ? member.department_id === department.departmentId : !member.department_id
       );
 
       const completedToday = departmentMembers.filter((member) => completedMemberIdsInRange.has(member.id)).length;
       const activeMembers = departmentMembers.length;
       const missingScans = Math.max(activeMembers - completedToday, 0);
       const openAlerts = alerts.filter((alert) =>
-        department.id ? alert.department_id === department.id : !alert.department_id
+        department.departmentId ? alert.department_id === department.departmentId : !alert.department_id
       ).length;
 
       rows.push({
-        key,
-        departmentId: department.id,
-        departmentName: department.name,
+        key: department.key,
+        departmentId: department.departmentId,
+        departmentName: department.departmentName,
         activeMembers,
         scanEligible: activeMembers,
         completedToday,
         missingScans,
         complianceRate: activeMembers > 0 ? Math.round((completedToday / activeMembers) * 100) : 0,
-        openAlerts
+        openAlerts,
+        note: department.note
       });
     }
 
     const filtered = this.applyDepartmentFilterToDepartmentRows(rows, data.filters.department);
-    return filtered.sort((left, right) => {
+    const sorted = filtered.sort((left, right) => {
       if (left.departmentName === 'Unassigned members') return 1;
       if (right.departmentName === 'Unassigned members') return -1;
       return left.departmentName.localeCompare(right.departmentName);
     });
+    console.info('[COMPLIANCE_GROUPING_DONE]', {
+      groupCount: sorted.length,
+      unassignedCount: sorted.filter((row) => row.departmentName === 'Unassigned members').length,
+      unavailableCount: sorted.filter((row) => row.departmentName === 'Department unavailable').length,
+      unknownCount: sorted.filter((row) => row.departmentName === 'Unknown department').length
+    });
+    return sorted;
   }
 
   buildComplianceExceptions(data: NormalizedSource): ComplianceExceptionRow[] {
@@ -568,7 +610,7 @@ export class ComplianceService {
         joinedAt: member.joined_at,
         userId: member.user_id,
         departmentId: member.department_id ?? null,
-        departmentName: member.department_name || 'Unassigned members',
+        departmentName: this.resolveMemberDepartmentGroup(data, member).departmentName,
         expectedCheck: this.expectedCheckLabel(latestRequest),
         todayScan,
         readiness,
@@ -605,7 +647,7 @@ export class ComplianceService {
       .map((member) => ({
         membershipId: member.id,
         role: member.member_role || 'employee',
-        department: member.department_name || 'Unassigned members',
+        department: this.resolveMemberDepartmentGroup(data, member).departmentName,
         joinedAt: member.joined_at,
         inviteEmail: this.pickString((member as unknown as Record<string, unknown>)['pending_invite_email']) || null,
         reason: 'User relation missing or inaccessible'
@@ -628,7 +670,11 @@ export class ComplianceService {
           type: 'request_sent',
           title: 'Request sent',
           detail: this.requestActivityDetail(request),
-          departmentName: request.department_name || 'Unassigned',
+          departmentName: this.resolveGenericDepartmentLabel(
+            request.department_id ?? null,
+            request.department_name ?? null,
+            data
+          ),
           happenedAt: request.requested_at ?? '',
           happenedTs: requestedTs
         });
@@ -641,7 +687,11 @@ export class ComplianceService {
           type: 'request_overdue',
           title: 'Request overdue',
           detail: this.requestActivityDetail(request),
-          departmentName: request.department_name || 'Unassigned',
+          departmentName: this.resolveGenericDepartmentLabel(
+            request.department_id ?? null,
+            request.department_name ?? null,
+            data
+          ),
           happenedAt: request.due_at ?? '',
           happenedTs: dueTs
         });
@@ -656,7 +706,11 @@ export class ComplianceService {
           type: 'alert_created',
           title: 'Alert created',
           detail: alert.message || alert.title || 'Operational alert recorded',
-          departmentName: alert.department_name || 'Unassigned',
+          departmentName: this.resolveGenericDepartmentLabel(
+            alert.department_id ?? null,
+            alert.department_name ?? null,
+            data
+          ),
           happenedAt: alert.date_created ?? '',
           happenedTs: createdTs
         });
@@ -670,7 +724,11 @@ export class ComplianceService {
           type: 'alert_resolved',
           title: status === 'overridden' ? 'Alert overridden' : 'Alert resolved',
           detail: alert.message || alert.title || 'Operational alert reviewed',
-          departmentName: alert.department_name || 'Unassigned',
+          departmentName: this.resolveGenericDepartmentLabel(
+            alert.department_id ?? null,
+            alert.department_name ?? null,
+            data
+          ),
           happenedAt: alert.reviewed_at ?? '',
           happenedTs: resolvedTs
         });
@@ -693,7 +751,11 @@ export class ComplianceService {
         type: 'scan_completed',
         title: 'Scan completed',
         detail: 'Readiness check completed by a workspace member.',
-        departmentName: this.departmentName(scan.department) || 'Unassigned',
+        departmentName: this.resolveGenericDepartmentLabel(
+          this.normalizeId(scan.department),
+          this.departmentName(scan.department),
+          data
+        ),
         happenedAt,
         happenedTs
       });
@@ -714,12 +776,128 @@ export class ComplianceService {
 
     for (const member of data.members) {
       if (!member.department_id) continue;
-      options.set(member.department_id, member.department_name || options.get(member.department_id) || 'Unnamed Department');
+      options.set(
+        member.department_id,
+        this.resolveMemberDepartmentGroup(data, member).departmentName || options.get(member.department_id) || 'Unnamed Department'
+      );
     }
 
     return Array.from(options.entries())
       .map(([id, name]) => ({ id, name }))
       .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private resolveDepartmentGroups(
+    data: NormalizedSource,
+    members: WorkforceMemberRow[]
+  ): ResolvedDepartmentGroup[] {
+    const groups = new Map<string, ResolvedDepartmentGroup>();
+    const loggedMissingMetadata = new Set<string>();
+
+    for (const member of members) {
+      const group = this.resolveMemberDepartmentGroup(data, member);
+      groups.set(group.key, group);
+
+      if (group.departmentId && (group.departmentName === 'Department unavailable' || group.departmentName === 'Unknown department')) {
+        const logKey = `${group.departmentId}:${group.departmentName}`;
+        if (!loggedMissingMetadata.has(logKey)) {
+          loggedMissingMetadata.add(logKey);
+          console.warn('[COMPLIANCE_DEPARTMENT_METADATA_MISSING]', {
+            departmentId: group.departmentId,
+            label: group.departmentName,
+            memberId: member.id
+          });
+        }
+      }
+    }
+
+    return Array.from(groups.values());
+  }
+
+  private resolveMemberDepartmentGroup(
+    data: NormalizedSource,
+    member: WorkforceMemberRow
+  ): ResolvedDepartmentGroup {
+    return this.resolveGenericDepartmentGroup(member.department_id, member.department_name, data);
+  }
+
+  private resolveGenericDepartmentGroup(
+    departmentId: string | null | undefined,
+    departmentName: string | null | undefined,
+    data: NormalizedSource
+  ): ResolvedDepartmentGroup {
+    const normalizedDepartmentId = this.normalizeId(departmentId);
+    const directName = this.pickString(departmentName);
+    const departmentMap = new Map(data.departments.map((department) => [department.id, department.name] as const));
+
+    if (!normalizedDepartmentId) {
+      return {
+        key: 'unassigned',
+        departmentId: null,
+        departmentName: 'Unassigned members',
+        note: null
+      };
+    }
+
+    if (directName) {
+      return {
+        key: normalizedDepartmentId,
+        departmentId: normalizedDepartmentId,
+        departmentName: directName,
+        note: null
+      };
+    }
+
+    const mappedName = departmentMap.get(normalizedDepartmentId);
+    if (mappedName) {
+      return {
+        key: normalizedDepartmentId,
+        departmentId: normalizedDepartmentId,
+        departmentName: mappedName,
+        note: null
+      };
+    }
+
+    if (data.departmentMetadataBlocked || data.departmentMetadataUnreadable || data.departments.length === 0) {
+      return {
+        key: normalizedDepartmentId,
+        departmentId: normalizedDepartmentId,
+        departmentName: 'Department unavailable',
+        note: 'Department metadata is blocked or unreadable for this workspace.'
+      };
+    }
+
+    return {
+      key: normalizedDepartmentId,
+      departmentId: normalizedDepartmentId,
+      departmentName: 'Unknown department',
+      note: 'Department id exists on members, but the matching metadata row was not returned.'
+    };
+  }
+
+  private resolveGenericDepartmentLabel(
+    departmentId: string | null | undefined,
+    departmentName: string | null | undefined,
+    data: NormalizedSource
+  ): string {
+    return this.resolveGenericDepartmentGroup(departmentId, departmentName, data).departmentName;
+  }
+
+  private buildDepartmentGroupingWarning(data: NormalizedSource): string | null {
+    if (data.departmentMetadataBlocked) {
+      return 'Department metadata is unavailable. Members with department ids are grouped under Department unavailable until departments.read is allowed.';
+    }
+
+    const hasUnavailableGroups = data.members.some((member) => {
+      const group = this.resolveMemberDepartmentGroup(data, member);
+      return group.departmentName === 'Department unavailable' || group.departmentName === 'Unknown department';
+    });
+
+    if (hasUnavailableGroups) {
+      return 'Some member department metadata is missing. Those members are grouped under Department unavailable or Unknown department instead of Unassigned.';
+    }
+
+    return null;
   }
 
   private resolveSettled<T>(
@@ -739,6 +917,57 @@ export class ComplianceService {
 
     warnings.add(source);
     return [] as T extends Array<infer U> ? U[] : T;
+  }
+
+  private resolveScanResultsSettled(
+    settled: PromiseSettledResult<ScanResultsLoadResult>,
+    warnings: Set<string>,
+    onForbidden: () => void
+  ): ScanResultsLoadResult {
+    if (settled.status === 'fulfilled') {
+      if (settled.value.state === 'permission_blocked') {
+        warnings.add('scan_results');
+        onForbidden();
+      } else if (settled.value.state === 'degraded') {
+        warnings.add('scan_results');
+      }
+      return settled.value;
+    }
+
+    const status = this.httpStatus(settled.reason);
+    if (status === 401 || status === 403) {
+      onForbidden();
+    }
+    warnings.add('scan_results');
+    return {
+      rows: [],
+      state: status === 401 || status === 403 ? 'permission_blocked' : 'degraded',
+      missingFields: []
+    };
+  }
+
+  private buildPartialWarning(
+    warnings: Set<string>,
+    scanResultsAccess: ScanResultsLoadState
+  ): string | null {
+    if (scanResultsAccess === 'permission_blocked') {
+      return 'Readiness data unavailable due to permissions.';
+    }
+    if (scanResultsAccess === 'degraded') {
+      return 'Scan result enrichment is partially unavailable.';
+    }
+    if (warnings.size) {
+      return 'Some compliance sources are unavailable due to workspace permissions.';
+    }
+    return null;
+  }
+
+  private isPermissionBlocked<T>(settled: PromiseSettledResult<T>): boolean {
+    if (settled.status !== 'rejected') {
+      return false;
+    }
+    const status = this.httpStatus(settled.reason);
+    return status === 401 || status === 403;
   }
 
   private async loadDepartments(token: string, businessProfileId: string): Promise<Array<{ id: string; name: string }>> {
@@ -835,39 +1064,123 @@ export class ComplianceService {
     );
   }
 
-  private async loadScanResults(token: string): Promise<ScanResultRecord[]> {
-    return this.queryWithFieldFallback<ScanResultRecord>(
-      'scan_results',
+  private async loadScanResults(token: string): Promise<ScanResultsLoadResult> {
+    const fieldVariants: string[][] = [
       [
-        [
-          'id',
-          'date_created',
-          'scan_id',
-          'risk_level',
-          'readiness_score',
-          'confidence',
-          'camera_confidence',
-          'voice_confidence',
-          'task_performance_score',
-          'confidence_drift',
-          'explanation',
-          'internal_analysis',
-          'ai_model_version',
-          'baseline_used',
-          'suggested_action',
-          'face_metrics',
-          'voice_metrics',
-          'reaction_metrics'
-        ],
-        ['id', 'date_created', 'scan_id', 'risk_level', 'readiness_score', 'confidence', 'task_performance_score'],
-        ['id', 'date_created', 'scan_id', 'risk_level']
+        'id',
+        'date_created',
+        'scan_id',
+        'risk_level',
+        'readiness_score',
+        'confidence',
+        'task_performance_score',
+        'readiness_summary',
+        'operational_summary',
+        'recommended_action',
+        'explanation',
+        'suggested_action'
       ],
-      token,
-      {
-        sort: '-date_created',
-        limit: 1500
+      [
+        'id',
+        'date_created',
+        'scan_id',
+        'risk_level',
+        'readiness_score',
+        'confidence',
+        'task_performance_score',
+        'explanation',
+        'suggested_action'
+      ],
+      ['id', 'date_created', 'scan_id', 'risk_level', 'readiness_score', 'confidence', 'explanation'],
+      ['id', 'date_created', 'scan_id', 'risk_level']
+    ];
+    const missingFields = new Set<string>();
+
+    console.info('[SCAN_RESULTS_FETCH_START]', {
+      fields: fieldVariants[0].join(',')
+    });
+
+    for (let index = 0; index < fieldVariants.length; index += 1) {
+      const fields = fieldVariants[index];
+
+      try {
+        const rows = await this.queryItems<ScanResultRecord>(
+          'scan_results',
+          fields,
+          token,
+          {
+            sort: '-date_created',
+            limit: 1500
+          }
+        );
+
+        const degradedFields = Array.from(missingFields);
+        if (degradedFields.length) {
+          console.warn('[SCAN_RESULTS_DEGRADED_STATE]', {
+            reason: 'optional_fields_unavailable',
+            missingFields: degradedFields
+          });
+        }
+
+        console.info('[SCAN_RESULTS_FETCH_SUCCESS]', {
+          resultCount: rows.length,
+          fields: fields.join(',')
+        });
+        return {
+          rows,
+          state: degradedFields.length ? 'degraded' : 'available',
+          missingFields: degradedFields
+        };
+      } catch (error) {
+        const status = this.httpStatus(error);
+
+        if (status === 401 || status === 403) {
+          console.warn('[SCAN_RESULTS_PERMISSION_BLOCKED]', {
+            status,
+            fields: fields.join(',')
+          });
+          return {
+            rows: [],
+            state: 'permission_blocked',
+            missingFields: []
+          };
+        }
+
+        if (this.isFieldCompatibilityError(error)) {
+          const nextFields = fieldVariants[index + 1] ?? [];
+          const removedFields = fields.filter((field) => !nextFields.includes(field));
+          removedFields.forEach((field) => missingFields.add(field));
+          console.warn('[SCAN_RESULTS_FIELD_MISSING]', {
+            status,
+            fields: fields.join(','),
+            removedFields: removedFields.join(','),
+            message: this.errorMessage(error)
+          });
+          continue;
+        }
+
+        console.warn('[SCAN_RESULTS_DEGRADED_STATE]', {
+          status,
+          fields: fields.join(','),
+          message: this.errorMessage(error)
+        });
+        return {
+          rows: [],
+          state: 'degraded',
+          missingFields: Array.from(missingFields)
+        };
       }
-    );
+    }
+
+    console.warn('[SCAN_RESULTS_DEGRADED_STATE]', {
+      reason: 'no_compatible_field_set',
+      missingFields: Array.from(missingFields)
+    });
+    return {
+      rows: [],
+      state: 'degraded',
+      missingFields: Array.from(missingFields)
+    };
   }
 
   private async loadMemberRiskProfiles(
@@ -1276,9 +1589,8 @@ export class ComplianceService {
     return Number((error as { status?: number }).status ?? 0);
   }
 
-  private isFieldCompatibilityError(error: unknown): boolean {
-    const status = this.httpStatus(error);
-    const message = this.normalizeText(
+  private errorMessage(error: unknown): string {
+    return this.normalizeText(
       (error as {
         error?: {
           errors?: Array<{ message?: string; extensions?: { reason?: string } }>;
@@ -1296,6 +1608,11 @@ export class ComplianceService {
       (error as { error?: { message?: string }; message?: string } | null)?.error?.message ??
       (error as { message?: string } | null)?.message
     );
+  }
+
+  private isFieldCompatibilityError(error: unknown): boolean {
+    const status = this.httpStatus(error);
+    const message = this.errorMessage(error);
 
     if (status === 403 || status === 401) {
       return true;

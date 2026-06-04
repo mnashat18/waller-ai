@@ -304,7 +304,7 @@ export class OperationsSupportService {
             { limit: 500 }
           ),
           requests: this.queryItems<ScanRequestRecord>(
-            'scan_requests',
+            'requests',
             ['id'],
             context.token,
             {

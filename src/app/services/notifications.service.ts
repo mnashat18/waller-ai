@@ -24,6 +24,8 @@ type NotificationRow = {
   member?: string | number | { id?: string | number } | null;
   type?: string | null;
   category?: string | null;
+  link_type?: string | null;
+  link_id?: string | number | { id?: string | number } | null;
 };
 
 type DirectusFieldRow = {
@@ -51,6 +53,8 @@ export type WorkspaceNotification = {
   status: string | null;
   dateCreated: string | null;
   iconKey: string | null;
+  linkType: string | null;
+  linkId: string | null;
 };
 
 export type NotificationsState = {
@@ -86,7 +90,7 @@ const BASE_FIELDS = [
   'user_created'
 ] as const;
 
-const OPTIONAL_FIELDS = ['body', 'read_at', 'seen_at', 'recipient', 'user', 'member', 'category', 'type'] as const;
+const OPTIONAL_FIELDS = ['body', 'read_at', 'seen_at', 'recipient', 'user', 'member', 'category', 'type', 'link_type', 'link_id'] as const;
 
 const OPEN_STATUS_VALUES = new Set(['unread', 'open', 'new']);
 
@@ -488,7 +492,9 @@ export class NotificationsService implements OnDestroy {
       message,
       status,
       dateCreated: row.date_created ?? null,
-      iconKey: iconSource ? this.normalizeText(iconSource) : null
+      iconKey: iconSource ? this.normalizeText(iconSource) : null,
+      linkType: this.pickText(row.link_type),
+      linkId: this.normalizeId(row.link_id)
     };
   }
 

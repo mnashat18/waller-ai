@@ -138,7 +138,7 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
     return [
       `${summary.missingScans} members are missing scans`,
       `${summary.overdueRequests} scan requests are overdue`,
-      `${summary.highAttention} high attention readiness cases`,
+      `${summary.highAttention ?? '--'} high attention readiness cases`,
       `${summary.openAlerts} open alerts need review`
     ];
   }
@@ -146,6 +146,7 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
   get actionSummaryRecommendation(): string {
     const summary = this.overview?.summary;
     if (!summary) return '';
+    if (summary.highAttention === null) return 'Recommended action: Restore scan_results access to review readiness outcomes.';
     if (summary.missingScans > 0) return 'Recommended action: Send scan requests to missing members.';
     if (summary.overdueRequests > 0) return 'Recommended action: Follow up on overdue scan requests.';
     if (summary.openAlerts > 0) return 'Recommended action: Review open alerts.';
@@ -168,9 +169,27 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
     return this.overview?.summary?.openAlerts ?? 0;
   }
 
+  get highAttentionDisplay(): string {
+    const value = this.overview?.summary?.highAttention;
+    return value === null || value === undefined ? '--' : String(value);
+  }
+
+  get highAttentionHelper(): string {
+    return this.overview?.readinessWarning ?? 'Needs follow-up';
+  }
+
+  get departmentGroupingWarning(): string {
+    return this.overview?.departmentGroupingWarning ?? '';
+  }
+
+  get readinessWarning(): string {
+    return this.overview?.readinessWarning ?? '';
+  }
+
   get isWorkspaceClear(): boolean {
     const summary = this.overview?.summary;
     if (!summary) return false;
+    if (summary.highAttention === null) return false;
     return (
       summary.missingScans === 0 &&
       summary.overdueRequests === 0 &&

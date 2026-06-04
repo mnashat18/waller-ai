@@ -52,6 +52,12 @@
     </section>
   }
 
+  @if (departmentGroupingWarning) {
+    <section class="compliance-warning-card">
+      {{ departmentGroupingWarning }}
+    </section>
+  }
+
   @if (feedback) {
     <section class="compliance-feedback-card" [class.compliance-feedback-card--error]="feedback.type === 'error'">
       {{ feedback.text }}
@@ -175,8 +181,8 @@
         </app-kpi-card>
         <app-kpi-card
           label="High Attention"
-          [value]="(overview?.summary?.highAttention ?? 0).toString()"
-          helper="Needs follow-up"
+          [value]="highAttentionDisplay"
+          [helper]="highAttentionHelper"
           [tone]="(overview?.summary?.highAttention ?? 0) > 0 ? 'danger' : 'neutral'"
           toneLabel="Attention">
         </app-kpi-card>
@@ -205,7 +211,7 @@
             </article>
             <article class="compliance-followup-item">
               <span>High attention</span>
-              <strong>{{ summaryHighAttention }}</strong>
+              <strong>{{ highAttentionDisplay }}</strong>
             </article>
             <article class="compliance-followup-item">
               <span>Open alerts</span>
@@ -220,6 +226,9 @@
         <div class="mb-4">
           <p class="dashboard-section-title text-lg">Department Compliance</p>
           <p class="mt-1 text-sm text-slate-300">Completion and alert coverage by department plus unassigned members.</p>
+          @if (departmentGroupingWarning) {
+            <p class="mt-2 text-sm text-amber-200">{{ departmentGroupingWarning }}</p>
+          }
         </div>
 
         @if (!departmentRows.length) {
@@ -235,6 +244,9 @@
                   <h3 class="compliance-department-card__title">{{ row.departmentName }}</h3>
                   <span [class]="departmentFollowUpClass(row)">{{ departmentFollowUpLabel(row) }}</span>
                 </div>
+                @if (row.note) {
+                  <p class="mt-2 text-xs text-amber-200">{{ row.note }}</p>
+                }
                 <div class="compliance-department-card__stats">
                   <div><span>Active members</span><strong>{{ row.activeMembers }}</strong></div>
                   <div><span>Scan eligible</span><strong>{{ row.scanEligible }}</strong></div>

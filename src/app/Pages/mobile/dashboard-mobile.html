@@ -52,6 +52,7 @@
       <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-[0.2em]">
         <span>Insights</span>
         <span class="text-[10px] tracking-normal" *ngIf="refreshing">Syncing data...</span>
+        <span class="text-[10px] tracking-normal text-amber-200" *ngIf="!refreshing && scanResultsAccess.message">{{ scanResultsAccess.message }}</span>
         <span class="text-[10px] tracking-normal" *ngIf="!refreshing && !loading && recentScans.length">Latest result available</span>
         <span class="text-[10px] tracking-normal" *ngIf="loading">Loading data...</span>
       </div>
@@ -101,7 +102,7 @@
         </div>
       </div>
 
-      <p class="mt-4 text-xs text-slate-400" *ngIf="!loading && !refreshing && !recentScans.length">
+      <p class="mt-4 text-xs text-slate-400" *ngIf="!loading && !refreshing && !recentScans.length && !scanResultsAccess.message">
         No scans yet. Run your first mobile scan to see insights here.
       </p>
     </div>

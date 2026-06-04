@@ -26,6 +26,14 @@
     </div>
   </div>
 
+  <div class="panel" *ngIf="scanResultsAccess.message">
+    <p class="text-sm text-slate-200">{{ scanResultsAccess.message }}</p>
+  </div>
+
+  <div class="panel" *ngIf="!scanResultsAccess.message && !scans.length">
+    <p class="text-sm text-slate-200">No scans yet. Complete a scan to view readiness results.</p>
+  </div>
+
   <div class="info-grid">
     <div class="list-card" *ngFor="let scan of scans | slice:0:6" (click)="openScan(scan)">
       <div class="flex items-center justify-between">

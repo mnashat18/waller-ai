@@ -791,19 +791,7 @@ export class CompanyContextService {
 
   private fetchCurrentUserContext(token: string): Observable<UserContextResponse> {
     const stored = this.readStoredContext();
-    const fields = [
-      'id',
-      'email',
-      'first_name',
-      'last_name',
-      'active_business_profile',
-      'active_business_profile.id',
-      'active_business_profile.company_name',
-      'active_member_role',
-      'active_department',
-      'active_department.id',
-      'active_department.name'
-    ].join(',');
+    const fields = ['id', 'email', 'first_name', 'last_name'].join(',');
 
     return this.http.get<any>(
       `${this.api}/users/me?fields=${encodeURIComponent(fields)}&_ts=${Date.now()}`,
@@ -1495,8 +1483,7 @@ export class CompanyContextService {
         'business_profile.is_active',
         'business_profile.plan_code',
         'business_profile.billing_status',
-        'department.id',
-        'department.name'
+        'department'
       ].join(',')
     });
     params.set('filter[id][_eq]', normalizedId);
@@ -1548,8 +1535,7 @@ export class CompanyContextService {
         'business_profile.is_active',
         'business_profile.plan_code',
         'business_profile.billing_status',
-        'department.id',
-        'department.name'
+        'department'
       ].join(',')
     });
     params.set('filter[user][_eq]', userId);

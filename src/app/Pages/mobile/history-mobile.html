@@ -29,6 +29,14 @@
       </div>
     </div>
 
+    <div class="mt-6 rounded-2xl bg-amber-500/10 border border-amber-400/20 p-4" *ngIf="scanResultsAccess.message">
+      <p class="text-sm text-amber-100">{{ scanResultsAccess.message }}</p>
+    </div>
+
+    <div class="mt-6 rounded-2xl bg-white/5 border border-white/10 p-4" *ngIf="!scanResultsAccess.message && !scans.length">
+      <p class="text-sm text-slate-200">No scans yet. Complete a scan to view readiness results.</p>
+    </div>
+
     <div class="mt-6 space-y-3">
       <div
         class="rounded-2xl bg-white/5 border border-white/10 p-4"

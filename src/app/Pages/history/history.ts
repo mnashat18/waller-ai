@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { RouterModule } from '@angular/router';
 
-import { DashboardService, ScanResult } from '../../services/dashboard.service';
+import { DashboardService, ScanResult, type ScanResultsAccessInfo } from '../../services/dashboard.service';
 
 @Component({
   selector: 'app-history',
@@ -20,6 +20,11 @@ export class History implements OnInit {
 
   scans: HistoryScan[] = [];
   selectedScan: HistoryScan | null = null;
+  scanResultsAccess: ScanResultsAccessInfo = {
+    state: 'available',
+    message: null,
+    missingFields: []
+  };
 
   constructor(
     private dashboardService: DashboardService,
@@ -27,6 +32,11 @@ export class History implements OnInit {
   ) {}
 
   ngOnInit() {
+    this.dashboardService.getScanResultsAccessInfo().subscribe((access) => {
+      this.scanResultsAccess = access;
+      this.cdr.detectChanges();
+    });
+
     this.dashboardService.getScanResults(50).subscribe((scans) => {
       this.scans = scans.map((scan) => this.mapToHistoryScan(scan));
       this.cdr.detectChanges();
@@ -50,8 +60,16 @@ export class History implements OnInit {
       ? createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
       : '';
     const result = this.coerceState(scan.overall_state);
-      const report = scan.explanation ?? 'No readiness summary available';
-      const recommendation = scan.explanation ?? 'No next-step guidance available';
+    const report =
+      scan.readiness_summary ??
+      scan.operational_summary ??
+      scan.explanation ??
+      'No readiness summary available';
+    const recommendation =
+      scan.recommended_action ??
+      scan.suggested_action ??
+      scan.explanation ??
+      'No next-step guidance available';
 
     return {
       id: scan.id ?? '',
