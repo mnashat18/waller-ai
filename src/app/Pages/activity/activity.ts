@@ -10,7 +10,7 @@ import { EmptyStateCtaComponent } from '../../shared/ui/empty-state-cta/empty-st
 import { ErrorStateComponent } from '../../shared/ui/error-state/error-state.component';
 import { FilterBarShellComponent } from '../../shared/ui/filter-bar-shell/filter-bar-shell.component';
 import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
-import { PageActionBarComponent } from '../../shared/ui/page-action-bar/page-action-bar.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
 import { CompanyContextChipComponent } from '../../shared/ui/company-context-chip/company-context-chip.component';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
@@ -33,7 +33,7 @@ type ActivityFilters = {
     CommonModule,
     FormsModule,
     DatePipe,
-    PageActionBarComponent,
+    PageHeaderComponent,
     FilterBarShellComponent,
     DashboardSectionComponent,
     KpiCardComponent,
@@ -141,6 +141,31 @@ export class ActivityPageComponent implements OnInit {
     return row.id || String(index);
   }
 
+  actionLabel(value: string | null | undefined): string {
+    return this.toTitleLabel(value, 'Activity recorded');
+  }
+
+  entityLabel(value: string | null | undefined): string {
+    return this.toTitleLabel(value, 'Record');
+  }
+
+  eventSummary(row: ActivityRow): string {
+    const action = this.actionLabel(row.action).toLowerCase();
+    const entity = this.entityLabel(row.entity_type).toLowerCase();
+    const target = row.target_label?.trim();
+    return target
+      ? `${row.actor_label} ${action} for ${target}.`
+      : `${row.actor_label} ${action} on ${entity}.`;
+  }
+
+  scopeLabel(row: ActivityRow): string {
+    return row.department_name?.trim() || 'Organization-wide';
+  }
+
+  hasActiveFilters(): boolean {
+    return Object.values(this.filters).some((value) => Boolean(value.trim()));
+  }
+
   private loadPage(): void {
     this.loading = true;
     this.errorMessage = '';
@@ -148,8 +173,6 @@ export class ActivityPageComponent implements OnInit {
     this.support.getActivityPageData().pipe(
       finalize(() => {
         this.loading = false;
-        console.log('activity loading', this.loading);
-        console.log('activity data', this.pageData);
       })
     ).subscribe({
       next: (pageData) => {
@@ -164,5 +187,18 @@ export class ActivityPageComponent implements OnInit {
         this.errorMessage = error?.message || 'Failed to load activity events.';
       }
     });
+  }
+
+  private toTitleLabel(value: string | null | undefined, fallback: string): string {
+    const normalized = (value ?? '').trim();
+    if (!normalized) {
+      return fallback;
+    }
+
+    return normalized
+      .split(/[_\s-]+/)
+      .filter(Boolean)
+      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
+      .join(' ');
   }
 }

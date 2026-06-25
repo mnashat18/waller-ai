@@ -1,11 +1,13 @@
-import { Injectable } from '@angular/core';
+﻿import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, forkJoin, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, take, timeout } from 'rxjs/operators';
 
 import { environment } from '../../environments/environment';
 import {
-  formatUserName
+  formatUserName,
+  formatWorkforceIdentity,
+  type WorkforceIdentity
 } from '../shared/utils/display-formatters';
 
 import { CompanyContextService, type CompanyContext } from '../core/context/company-context.service';
@@ -66,13 +68,9 @@ export type CompanyInviteRecord = {
   email: string | null;
   member_role: string | null;
   status: string | null;
-  sent_at: string | null;
   expires_at: string | null;
-  claimed_at: string | null;
   department_id: string | null;
   department_name: string | null;
-  invited_by_name: string | null;
-  invited_by_email: string | null;
 };
 
 export type CompanyShiftTemplateRecord = {
@@ -121,7 +119,6 @@ export type MemberDirectoryRow = {
   department_alert_count: number;
   pending_invite_id: string | null;
   pending_invite_status: string | null;
-  pending_invite_sent_at: string | null;
   pending_invite_expires_at: string | null;
   user_id: string | null;
 };
@@ -185,6 +182,8 @@ export type WorkforceRosterRow = {
   member_id: string | null;
   invite_id: string | null;
   user_id: string | null;
+  identity: WorkforceIdentity;
+  identity_state: 'identified' | 'pending_onboarding' | 'identity_unavailable';
   name: string;
   email: string | null;
   member_role: string;
@@ -192,10 +191,7 @@ export type WorkforceRosterRow = {
   department_name: string | null;
   status: string;
   joined_at: string | null;
-  sent_at: string | null;
   expires_at: string | null;
-  claimed_at: string | null;
-  invite_token: string | null;
   scan_status: WorkforceScanStatus;
   todays_scan: boolean;
   readiness_label: 'Stable' | 'Low Focus' | 'Elevated Fatigue' | 'High Risk' | 'No scan';
@@ -212,7 +208,6 @@ export type WorkforceRosterRow = {
   needs_review_reason: string | null;
   linked_invite_email: string | null;
   linked_invite_status: string | null;
-  linked_invite_sent_at: string | null;
   linked_invite_requested_by: string | null;
   business_profile_id: string | null;
   business_profile_name: string | null;
@@ -229,6 +224,7 @@ export type WorkforceScanRequestRow = {
   department_id: string | null;
   department_name: string | null;
   target_member_id: string | null;
+  target_identity: WorkforceIdentity;
   target_member_name: string;
   target_user_id: string | null;
   target_user_email: string | null;
@@ -309,8 +305,6 @@ export type InviteRow = {
   department_name: string | null;
   invite_type: string | null;
   status: string | null;
-  sent_at: string | null;
-  claimed_at: string | null;
   expires_at: string | null;
   claimed_member_id: string | null;
   claimed_member_name: string | null;
@@ -420,8 +414,6 @@ type RequestInviteRecord = {
   id?: string | number;
   email?: string | null;
   phone?: string | null;
-  token?: string | null;
-  accepted_user?: string | number | { id?: string | number } | null;
   member_role?: string | null;
   business_profile?: string | number | { id?: string | number } | null;
   department?: {
@@ -430,8 +422,6 @@ type RequestInviteRecord = {
   } | string | number | null;
   invite_type?: string | null;
   status?: string | null;
-  sent_at?: string | null;
-  claimed_at?: string | null;
   expires_at?: string | null;
   requested_by_user?:
     | string
@@ -555,11 +545,29 @@ type ScopedContext = {
   activeDepartmentId: string | null;
 };
 
+type CreateInvitePayload = {
+  email?: string;
+  phone?: string;
+  status: 'pending';
+  requested_by_user: string;
+  business_profile: string;
+  member_role: string;
+  department?: string | null;
+  invite_type: 'email' | 'phone';
+};
+
+type InviteErrorCode =
+  | 'MISSING_COMPANY_CONTEXT'
+  | 'INVALID_EMAIL'
+  | 'DUPLICATE_INVITE'
+  | 'ALREADY_MEMBER'
+  | 'PERMISSION_DENIED'
+  | 'NETWORK_ERROR'
+  | 'SERVER_ERROR';
+
 @Injectable({ providedIn: 'root' })
 export class OperationsAdminService {
   private readonly api = environment.API_URL;
-  private readonly inviteExpiryDays = 7;
-  private readonly collectionFieldCache = new Map<string, string[]>();
   private readonly loggedIncompleteMemberIds = new Set<string>();
 
   constructor(
@@ -573,7 +581,7 @@ export class OperationsAdminService {
       switchMap((context) => {
         const profile$ = this.queryItemsStrict<CompanyProfileRecord>(
           'business_profiles',
-          ['id', 'company_name', 'is_active', 'plan_code', 'billing_status', 'date_created', 'date_updated'],
+          this.companyProfileFieldsForRole(context.activeRole),
           context.token,
           {
             filters: [{ path: ['id'], operator: '_eq', value: context.businessProfileId }],
@@ -632,20 +640,14 @@ export class OperationsAdminService {
             'email',
             'member_role',
             'status',
-            'sent_at',
             'expires_at',
-            'claimed_at',
             'department.id',
-            'department.name',
-            'requested_by_user.id',
-            'requested_by_user.first_name',
-            'requested_by_user.last_name',
-            'requested_by_user.email'
+            'department.name'
           ],
           context.token,
           {
             filters: this.scopeFilters(context, ['business_profile'], ['department']),
-            sort: '-sent_at',
+            sort: '-id',
             limit: 50
           }
         ).pipe(
@@ -712,32 +714,9 @@ export class OperationsAdminService {
   }
 
   updateCompanyProfile(profileId: string, input: Partial<CompanyProfileRecord>): Observable<void> {
-    const payload: Record<string, unknown> = {};
-    if (typeof input.company_name === 'string') {
-      payload['company_name'] = input.company_name;
-    }
-    if (typeof input.is_active === 'boolean') {
-      payload['is_active'] = input.is_active;
-    }
-
-    if (!Object.keys(payload).length) {
-      return of(void 0);
-    }
-
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.patch(
-          `${this.api}/items/business_profiles/${encodeURIComponent(profileId)}`,
-          payload,
-          {
-            headers: this.headers(context.token),
-            withCredentials: true
-          }
-        ).pipe(
-          map(() => void 0)
-        )
-      )
-    );
+    void profileId;
+    void input;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   getMembersPageData(): Observable<MembersPageData> {
@@ -788,14 +767,12 @@ export class OperationsAdminService {
               'department.id',
               'department.name',
               'status',
-              'sent_at',
-              'expires_at',
-              'claimed_at'
+              'expires_at'
             ],
             context.token,
             {
               filters: this.scopeFilters(context, ['business_profile'], ['department']),
-              sort: '-sent_at',
+              sort: '-id',
               limit: 200
             }
           ),
@@ -837,22 +814,38 @@ export class OperationsAdminService {
   getWorkforcePageData(): Observable<WorkforcePageData> {
     return this.ensureScopedContext().pipe(
       switchMap((context) => {
+        if (context.activeRole === 'manager' && !context.activeDepartmentId) {
+          return throwError(() => new Error('Scoped data unavailable: manager account has no active department context.'));
+        }
+
         const filters = [
           ...this.scopeFilters(context, ['business_profile'], ['department']),
           { path: ['status'], operator: '_in', value: 'active,pending' }
         ];
 
-        const safeFields = [
-          'id',
-          'status',
-          'member_role',
-          'joined_at',
-          'business_profile',
-          'department',
-          'user',
-          'last_scan_at',
-          'last_risk_level'
-        ];
+        const safeFields = context.activeRole === 'manager'
+          ? [
+              'id',
+              'status',
+              'member_role',
+              'department',
+              'employee_code',
+              'job_title',
+              'last_scan_at',
+              'last_risk_level',
+              'last_readiness_score'
+            ]
+          : [
+              'id',
+              'status',
+              'member_role',
+              'joined_at',
+              'business_profile',
+              'department',
+              'user',
+              'last_scan_at',
+              'last_risk_level'
+            ];
 
         const expandedFields = [
           'id',
@@ -876,6 +869,9 @@ export class OperationsAdminService {
           {
             filters: [
               { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
+              ...(context.activeRole === 'manager' && context.activeDepartmentId
+                ? [{ path: ['id'], operator: '_eq', value: context.activeDepartmentId }]
+                : []),
               { path: ['is_active'], operator: '_eq', value: 'true' }
             ],
             sort: 'name',
@@ -914,8 +910,12 @@ export class OperationsAdminService {
                 limit: 500
               }
             ).pipe(
-              switchMap((safeMembers) =>
-                this.queryItemsStrict<WorkforceMemberRecord>(
+              switchMap((safeMembers) => {
+                if (context.activeRole === 'manager') {
+                  return of(this.buildWorkforcePageData(safeMembers, departmentWarning, scopedDepartments));
+                }
+
+                return this.queryItemsStrict<WorkforceMemberRecord>(
                   'business_profile_members',
                   expandedFields,
                   context.token,
@@ -937,8 +937,8 @@ export class OperationsAdminService {
                         .join(' ');
                     return of(this.buildWorkforcePageData(safeMembers, relationWarning, scopedDepartments));
                   })
-                )
-              )
+                );
+              })
             )
           )
         );
@@ -1001,12 +1001,13 @@ export class OperationsAdminService {
                 : warningParts.length
                   ? warningParts.join(' ')
                   : null;
-            const userIds = this.uniqueIds([
-              ...membersResult.rows.map((row) => this.normalizeId(row.user)),
-              ...acceptedInvitesResult.rows.map((row) => this.normalizeId(row.accepted_user)),
-              ...invitesResult.rows.map((row) => this.normalizeId(row.requested_by_user)),
-              ...acceptedInvitesResult.rows.map((row) => this.normalizeId(row.requested_by_user))
-            ]);
+            const userIds = context.activeRole === 'manager'
+              ? []
+              : this.uniqueIds([
+                  ...membersResult.rows.map((row) => this.normalizeId(row.user)),
+                  ...invitesResult.rows.map((row) => this.normalizeId(row.requested_by_user)),
+                  ...acceptedInvitesResult.rows.map((row) => this.normalizeId(row.requested_by_user))
+                ]);
 
             return this.loadUsersByIds(context.token, userIds).pipe(
               map((usersById) =>
@@ -1029,30 +1030,14 @@ export class OperationsAdminService {
   }
 
   updateMember(memberId: string, input: MemberUpdateInput): Observable<void> {
-    const payload: MemberUpdateInput = { ...input };
-    if (typeof input.member_role === 'string') {
-      payload.member_role = this.toBackendMemberRole(input.member_role);
-    }
-
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.patch(
-          `${this.api}/items/business_profile_members/${encodeURIComponent(memberId)}`,
-          payload,
-          {
-            headers: this.headers(context.token),
-            withCredentials: true
-          }
-        ).pipe(map(() => void 0))
-      )
-    );
+    void memberId;
+    void input;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   deactivateMember(memberId: string): Observable<void> {
-    return this.updateMember(memberId, {
-      status: 'inactive',
-      deactivated_at: new Date().toISOString()
-    });
+    void memberId;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   getDepartmentsPageData(): Observable<DepartmentsPageData> {
@@ -1117,42 +1102,20 @@ export class OperationsAdminService {
   }
 
   createDepartment(input: DepartmentMutationInput): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.post(
-          `${this.api}/items/departments`,
-          {
-            business_profile: context.businessProfileId,
-            name: input.name,
-            is_active: input.is_active ?? true,
-            manager_member: input.manager_member ?? null
-          },
-          {
-            headers: this.headers(context.token),
-            withCredentials: true
-          }
-        ).pipe(map(() => void 0))
-      )
-    );
+    void input;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   updateDepartment(departmentId: string, input: Partial<DepartmentMutationInput>): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.patch(
-          `${this.api}/items/departments/${encodeURIComponent(departmentId)}`,
-          input,
-          {
-            headers: this.headers(context.token),
-            withCredentials: true
-          }
-        ).pipe(map(() => void 0))
-      )
-    );
+    void departmentId;
+    void input;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   assignDepartmentManager(departmentId: string, managerId: string | null): Observable<void> {
-    return this.updateDepartment(departmentId, { manager_member: managerId });
+    void departmentId;
+    void managerId;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   getInvitesPageData(): Observable<InvitesPageData> {
@@ -1170,14 +1133,12 @@ export class OperationsAdminService {
               'department.name',
               'invite_type',
               'status',
-              'sent_at',
-              'claimed_at',
               'expires_at'
             ],
             context.token,
             {
               filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
-              sort: '-sent_at',
+              sort: '-id',
               limit: 200
             }
           ),
@@ -1217,140 +1178,27 @@ export class OperationsAdminService {
   }
 
   createInvite(input: CreateInviteInput): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const normalizedRole = this.normalizeMemberRole(input.member_role);
-        const normalizedEmail = this.pickString(input.email);
-        const normalizedDepartmentId = this.normalizeId(input.department);
-        const normalizedNote = this.pickString(input.note);
-
-        if (context.activeRole !== 'owner' && context.activeRole !== 'hr') {
-          return throwError(() => new Error('You do not have permission to send invites from this workspace.'));
-        }
-        if (!normalizedEmail || !this.isValidEmail(normalizedEmail)) {
-          return throwError(() => new Error('Enter a valid email address.'));
-        }
-        if (!['employee', 'manager', 'hr', 'owner'].includes(normalizedRole)) {
-          return throwError(() => new Error('Select a valid member role.'));
-        }
-
-        return this.queryItems<DepartmentRecord>(
-          'departments',
-          ['id', 'name', 'is_active'],
-          context.token,
-          {
-            filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
-            sort: 'name',
-            limit: 250
-          }
-        ).pipe(
-          map((rows) =>
-            rows
-              .filter((row) => row.is_active !== false)
-              .map((row) => ({
-                id: this.normalizeId(row.id) ?? '',
-                name: this.pickString(row.name) ?? 'Unnamed Department'
-              }))
-              .filter((row) => row.id)
-          ),
-          switchMap((departments) => {
-            if (normalizedDepartmentId && !departments.some((department) => department.id === normalizedDepartmentId)) {
-              return throwError(() => new Error('Select a valid department for this workspace.'));
-            }
-
-            return this.getCollectionFieldNames('request_invites', context.token).pipe(
-              switchMap((fieldNames) => {
-                const payload = this.buildInviteCreatePayload({
-                  context,
-                  input: {
-                    ...input,
-                    email: normalizedEmail,
-                    member_role: normalizedRole,
-                    department: normalizedDepartmentId,
-                    note: normalizedNote
-                  },
-                  fieldNames
-                });
-                const endpoint = `${this.api}/items/request_invites`;
-
-                return this.http.post<{ data?: { id?: string | number } }>(
-                  endpoint,
-                  payload,
-                  {
-                    headers: this.headers(context.token),
-                    withCredentials: true
-                  }
-                ).pipe(
-                  map(() => void 0)
-                );
-              })
-            );
-          })
-        );
-
-      })
-    );
+    void input;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   resendInvite(inviteId: string): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const now = new Date();
-        const expiresAt = new Date(now.getTime());
-        expiresAt.setDate(expiresAt.getDate() + this.inviteExpiryDays);
-        return this.http.patch(
-          `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`,
-          {
-            status: 'sent',
-            sent_at: now.toISOString(),
-            expires_at: expiresAt.toISOString()
-          },
-          {
-            headers: this.headers(context.token),
-            withCredentials: true
-          }
-        ).pipe(map(() => void 0));
-      })
-    );
+    void inviteId;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   expireInvite(inviteId: string): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.patch(
-          `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`,
-          {
-            status: 'expired',
-            expires_at: new Date().toISOString()
-          },
-          {
-            headers: this.headers(context.token),
-            withCredentials: true
-          }
-        ).pipe(map(() => void 0))
-      )
-    );
+    void inviteId;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
   }
 
   revokeInvite(inviteId: string): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const endpoint = `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`;
-        const request = (status: string) =>
-          this.http.patch(
-            endpoint,
-            { status },
-            {
-              headers: this.headers(context.token),
-              withCredentials: true
-            }
-          ).pipe(map(() => void 0));
+    void inviteId;
+    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+  }
 
-        return request('cancelled').pipe(
-          catchError(() => request('revoked'))
-        );
-      })
-    );
+  private organizationWorkflowPrerequisiteMessage(): string {
+    return 'Coming next: controlled access workflow.';
   }
 
   private ensureScopedContext(): Observable<ScopedContext> {
@@ -1391,6 +1239,14 @@ export class OperationsAdminService {
       }),
       catchError((error) => throwError(() => error))
     );
+  }
+
+  private companyProfileFieldsForRole(role: ActiveMemberRole): string[] {
+    if (role === 'owner') {
+      return ['id', 'company_name', 'is_active', 'plan_code', 'billing_status', 'date_created', 'date_updated'];
+    }
+
+    return ['id', 'company_name'];
   }
 
   private queryCompanyMembersForCompanyPage(
@@ -1511,63 +1367,91 @@ export class OperationsAdminService {
   }
 
   private mapCompanyInviteRecord(row: RequestInviteRecord): CompanyInviteRecord {
-    const invitedByName = this.userLabel(row.requested_by_user);
-    const invitedByEmail = this.pickString((row.requested_by_user as Record<string, unknown> | null)?.['email']);
     return {
       id: this.normalizeId(row.id) ?? '',
       email: this.pickString(row.email),
       member_role: this.pickString(row.member_role),
       status: this.pickString(row.status),
-      sent_at: this.pickString(row.sent_at),
       expires_at: this.pickString(row.expires_at),
-      claimed_at: this.pickString(row.claimed_at),
       department_id: this.normalizeId(row.department),
-      department_name: this.departmentName(row.department),
-      invited_by_name: invitedByName,
-      invited_by_email: invitedByEmail
+      department_name: this.departmentName(row.department)
     };
   }
 
   private getActiveMembers(context: ScopedContext): Observable<WorkforceMemberRecord[]> {
+    if (context.activeRole === 'manager' && !context.activeDepartmentId) {
+      return throwError(() => new Error('Scoped data unavailable: manager account has no active department context.'));
+    }
+
     const filters = [
       ...this.scopeFilters(context, ['business_profile'], ['department']),
       { path: ['status'], operator: '_eq', value: 'active' }
     ];
 
-    const baseFields = [
+    const managerFields = [
       'id',
       'status',
       'member_role',
-      'employee_code',
-      'job_title',
-      'joined_at',
-      'deactivated_at',
-      'date_created',
-      'date_updated',
-      'business_profile',
-      'business_profile.id',
-      'business_profile.company_name',
-      'department',
-      'shift_template',
-      'shift_template.id',
-      'shift_template.name',
       'user.id',
       'user.first_name',
       'user.last_name',
-      'user.email',
-      'user.active_business_profile',
-      'user.active_department',
-      'user.active_member_role',
+      'department',
+      'employee_code',
+      'job_title',
       'last_scan_at',
       'last_risk_level',
       'last_readiness_score'
     ];
+
+    const baseFields = context.activeRole === 'manager'
+      ? managerFields
+      : [
+          'id',
+          'status',
+          'member_role',
+          'employee_code',
+          'job_title',
+          'joined_at',
+          'deactivated_at',
+          'date_created',
+          'date_updated',
+          'business_profile',
+          'business_profile.id',
+          'business_profile.company_name',
+          'department',
+          'shift_template',
+          'shift_template.id',
+          'shift_template.name',
+          'user.id',
+          'user.first_name',
+          'user.last_name',
+          'user.email',
+          'user.active_business_profile',
+          'user.active_department',
+          'user.active_member_role',
+          'last_scan_at',
+          'last_risk_level',
+          'last_readiness_score'
+        ];
 
     const optionalPresenceFields = [
       ...baseFields,
       'user.last_seen_at',
       'user.last_active_at'
     ];
+
+    if (context.activeRole === 'manager') {
+      return this.queryItemsStrict<WorkforceMemberRecord>(
+        'business_profile_members',
+        managerFields,
+        context.token,
+        {
+          filters,
+          sort: '-id',
+          limit: 500
+        }
+      );
+    }
 
     return this.queryItemsStrict<WorkforceMemberRecord>(
       'business_profile_members',
@@ -1595,205 +1479,131 @@ export class OperationsAdminService {
   }
 
   private getPendingInvites(context: ScopedContext): Observable<RequestInviteRecord[]> {
+    if (context.activeRole === 'manager') {
+      return of([] as RequestInviteRecord[]);
+    }
+
     const filters = [
-      ...this.scopeFilters(context, ['business_profile'], ['department']),
-      { path: ['claimed_at'], operator: '_null', value: 'true' },
-      { path: ['accepted_user'], operator: '_null', value: 'true' },
-      { path: ['token'], operator: '_nnull', value: 'true' }
+      ...this.scopeFilters(context, ['business_profile'], ['department'])
     ];
 
-    const expandedFields = [
-      'id',
-      'email',
-      'phone',
-      'status',
-      'token',
-      'sent_at',
-      'claimed_at',
-      'expires_at',
-      'requested_by_user',
-      'requested_by_user.id',
-      'requested_by_user.email',
-      'requested_by_user.first_name',
-      'requested_by_user.last_name',
-      'business_profile',
-      'business_profile.id',
-      'business_profile.company_name',
-      'member_role',
-      'department',
-      'accepted_user',
-      'accepted_user.id',
-      'accepted_user.email',
-      'accepted_user.first_name',
-      'accepted_user.last_name',
-      'invite_type',
-      'request'
-    ];
     const fallbackFields = [
       'id',
       'email',
       'status',
-      'token',
       'member_role',
       'invite_type',
-      'sent_at',
       'expires_at',
-      'claimed_at',
       'business_profile',
-      'department',
-      'requested_by_user',
-      'accepted_user',
-      'request'
+      'department'
     ];
 
     return this.queryItemsStrict<RequestInviteRecord>(
       'request_invites',
-      expandedFields,
+      fallbackFields,
       context.token,
       {
         filters,
-        sort: '-sent_at',
+        sort: '-id',
         limit: 300
       }
-    ).pipe(
-      catchError(() =>
-        this.queryItemsStrict<RequestInviteRecord>(
-          'request_invites',
-          fallbackFields,
-          context.token,
-          {
-            filters,
-            sort: '-sent_at',
-            limit: 300
-          }
-        )
-      )
     );
   }
 
   private getAcceptedInvitesForMembers(context: ScopedContext): Observable<RequestInviteRecord[]> {
+    if (context.activeRole === 'manager') {
+      return of([] as RequestInviteRecord[]);
+    }
+
     const filters = [
-      ...this.scopeFilters(context, ['business_profile'], ['department']),
-      { path: ['accepted_user'], operator: '_nnull', value: 'true' }
+      ...this.scopeFilters(context, ['business_profile'], ['department'])
     ];
 
-    const expandedFields = [
-      'id',
-      'email',
-      'phone',
-      'status',
-      'token',
-      'sent_at',
-      'claimed_at',
-      'expires_at',
-      'requested_by_user',
-      'requested_by_user.id',
-      'requested_by_user.email',
-      'requested_by_user.first_name',
-      'requested_by_user.last_name',
-      'business_profile',
-      'business_profile.id',
-      'business_profile.company_name',
-      'member_role',
-      'department',
-      'accepted_user',
-      'accepted_user.id',
-      'accepted_user.email',
-      'accepted_user.first_name',
-      'accepted_user.last_name',
-      'invite_type',
-      'request'
-    ];
     const fallbackFields = [
       'id',
       'email',
       'status',
-      'token',
       'member_role',
       'invite_type',
-      'sent_at',
       'expires_at',
-      'claimed_at',
       'business_profile',
-      'department',
-      'requested_by_user',
-      'accepted_user',
-      'request'
+      'department'
     ];
 
     return this.queryItemsStrict<RequestInviteRecord>(
       'request_invites',
-      expandedFields,
+      fallbackFields,
       context.token,
       {
         filters,
-        sort: '-sent_at',
+        sort: '-id',
         limit: 500
       }
-    ).pipe(
-      catchError(() =>
-        this.queryItemsStrict<RequestInviteRecord>(
-          'request_invites',
-          fallbackFields,
-          context.token,
-          {
-            filters,
-            sort: '-sent_at',
-            limit: 500
-          }
-        )
-      )
     );
   }
 
   private getScanRequestsForMembers(context: ScopedContext): Observable<ScanRequestRecord[]> {
+    if (context.activeRole === 'manager' && !context.activeDepartmentId) {
+      return throwError(() => new Error('Scoped data unavailable: manager account has no active department context.'));
+    }
+
     const filters = this.scopeFilters(context, ['business_profile'], ['department']);
 
     const expandedFields = [
       'id',
       'business_profile',
-      'scan_id',
-      'required_state',
-      'response_status',
-      'response_payload',
-      'timestamp',
-      'requested_for_user',
-      'requested_for_email',
-      'requested_for_phone',
-      'Target'
+      'department',
+      'requested_by_user',
+      'target_member',
+      'completed_scan',
+      'status',
+      'cancelled',
+      'request_type',
+      'requested_at',
+      'due_at',
+      'completed_at'
     ];
     const fallbackFields = [
       'id',
-      'business_profile',
-      'scan_id',
-      'required_state',
-      'response_status',
-      'timestamp',
-      'requested_for_user',
-      'requested_for_email',
-      'requested_for_phone',
-      'Target'
+      'department',
+      'status',
+      'request_type',
+      'requested_at',
+      'due_at'
     ];
 
+    if (context.activeRole === 'manager') {
+      return this.queryItemsStrict<ScanRequestRecord>(
+        'scan_requests',
+        fallbackFields,
+        context.token,
+        {
+          filters,
+          sort: '-requested_at',
+          limit: 800
+        }
+      ).pipe(map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))));
+    }
+
     return this.queryItemsStrict<ScanRequestRecord>(
-      'requests',
+      'scan_requests',
       expandedFields,
       context.token,
       {
         filters,
-        sort: '-timestamp',
+        sort: '-requested_at',
         limit: 800
       }
     ).pipe(
       map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))),
       catchError(() =>
         this.queryItemsStrict<ScanRequestRecord>(
-          'requests',
+          'scan_requests',
           fallbackFields,
           context.token,
           {
             filters,
-            sort: '-timestamp',
+            sort: '-requested_at',
             limit: 800
           }
         ).pipe(map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))))
@@ -1860,15 +1670,25 @@ export class OperationsAdminService {
   }
 
   private getActiveDepartmentsForWorkforce(context: ScopedContext): Observable<DepartmentOption[]> {
+    if (context.activeRole === 'manager' && !context.activeDepartmentId) {
+      return throwError(() => new Error('Scoped data unavailable: manager account has no active department context.'));
+    }
+
     return this.queryItems<DepartmentRecord>(
       'departments',
       ['id', 'name', 'is_active'],
       context.token,
       {
-        filters: [
-          { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
-          { path: ['is_active'], operator: '_eq', value: 'true' }
-        ],
+        filters: context.activeRole === 'manager'
+          ? [
+              { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
+              { path: ['id'], operator: '_eq', value: context.activeDepartmentId as string },
+              { path: ['is_active'], operator: '_eq', value: 'true' }
+            ]
+          : [
+              { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
+              { path: ['is_active'], operator: '_eq', value: 'true' }
+            ],
         sort: 'name',
         limit: 250
       }
@@ -1954,15 +1774,6 @@ export class OperationsAdminService {
       }
     }
 
-    const acceptedInviteByUserId = new Map<string, RequestInviteRecord>();
-    for (const invite of acceptedInvites ?? []) {
-      const acceptedUserId = this.normalizeId(invite.accepted_user);
-      if (!acceptedUserId) continue;
-      const current = acceptedInviteByUserId.get(acceptedUserId) ?? null;
-      if (!current || this.toTimestamp(invite.sent_at) >= this.toTimestamp(current.sent_at)) {
-        acceptedInviteByUserId.set(acceptedUserId, invite);
-      }
-    }
     const candidateInvites = [...(invites ?? []), ...(acceptedInvites ?? [])];
 
     const memberRows: WorkforceRosterRow[] = (members ?? []).map((member) => {
@@ -2003,15 +1814,20 @@ export class OperationsAdminService {
         : 'Presence unavailable';
       const firstName = this.pickString(user?.['first_name']) ?? this.pickString(directoryUser?.first_name);
       const lastName = this.pickString(user?.['last_name']) ?? this.pickString(directoryUser?.last_name);
-      const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
-      const profileIncomplete = !email || !userId;
+      const identity = formatWorkforceIdentity(
+        { id: userId, first_name: firstName, last_name: lastName },
+        email,
+        userId ? 'Identity unavailable' : 'Pending onboarding'
+      );
+      const identityState: WorkforceRosterRow['identity_state'] = identity.hasApprovedDisplayName
+        ? 'identified'
+        : userId
+          ? 'identity_unavailable'
+          : 'pending_onboarding';
+      const profileIncomplete = identityState !== 'identified';
       const departmentId = this.normalizeId(member.department);
 
-      const sourceInvite = userId ? acceptedInviteByUserId.get(userId) ?? null : null;
-      const invitedById = this.normalizeId(sourceInvite?.requested_by_user);
-      const invitedByUser = invitedById ? usersById.get(invitedById) ?? null : null;
-      const invitedByName =
-        formatUserName(invitedByUser ?? sourceInvite?.requested_by_user, '') || null;
+      const invitedByName = null;
       const linkedInvite = candidateInvites.find((invite) => {
         const inviteRole = this.normalizeMemberRole(invite.member_role);
         const memberRole = this.normalizeMemberRole(member.member_role);
@@ -2027,25 +1843,22 @@ export class OperationsAdminService {
       const linkedInviteRequesterUser = linkedInviteRequesterId ? usersById.get(linkedInviteRequesterId) ?? null : null;
       const linkedInviteRequestedBy = formatUserName(linkedInviteRequesterUser ?? linkedInvite?.requested_by_user, '') || null;
       const linkedInviteEmail = this.pickString(linkedInvite?.email);
-      const acceptedInviteEmail = this.pickString(sourceInvite?.email);
-      const resolvedEmail = email ?? linkedInviteEmail ?? acceptedInviteEmail ?? null;
-      const linkedInviteName = linkedInviteEmail?.split('@')[0]?.trim() || null;
-      const name = fullName || resolvedEmail || linkedInviteName || this.pickString(member.employee_code) || `Member #${memberId ?? ''}`;
+      const resolvedEmail = identity.email ?? linkedInviteEmail ?? null;
       const departmentName = resolveDepartmentName(
         departmentId,
         this.departmentName(member.department) ?? 'Unassigned'
       );
       const needsReviewReason = (() => {
         if (!member.user) {
-          return 'User relation missing';
+          return 'Membership has no linked user; pending onboarding record';
         }
         if (member.user && typeof member.user !== 'object') {
-          return 'User relation not readable';
+          return 'Linked user exists but Directus did not return first_name/last_name fields';
         }
-        if (!email) {
-          return 'Accepted invite did not link to user';
+        if (!identity.hasApprovedDisplayName) {
+          return identity.dataQualityIssue ?? 'Approved user display name unavailable';
         }
-        return 'User relation missing';
+        return null;
       })();
 
       if (profileIncomplete && !environment.production && memberId && !this.loggedIncompleteMemberIds.has(memberId)) {
@@ -2062,17 +1875,16 @@ export class OperationsAdminService {
         member_id: memberId,
         invite_id: null,
         user_id: userId,
-        name,
+        identity,
+        identity_state: identityState,
+        name: identity.displayName,
         email: resolvedEmail,
         member_role: this.normalizeMemberRole(member.member_role),
         department_id: departmentId,
         department_name: departmentName,
         status: this.normalizeText(member.status) || 'active',
         joined_at: this.pickString(member.joined_at),
-        sent_at: null,
         expires_at: null,
-        claimed_at: null,
-        invite_token: null,
         invite_phone: null,
         scan_status: scanStatus,
         todays_scan: hasScanToday,
@@ -2089,7 +1901,6 @@ export class OperationsAdminService {
         needs_review_reason: profileIncomplete ? needsReviewReason : null,
         linked_invite_email: this.pickString(linkedInvite?.email),
         linked_invite_status: this.pickString(linkedInvite?.status),
-        linked_invite_sent_at: this.pickString(linkedInvite?.sent_at),
         linked_invite_requested_by: linkedInviteRequestedBy,
         business_profile_id: this.normalizeId(member.business_profile),
         business_profile_name: this.pickString((member.business_profile as Record<string, unknown> | null)?.['company_name']) ?? null
@@ -2116,6 +1927,13 @@ export class OperationsAdminService {
         member_id: null,
         invite_id: inviteId,
         user_id: null,
+        identity: {
+          displayName: email || phone || 'Pending onboarding',
+          email,
+          hasApprovedDisplayName: Boolean(email || phone),
+          dataQualityIssue: email || phone ? null : 'Invite contact unavailable'
+        },
+        identity_state: 'pending_onboarding',
         name: email || phone || 'Invite contact unavailable',
         email,
         member_role: role,
@@ -2123,10 +1941,7 @@ export class OperationsAdminService {
         department_name: departmentName,
         status: this.normalizeText(invite.status) || 'pending',
         joined_at: null,
-        sent_at: this.pickString(invite.sent_at),
         expires_at: this.pickString(invite.expires_at),
-        claimed_at: this.pickString(invite.claimed_at),
-        invite_token: this.pickString(invite.token),
         invite_phone: phone,
         scan_status: 'not_applicable',
         todays_scan: false,
@@ -2143,7 +1958,6 @@ export class OperationsAdminService {
         needs_review_reason: null,
         linked_invite_email: null,
         linked_invite_status: null,
-        linked_invite_sent_at: null,
         linked_invite_requested_by: null,
         business_profile_id: this.normalizeId(invite.business_profile),
         business_profile_name: this.pickString((invite.business_profile as Record<string, unknown> | null)?.['company_name']) ?? null
@@ -2196,6 +2010,7 @@ export class OperationsAdminService {
           'Unassigned'
         );
         const cancelled = this.normalizeText(request.status) === 'cancelled';
+        const targetIdentity = matchedMember?.identity ?? formatWorkforceIdentity(targetUserRecord, targetUserEmail);
 
         return {
           id: requestId,
@@ -2208,7 +2023,8 @@ export class OperationsAdminService {
           department_id: departmentId,
           department_name: departmentName,
           target_member_id: targetMemberId,
-          target_member_name: matchedMember?.name || this.userLabel(targetUserRecord) || 'Assigned member',
+          target_identity: targetIdentity,
+          target_member_name: targetIdentity.displayName,
           target_user_id: targetUserId,
           target_user_email: targetUserEmail,
           requested_by_user_id: requestedByUserId,
@@ -2332,10 +2148,7 @@ export class OperationsAdminService {
         continue;
       }
 
-      const current = latestInviteByEmail.get(email);
-      const currentTimestamp = this.toTimestamp(current?.sent_at ?? null);
-      const nextTimestamp = this.toTimestamp(invite.sent_at ?? null);
-      if (!current || nextTimestamp >= currentTimestamp) {
+      if (!latestInviteByEmail.has(email)) {
         latestInviteByEmail.set(email, invite);
       }
     }
@@ -2382,7 +2195,6 @@ export class OperationsAdminService {
         department_alert_count: departmentId ? (openAlertsByDepartment.get(departmentId) ?? 0) : 0,
         pending_invite_id: this.normalizeId(invite?.id),
         pending_invite_status: invite?.status ?? null,
-        pending_invite_sent_at: invite?.sent_at ?? null,
         pending_invite_expires_at: invite?.expires_at ?? null,
         user_id: userId
       } satisfies MemberDirectoryRow;
@@ -2400,7 +2212,7 @@ export class OperationsAdminService {
         scanEligible: rows.filter((item) => item.scan_eligible).length,
         pendingInvites: (invites ?? []).filter((item) => {
           const normalizedStatus = this.normalizeText(item.status);
-          return ['pending', 'sent'].includes(normalizedStatus) && !item.claimed_at;
+          return ['pending', 'sent'].includes(normalizedStatus);
         }).length,
         managers: rows.filter((item) => this.isManagerRole(item.member_role)).length,
         inactive: rows.filter((item) => ['inactive', 'suspended'].includes(this.normalizeText(item.status))).length
@@ -2513,8 +2325,6 @@ export class OperationsAdminService {
         department_name: this.departmentName(invite.department),
         invite_type: invite.invite_type ?? null,
         status: invite.status ?? null,
-        sent_at: invite.sent_at ?? null,
-        claimed_at: invite.claimed_at ?? null,
         expires_at: invite.expires_at ?? null,
         claimed_member_id: claimedMember?.id ?? null,
         claimed_member_name: claimedMember?.name ?? null
@@ -2530,7 +2340,7 @@ export class OperationsAdminService {
       summary: {
         pending: rows.filter((item) => this.normalizeText(item.status) === 'pending').length,
         sent: rows.filter((item) => this.normalizeText(item.status) === 'sent').length,
-        claimed: rows.filter((item) => item.claimed_at || this.normalizeText(item.status) === 'claimed').length,
+        claimed: rows.filter((item) => this.normalizeText(item.status) === 'claimed').length,
         expired: rows.filter((item) => this.normalizeText(item.status) === 'expired').length
       }
     };
@@ -2671,8 +2481,8 @@ export class OperationsAdminService {
     }
 
     const url = `${this.api}/items/${collection}?${params.toString()}`;
-    if (collection === 'requests') {
-      console.log('[ScanRequestsDebug] final requests query URL', url);
+    if (collection === 'scan_requests') {
+      console.log('[ScanRequestsDebug] final scan_requests query URL', url);
     }
 
     return this.http.get<{ data?: T[] }>(
@@ -2685,7 +2495,7 @@ export class OperationsAdminService {
       timeout(15000),
       map((response) => {
         const rows = response.data ?? [];
-        if (collection === 'requests') {
+        if (collection === 'scan_requests') {
           console.log('[ScanRequestsDebug] raw API response count', Array.isArray(rows) ? rows.length : 0);
         }
         return rows;
@@ -2965,118 +2775,125 @@ export class OperationsAdminService {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
   }
 
-  private getCollectionFieldNames(collection: string, token: string): Observable<string[]> {
-    const cacheKey = collection.trim().toLowerCase();
-    const cached = this.collectionFieldCache.get(cacheKey);
-    if (cached?.length) {
-      return of(cached);
+  private buildCreateInvitePayload(input: CreateInviteInput, context: ScopedContext): CreateInvitePayload {
+    const actorUserId = this.normalizeId(context.company.userId ?? context.company.currentUser?.id);
+    if (!context.businessProfileId || !actorUserId) {
+      throw this.createInviteError('MISSING_COMPANY_CONTEXT', 'Active workspace context is missing.');
     }
 
-    const url = `${this.api}/fields/${encodeURIComponent(collection)}?limit=500&fields=field`;
-    return this.http.get<{ data?: Array<{ field?: string | null }> }>(
-      url,
-      {
-        headers: this.headers(token),
-        withCredentials: true
-      }
-    ).pipe(
-      map((response) =>
-        (response.data ?? [])
-          .map((row) => this.pickString(row.field)?.toLowerCase() ?? '')
-          .filter(Boolean)
-      ),
-      map((fields) => {
-        if (!fields.length) {
-          return this.defaultRequestInviteFieldNames();
-        }
-        this.collectionFieldCache.set(cacheKey, fields);
-        return fields;
-      }),
-      catchError(() => of(this.defaultRequestInviteFieldNames()))
-    );
-  }
+    const activeRole = this.normalizeMemberRole(context.activeRole);
+    if (activeRole !== 'owner' && activeRole !== 'hr') {
+      throw this.createInviteError('PERMISSION_DENIED', 'You do not have permission to send invites.');
+    }
 
-  private defaultRequestInviteFieldNames(): string[] {
-    return [
-      'email',
-      'invited_email',
-      'recipient_email',
-      'business_profile',
-      'member_role',
-      'department',
-      'requested_by_user',
-      'status',
-      'note',
-      'message',
-      'phone',
-      'invite_type'
-    ];
-  }
+    const email = this.pickString(input.email)?.trim().toLowerCase() ?? '';
+    const phone = this.pickString(input.phone)?.trim() ?? '';
+    if (!email && !phone) {
+      throw this.createInviteError('INVALID_EMAIL', 'Enter a valid email address.');
+    }
+    if (email && !this.isValidEmail(email)) {
+      throw this.createInviteError('INVALID_EMAIL', 'Enter a valid email address.');
+    }
 
-  private buildInviteCreatePayload(input: {
-    context: ScopedContext;
-    input: CreateInviteInput;
-    fieldNames: string[];
-  }): Record<string, unknown> {
-    const fieldSet = new Set((input.fieldNames ?? []).map((field) => this.normalizeText(field)));
-    const payload: Record<string, unknown> = {};
-    const choose = (keys: string[]): string | null => {
-      for (const key of keys) {
-        if (fieldSet.has(this.normalizeText(key))) {
-          return key;
-        }
-      }
-      return null;
+    const inviteType = email ? 'email' : 'phone';
+    const payload: CreateInvitePayload = {
+      status: 'pending',
+      requested_by_user: actorUserId,
+      business_profile: context.businessProfileId,
+      member_role: this.toBackendMemberRole(input.member_role ?? 'employee'),
+      invite_type: inviteType
     };
 
-    const emailField = choose(['email', 'invited_email', 'recipient_email']);
-    if (!emailField) {
-      throw new Error('request_invites email field is missing in Directus schema.');
+    if (email) {
+      payload.email = email;
     }
-    payload[emailField] = input.input.email ?? null;
-
-    const businessProfileField = choose(['business_profile']);
-    if (!businessProfileField) {
-      throw new Error('request_invites.business_profile field is missing in Directus schema.');
-    }
-    payload[businessProfileField] = input.context.businessProfileId;
-
-    const roleField = choose(['member_role']);
-    if (roleField) {
-      payload[roleField] = this.toBackendMemberRole(input.input.member_role);
+    if (!email && phone) {
+      payload.phone = phone;
     }
 
-    const departmentField = choose(['department']);
-    if (departmentField) {
-      payload[departmentField] = input.input.department ?? null;
-    }
-
-    const requesterField = choose(['requested_by_user']);
-    if (requesterField && input.context.company.userId) {
-      payload[requesterField] = input.context.company.userId;
-    }
-
-    const statusField = choose(['status']);
-    if (statusField) {
-      payload[statusField] = 'pending';
-    }
-
-    const noteField = choose(['note', 'message']);
-    if (noteField && input.input.note) {
-      payload[noteField] = input.input.note;
-    }
-
-    const phoneField = choose(['phone']);
-    if (phoneField && input.input.phone) {
-      payload[phoneField] = input.input.phone;
-    }
-
-    const inviteTypeField = choose(['invite_type']);
-    if (inviteTypeField && input.input.invite_type) {
-      payload[inviteTypeField] = input.input.invite_type;
+    const departmentId = this.normalizeId(input.department);
+    if (departmentId) {
+      payload.department = departmentId;
     }
 
     return payload;
+  }
+
+  private toCreateInviteError(error: unknown): Error {
+    const existing = this.inviteErrorCode(error);
+    if (existing) {
+      return error as Error;
+    }
+
+    if (error instanceof HttpErrorResponse) {
+      const detail = this.directusErrorText(error);
+      const normalized = detail.toLowerCase();
+
+      if (error.status === 0) {
+        return this.createInviteError('NETWORK_ERROR', 'Network error while sending invite.');
+      }
+      if (error.status === 401 || error.status === 403) {
+        return this.createInviteError('PERMISSION_DENIED', 'You do not have permission to send invites.');
+      }
+      if (error.status === 409 || normalized.includes('duplicate') || normalized.includes('already invited')) {
+        return this.createInviteError('DUPLICATE_INVITE', 'An active invite already exists for this person.');
+      }
+      if (normalized.includes('already a member')) {
+        return this.createInviteError('ALREADY_MEMBER', 'This person is already a member of this workspace.');
+      }
+      if (normalized.includes('email') && (normalized.includes('invalid') || normalized.includes('format'))) {
+        return this.createInviteError('INVALID_EMAIL', 'Enter a valid email address.');
+      }
+    }
+
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'WORKSPACE_CONTEXT_MISSING' || message === 'AUTH_REQUIRED' || message === 'AUTH_TOKEN_MISSING') {
+      return this.createInviteError('MISSING_COMPANY_CONTEXT', 'Active workspace context is missing.');
+    }
+
+    return this.createInviteError('SERVER_ERROR', 'Failed to send invite.');
+  }
+
+  private createInviteError(code: InviteErrorCode, message: string): Error {
+    const error = new Error(message) as Error & { code: InviteErrorCode };
+    error.code = code;
+    return error;
+  }
+
+  private inviteErrorCode(error: unknown): InviteErrorCode | null {
+    if (!error || typeof error !== 'object') {
+      return null;
+    }
+    const code = (error as { code?: unknown }).code;
+    if (
+      code === 'MISSING_COMPANY_CONTEXT' ||
+      code === 'INVALID_EMAIL' ||
+      code === 'DUPLICATE_INVITE' ||
+      code === 'ALREADY_MEMBER' ||
+      code === 'PERMISSION_DENIED' ||
+      code === 'NETWORK_ERROR' ||
+      code === 'SERVER_ERROR'
+    ) {
+      return code;
+    }
+    return null;
+  }
+
+  private directusErrorText(error: HttpErrorResponse): string {
+    const parts = [
+      error.error?.errors?.[0]?.extensions?.reason,
+      error.error?.errors?.[0]?.message,
+      error.error?.message,
+      error.message
+    ];
+    return parts
+      .map((part) => this.pickString(part))
+      .filter((part): part is string => Boolean(part))
+      .join(' ');
+  }
+
+  private inviteManagementFlowPrerequisiteMessage(): string {
+    return 'Invitation management requires a server-side invitation flow.';
   }
 
   private isRelationPermissionError(error: unknown): boolean {

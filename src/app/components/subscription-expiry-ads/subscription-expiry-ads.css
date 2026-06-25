@@ -1,131 +1,134 @@
-.expiry-ad-overlay {
+/* Non-blocking reminder banner (replaces the previous full-screen overlay).
+   It is a fixed, dismissible bar that never covers or blocks the dashboard. */
+.expiry-banner {
   position: fixed;
-  inset: 0;
-  z-index: 1280;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  background: rgba(2, 6, 23, 0.56);
-  backdrop-filter: blur(6px);
-}
-
-.expiry-ad-card {
-  width: min(520px, 100%);
-  border-radius: 22px;
-  border: 1px solid rgba(245, 196, 81, 0.44);
-  background:
-    radial-gradient(circle at 10% 0%, rgba(56, 189, 248, 0.18), transparent 55%),
-    radial-gradient(circle at 100% 0%, rgba(245, 196, 81, 0.2), transparent 40%),
-    linear-gradient(140deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.97));
-  box-shadow: 0 30px 70px rgba(2, 6, 23, 0.55);
-  color: #e2e8f0;
-  padding: 18px;
-}
-
-.ad-head {
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 1200;
+  width: min(720px, calc(100% - 32px));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-}
-
-.ad-pill {
-  border-radius: 999px;
-  border: 1px solid rgba(245, 196, 81, 0.52);
-  background: rgba(245, 196, 81, 0.13);
-  color: #fde68a;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-  padding: 5px 10px;
-}
-
-.icon-btn {
-  border: 0;
-  background: transparent;
-  color: #cbd5e1;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.icon-btn:hover {
-  background: rgba(148, 163, 184, 0.2);
-}
-
-.expiry-ad-card h3 {
-  margin: 10px 0 6px;
-  font-size: 24px;
-  line-height: 1.2;
-  color: #f8fafc;
-}
-
-.expiry-ad-card p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.5;
-  color: rgba(226, 232, 240, 0.92);
-}
-
-.ad-points {
-  margin-top: 14px;
-  display: grid;
-  gap: 8px;
-}
-
-.ad-points span {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(245, 196, 81, 0.4);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.16), transparent 55%),
+    linear-gradient(140deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.97));
+  box-shadow: 0 22px 50px rgba(2, 6, 23, 0.5);
   color: #e2e8f0;
+  animation: expiryBannerIn 0.3s ease;
 }
 
-.ad-points span::before {
-  content: '';
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: linear-gradient(130deg, #f5c451, #38bdf8);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.6);
+@keyframes expiryBannerIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
-.ad-actions {
-  margin-top: 16px;
+.expiry-banner__body {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  gap: 12px;
+  min-width: 0;
 }
 
-.pay-btn,
-.dismiss-btn {
+.expiry-banner__pill {
+  flex-shrink: 0;
   border-radius: 999px;
-  padding: 9px 14px;
-  font-size: 13px;
-  font-weight: 600;
+  border: 1px solid rgba(245, 196, 81, 0.5);
+  background: rgba(245, 196, 81, 0.13);
+  color: #fde68a;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 5px 9px;
+}
+
+.expiry-banner__copy {
+  min-width: 0;
+}
+
+.expiry-banner__copy strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.expiry-banner__copy p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.expiry-banner__actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.expiry-banner__pay,
+.expiry-banner__later {
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-size: 12.5px;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.pay-btn {
+.expiry-banner__pay {
   border: 0;
   background: linear-gradient(130deg, #f5c451, #f59e0b);
   color: #0f172a;
 }
 
-.dismiss-btn {
+.expiry-banner__later {
   border: 1px solid rgba(148, 163, 184, 0.4);
   background: transparent;
   color: #e2e8f0;
 }
 
+.expiry-banner__close {
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.expiry-banner__close:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expiry-banner {
+    animation: none;
+  }
+}
+
 @media (max-width: 640px) {
-  .expiry-ad-card {
-    padding: 16px;
+  .expiry-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
   }
 
-  .expiry-ad-card h3 {
-    font-size: 20px;
+  .expiry-banner__actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }

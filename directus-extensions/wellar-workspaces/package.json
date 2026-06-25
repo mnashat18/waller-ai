@@ -1,0 +1,19 @@
+{
+  "name": "directus-extension-wellar-workspaces",
+  "version": "1.0.0",
+  "description": "Wellar web workspace provisioning endpoint for Directus.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "directus-extension build"
+  },
+  "directus:extension": {
+    "type": "endpoint",
+    "path": "dist/index.js",
+    "source": "src/index.js",
+    "host": "^11.14.1"
+  },
+  "devDependencies": {
+    "@directus/extensions-sdk": "10.3.4"
+  }
+}

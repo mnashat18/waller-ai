@@ -3,9 +3,59 @@
     <span class="orbit orbit-a"></span>
     <span class="orbit orbit-b"></span>
     <span class="orbit orbit-c"></span>
+    <span class="public-signal public-signal--a"></span>
+    <span class="public-signal public-signal--b"></span>
+    <span class="public-signal public-signal--c"></span>
+    <span class="public-node public-node--a"></span>
+    <span class="public-node public-node--b"></span>
+    <span class="public-node public-node--c"></span>
     <span class="grid-mask"></span>
-    <canvas id="snow"></canvas>
   </div>
+
+  <header class="public-header">
+    <div class="public-header__inner">
+      <a routerLink="/" class="public-brand" aria-label="Wellar AI home" (click)="closeMobileMenu()">
+        <img class="public-brand__logo" src="assets/logo/app_icon.png" alt="Wellar app icon" />
+        <span>
+          <strong>Wellar AI</strong>
+          <small>Workforce operations</small>
+        </span>
+      </a>
+
+      <button
+        #menuTrigger
+        type="button"
+        class="public-menu-button"
+        aria-label="Toggle public navigation"
+        [attr.aria-expanded]="mobileMenuOpen"
+        aria-controls="public-nav"
+        (click)="toggleMobileMenu()">
+        <span></span>
+        <span></span>
+        <span></span>
+        <em>Menu</em>
+      </button>
+
+      <nav
+        id="public-nav"
+        class="public-nav"
+        [class.is-open]="mobileMenuOpen"
+        [attr.aria-hidden]="navHiddenFromAssistiveTechnology ? 'true' : null"
+        [attr.inert]="navInert"
+        aria-label="Public navigation">
+        <div class="public-nav__links">
+          <a routerLink="/" fragment="product" (click)="closeMobileMenu()">Product</a>
+          <a routerLink="/pricing" [class.is-active]="isActiveRoute('/pricing')" (click)="closeMobileMenu()">Plan &amp; Support</a>
+          <a routerLink="/download-app" [class.is-active]="isActiveRoute('/download-app')" (click)="closeMobileMenu()">Mobile Scan</a>
+          <a routerLink="/contact" [class.is-active]="isActiveRoute('/contact')" (click)="closeMobileMenu()">Contact</a>
+        </div>
+        <div class="public-nav__actions">
+          <a routerLink="/" [queryParams]="{ auth: 'login' }" class="public-nav__signin" (click)="closeMobileMenu()">Sign in</a>
+          <a routerLink="/" [queryParams]="{ auth: 'signup' }" class="public-nav__cta" (click)="closeMobileMenu()">Start Organization</a>
+        </div>
+      </nav>
+    </div>
+  </header>
 
   <main class="page-slot" [class.is-transitioning]="isTransitioning">
     <router-outlet></router-outlet>
@@ -29,9 +79,10 @@
       </div>
       <div>
         <h4>Product</h4>
-        <a routerLink="/pricing">Pricing</a>
+        <a routerLink="/" fragment="product">Product</a>
+        <a routerLink="/pricing">Plan &amp; Support</a>
         <a routerLink="/download-app">Mobile Scan</a>
-        <a routerLink="/signup">Get Started</a>
+        <a routerLink="/" [queryParams]="{ auth: 'signup' }">Start Organization</a>
       </div>
       <div>
         <h4>Company</h4>
@@ -46,6 +97,9 @@
         <a routerLink="/security">Security</a>
       </div>
     </div>
+    <p class="footer-note">
+      Enterprise Pilot and Managed Activation are coordinated with the Wellar AI account team.
+    </p>
     <div class="footer-bottom">
       (c) 2026 Wellar AI. All rights reserved.
     </div>

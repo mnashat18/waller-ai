@@ -1,7 +1,7 @@
 <div class="space-y-6">
   <app-page-action-bar>
     <div actionBarMeta>
-      <p class="text-sm font-semibold text-slate-950">Invites</p>
+      <p class="text-sm font-semibold text-slate-950">Invitations</p>
       <p class="mt-1 text-sm text-slate-500">
         Manage onboarding invitations, claim progress, and invite lifecycle actions.
       </p>
@@ -60,15 +60,15 @@
 
   <app-error-state
     *ngIf="!loading && errorMessage"
-    title="Invites page failed to load"
+    title="Invitations page failed to load"
     [message]="errorMessage"
     (retry)="refresh()">
   </app-error-state>
 
   <app-empty-state-cta
     *ngIf="!loading && !errorMessage && !pageData?.rows?.length"
-    title="No invites in this company"
-    message="The active business profile does not have any request_invites records yet."
+    title="No invitations in this organization"
+    message="The active organization does not have any invitations yet."
     ctaLabel="Refresh"
     ctaRoute="/app/invites">
   </app-empty-state-cta>
@@ -82,28 +82,28 @@
         <app-kpi-card
           label="Pending"
           [value]="pageData.summary.pending.toString()"
-          helper="Invites waiting to be delivered or claimed."
+          helper="Invitations waiting to be delivered or claimed."
           tone="warning"
           toneLabel="Pending">
         </app-kpi-card>
         <app-kpi-card
           label="Sent"
           [value]="pageData.summary.sent.toString()"
-          helper="Invites sent and still active."
+          helper="Invitations sent and still active."
           tone="success"
           toneLabel="Sent">
         </app-kpi-card>
         <app-kpi-card
           label="Claimed"
           [value]="pageData.summary.claimed.toString()"
-          helper="Invites that already resolved to a member."
+          helper="Invitations that already resolved to a member."
           tone="success"
           toneLabel="Claimed">
         </app-kpi-card>
         <app-kpi-card
           label="Expired"
           [value]="pageData.summary.expired.toString()"
-          helper="Invites that reached expiry before claim."
+          helper="Invitations that reached expiry before claim."
           tone="neutral"
           toneLabel="Expired">
         </app-kpi-card>
@@ -113,13 +113,13 @@
     <app-dashboard-section
       eyebrow="Queue"
       title="Invite Queue"
-      description="Review onboarding request_invites and take lifecycle actions.">
+      description="Review onboarding invitations and take lifecycle actions.">
       <app-table-shell>
         <div tableHeader>
           <div>
-            <p class="text-sm font-semibold text-slate-950">Scoped Invites</p>
+            <p class="text-sm font-semibold text-slate-950">Scoped Invitations</p>
             <p class="mt-1 text-sm text-slate-500">
-              {{ filteredRows.length }} of {{ pageData.rows.length }} invites shown in the current filter.
+              {{ filteredRows.length }} of {{ pageData.rows.length }} invitations shown in the current filter.
             </p>
           </div>
         </div>
@@ -128,12 +128,10 @@
           <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
             <tr>
               <th class="px-5 py-3">Recipient</th>
-              <th class="px-5 py-3">Role</th>
+              <th class="px-5 py-3">Access Level</th>
               <th class="px-5 py-3">Department</th>
               <th class="px-5 py-3">Invite Type</th>
               <th class="px-5 py-3">Status</th>
-              <th class="px-5 py-3">Sent At</th>
-              <th class="px-5 py-3">Claimed At</th>
               <th class="px-5 py-3">Expires At</th>
               <th class="px-5 py-3">Actions</th>
             </tr>
@@ -151,20 +149,6 @@
               <td class="px-5 py-4">{{ row.invite_type || 'member_onboarding' }}</td>
               <td class="px-5 py-4">
                 <app-status-badge [status]="row.status"></app-status-badge>
-              </td>
-              <td class="px-5 py-4">{{ row.sent_at ? (row.sent_at | date: 'yyyy-MM-dd HH:mm') : 'Not sent' }}</td>
-              <td class="px-5 py-4">
-                <div *ngIf="row.claimed_at; else notClaimed">
-                  <p>{{ row.claimed_at | date: 'yyyy-MM-dd HH:mm' }}</p>
-                  <button
-                    *ngIf="row.claimed_member_id"
-                    type="button"
-                    (click)="openClaimedMember(row)"
-                    class="mt-1 text-xs font-medium text-slate-900">
-                    View Claimed Member
-                  </button>
-                </div>
-                <ng-template #notClaimed>Not claimed</ng-template>
               </td>
               <td class="px-5 py-4">{{ row.expires_at ? (row.expires_at | date: 'yyyy-MM-dd HH:mm') : 'No expiry' }}</td>
               <td class="px-5 py-4">
@@ -207,7 +191,7 @@
           <input [(ngModel)]="inviteForm.phone" name="inviteCreatePhone" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm" />
         </label>
         <label class="grid gap-2 text-sm font-medium text-slate-700">
-          Member Role
+          Access Level
           <select [(ngModel)]="inviteForm.member_role" name="inviteCreateRole" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
             <option value="employee">Employee</option>
             <option value="manager">Manager</option>

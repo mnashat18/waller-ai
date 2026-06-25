@@ -7,7 +7,6 @@ import { environment } from '../../environments/environment';
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { AdminTokenService } from './admin-token';
 import { AuthService } from './auth';
-import { BusinessCenterService } from './business-center.service';
 import { CompanyContextService } from '../core/context/company-context.service';
 import {
   formatDepartment,
@@ -251,7 +250,6 @@ export class OperationalDashboardService {
     private http: HttpClient,
     private auth: AuthService,
     private adminTokens: AdminTokenService,
-    private businessCenter: BusinessCenterService,
     private companyContext: CompanyContextService
   ) {}
 
@@ -381,24 +379,27 @@ export class OperationalDashboardService {
                     departmentFilterPath: ['department']
                   }, token, 'Alerts could not be loaded.'),
                   requests: this.querySection<RequestRecord>({
-                    collection: 'requests',
+                    collection: 'scan_requests',
                     fields: [
                       'id',
                       'business_profile',
-                      'scan_id',
-                      'required_state',
-                      'response_status',
-                      'response_payload',
-                      'timestamp',
-                      'requested_for_user',
-                      'requested_for_email',
-                      'requested_for_phone',
-                      'Target'
+                      'department',
+                      'requested_by_user',
+                      'target_member',
+                      'completed_scan',
+                      'status',
+                      'cancelled',
+                      'request_type',
+                      'requested_at',
+                      'due_at',
+                      'completed_at'
                     ],
                     limit: 80,
-                    sort: '-timestamp',
+                    sort: '-requested_at',
                     businessProfileId: resolvedBusinessProfileId,
                     businessProfileFilterPath: ['business_profile'],
+                    departmentId: resolvedDepartmentId,
+                    departmentFilterPath: ['department']
                   }, token, 'Scan requests could not be loaded.')
                 }).pipe(
                   switchMap((sources) => {
@@ -453,8 +454,7 @@ export class OperationalDashboardService {
     departmentId: string | null,
     companyName: string | null
   ): OperationalDashboardViewModel {
-    const profile = this.businessCenter.getCachedHubAccessState()?.profile ?? null;
-    const timezone = profile?.timezone?.trim() || null;
+    const timezone = null;
     const departmentMap = this.buildDepartmentMap(sources.departments.items);
     const member = this.findCurrentMember(sources.members.items, userId, departmentMap, sources.departments.error);
     const memberMap = this.buildMemberMap(sources.members.items, departmentMap, sources.departments.error);
@@ -587,7 +587,7 @@ export class OperationalDashboardService {
           : 'Dashboard data is scoped to the active business profile.'
     };
 
-    const companyNameResolved = companyName?.trim() || profile?.company_name?.trim() || 'Active company';
+    const companyNameResolved = companyName?.trim() || context.activeBusinessProfileName?.trim() || 'Active company';
 
     return {
       company: {
@@ -628,7 +628,7 @@ export class OperationalDashboardService {
   }
 
   private querySection<T>(config: QueryConfig, token: string, fallbackError: string): Observable<DashboardSectionState<T>> {
-    if (config.collection === 'requests') {
+    if (config.collection === 'scan_requests') {
       return this.queryRequestsSection<T>(config, token, fallbackError);
     }
     return this.querySectionSingle<T>(config, token, fallbackError);
@@ -642,15 +642,16 @@ export class OperationalDashboardService {
         fields: [
           'id',
           'business_profile',
-          'scan_id',
-          'required_state',
-          'response_status',
-          'response_payload',
-          'timestamp',
-          'requested_for_user',
-          'requested_for_email',
-          'requested_for_phone',
-          'Target'
+          'department',
+          'requested_by_user',
+          'target_member',
+          'completed_scan',
+          'status',
+          'cancelled',
+          'request_type',
+          'requested_at',
+          'due_at',
+          'completed_at'
         ]
       },
       {
@@ -658,14 +659,11 @@ export class OperationalDashboardService {
         fields: [
           'id',
           'business_profile',
-          'scan_id',
-          'required_state',
-          'response_status',
-          'timestamp',
-          'requested_for_user',
-          'requested_for_email',
-          'requested_for_phone',
-          'Target'
+          'target_member',
+          'requested_by_user',
+          'status',
+          'request_type',
+          'requested_at'
         ]
       }
     ];

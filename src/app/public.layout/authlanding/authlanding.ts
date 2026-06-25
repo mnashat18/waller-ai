@@ -1,11 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { Component, AfterViewInit, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, AfterViewInit, OnDestroy, OnInit, HostListener } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../services/auth';
 import { of, Subscription } from 'rxjs';
 import { catchError, filter, map, switchMap, timeout } from 'rxjs/operators';
-import { BusinessCenterService } from '../../services/business-center.service';
 import { InviteService } from '../../services/invites';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 
@@ -19,22 +18,48 @@ import { PostLoginRoutingService } from '../../services/post-login-routing.servi
 export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   private readonly authTimeoutMs = 20000;
 
-  texts = [
-    'Enterprise wellness intelligence for every team.',
-    'Daily mobile scans with real-time alerts.',
-    'Operational risk insights for managers.',
-    'Secure dashboards for clinics and factories.',
-    'New users unlock 14 days of Business after completing setup.',
-    'Activate Admin or Business to scale.'
+  presentationStates = [
+    {
+      shortLabel: 'Scope',
+      label: 'Organization Scope',
+      kicker: 'Define the operating frame',
+      title: 'Start with the team structure.',
+      body: 'Align Organization, Company, and Department context before teams coordinate daily workforce operations.'
+    },
+    {
+      shortLabel: 'Requests',
+      label: 'Scan Requests',
+      kicker: 'Coordinate the next step',
+      title: 'Keep requests moving.',
+      body: 'Create a clear web workflow for coordinating Scan Requests and follow-up across operational teams.'
+    },
+    {
+      shortLabel: 'Alerts',
+      label: 'Alerts',
+      kicker: 'Review what needs attention',
+      title: 'See returned alerts in one inbox.',
+      body: 'Bring operational alert visibility into a focused web surface for review and follow-up.'
+    },
+    {
+      shortLabel: 'Reports',
+      label: 'Compliance & Reports',
+      kicker: 'Close the loop',
+      title: 'Track coverage and reporting.',
+      body: 'Review Compliance coverage and reporting surfaces as part of the same operational rhythm.'
+    }
   ];
 
-  showAuthModal = false;
-  authMode: 'signup' | 'login' = 'signup';
+  activePresentationIndex = 0;
+  presentationProgress = 0;
+  authMode: 'signup' | 'login' | null = null;
   submitting = false;
+  resolvingOrganizationAccess = false;
   feedback = '';
   inviteMode = false;
   showSignupPassword = false;
   showLoginPassword = false;
+  signupEmailTouched = false;
+  loginEmailTouched = false;
 
   signup = {
     firstName: '',
@@ -49,40 +74,47 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   };
 
   private routeSub?: Subscription;
-  private textRotationInterval: ReturnType<typeof setInterval> | null = null;
-  private textRotationSwapTimer: ReturnType<typeof setTimeout> | null = null;
+  private authQuerySub?: Subscription;
+  private presentationTimer: ReturnType<typeof setInterval> | null = null;
+  private presentationProgressTimer: ReturnType<typeof setInterval> | null = null;
   private revealObserver: IntersectionObserver | null = null;
 
   constructor(
     private auth: AuthService,
-    private businessCenter: BusinessCenterService,
     private router: Router,
     private route: ActivatedRoute,
     private invites: InviteService,
-    private postLoginRouting: PostLoginRoutingService
+    private postLoginRouting: PostLoginRoutingService,
+    private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit() {
-    this.applyRouteAuthMode();
+    this.authQuerySub = this.route.queryParamMap.subscribe(() => {
+      this.applyRouteAuthMode();
+    });
     this.routeSub = this.router.events
       .pipe(filter(event => event instanceof NavigationEnd))
-      .subscribe(() => this.applyRouteAuthMode());
+      .subscribe(() => {
+        this.focusProductFragment();
+      });
   }
 
   ngAfterViewInit() {
-    this.startTextRotation();
+    this.startPresentationRotation();
     this.setupReveal();
+    setTimeout(() => this.focusProductFragment(), 0);
   }
 
   ngOnDestroy() {
     this.routeSub?.unsubscribe();
-    if (this.textRotationInterval) {
-      clearInterval(this.textRotationInterval);
-      this.textRotationInterval = null;
+    this.authQuerySub?.unsubscribe();
+    if (this.presentationTimer) {
+      clearInterval(this.presentationTimer);
+      this.presentationTimer = null;
     }
-    if (this.textRotationSwapTimer) {
-      clearTimeout(this.textRotationSwapTimer);
-      this.textRotationSwapTimer = null;
+    if (this.presentationProgressTimer) {
+      clearInterval(this.presentationProgressTimer);
+      this.presentationProgressTimer = null;
     }
     if (this.revealObserver) {
       this.revealObserver.disconnect();
@@ -90,24 +122,116 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     }
   }
 
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.showAuthModal && !this.authBusy) {
+      this.closeAuth();
+    }
+  }
+
+  get showAuthModal(): boolean {
+    return this.authMode === 'signup' || this.authMode === 'login';
+  }
+
+  get authBusy(): boolean {
+    return this.submitting || this.resolvingOrganizationAccess;
+  }
+
   openAuth(mode: 'signup' | 'login' = 'signup') {
     this.authMode = mode;
-    this.showAuthModal = true;
     this.feedback = '';
+    this.resolvingOrganizationAccess = false;
+    this.focusFirstField();
+  }
+
+  private isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value ?? '').trim());
+  }
+
+  get signupEmailInvalid(): boolean {
+    return (
+      this.signupEmailTouched &&
+      this.signup.email.trim().length > 0 &&
+      !this.isValidEmail(this.signup.email)
+    );
+  }
+
+  get loginEmailInvalid(): boolean {
+    return (
+      this.loginEmailTouched &&
+      this.login.email.trim().length > 0 &&
+      !this.isValidEmail(this.login.email)
+    );
+  }
+
+  get passwordStrength(): { score: number; label: string } {
+    const pw = this.signup.password ?? '';
+    if (!pw.length) {
+      return { score: 0, label: '' };
+    }
+
+    let score = 0;
+    if (pw.length >= 8) score += 1;
+    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score += 1;
+    if (/\d/.test(pw)) score += 1;
+    if (/[^A-Za-z0-9]/.test(pw)) score += 1;
+
+    const labels = ['Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+    return { score, label: labels[score] };
+  }
+
+  get signupFormValid(): boolean {
+    return this.isValidEmail(this.signup.email) && this.signup.password.trim().length > 0;
+  }
+
+  get loginFormValid(): boolean {
+    return this.isValidEmail(this.login.email) && this.login.password.trim().length > 0;
+  }
+
+  get activePresentation() {
+    return this.presentationStates[this.activePresentationIndex] ?? this.presentationStates[0];
+  }
+
+  selectPresentationState(index: number): void {
+    if (index < 0 || index >= this.presentationStates.length) {
+      return;
+    }
+    this.activePresentationIndex = index;
+    this.presentationProgress = 0;
+    this.cdr.detectChanges();
+    this.restartPresentationRotation();
+  }
+
+  private focusFirstField(): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    setTimeout(() => {
+      const input = document.querySelector('.auth-card input') as HTMLInputElement | null;
+      input?.focus();
+    }, 60);
   }
 
   closeAuth(navigateHome = true) {
-    this.showAuthModal = false;
+    this.authMode = null;
     this.feedback = '';
     this.submitting = false;
+    this.resolvingOrganizationAccess = false;
     if (navigateHome && this.isAuthRoute()) {
-      this.router.navigateByUrl('/');
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { auth: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true
+      });
     }
   }
 
   switchAuth(mode: 'signup' | 'login') {
     this.authMode = mode;
     this.feedback = '';
+    this.resolvingOrganizationAccess = false;
+    this.focusFirstField();
   }
 
   toggleSignupPasswordVisibility() {
@@ -119,7 +243,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   }
 
   submitSignup() {
-    if (this.submitting) {
+    if (this.authBusy) {
       return;
     }
 
@@ -139,14 +263,11 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         this.feedback = 'Account created. Signing you in...';
         return this.auth.login(email, password).pipe(
           timeout(this.authTimeoutMs),
-          switchMap((loginResult) =>
-            this.businessCenter.hasRequestForEmail(email).pipe(
-              map((hasRequest) => ({
-                loginResult,
-                hasRequest
-              }))
-            )
-          ),
+          // Legacy old-`requests` pending-request check removed.
+          map((loginResult) => ({
+            loginResult,
+            hasRequest: false
+          })),
           catchError((err) => {
             this.authMode = 'login';
             this.login.email = email;
@@ -167,10 +288,10 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       }
 
       this.submitting = false;
-      this.closeAuth(false);
 
       const inviteToken = this.resolveInviteTokenFromContext();
       if (inviteToken) {
+        this.closeAuth(false);
         await this.router.navigate(['/invites/claim'], {
           queryParams: { token: inviteToken },
           replaceUrl: true
@@ -178,35 +299,19 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         return;
       }
 
-      const nextRoute = await this.postLoginRouting.resolveDestination();
-      const hasActiveWorkspace = this.hasActiveWorkspaceContext();
-      const shouldSkipRequestWelcome =
-        this.inviteMode ||
-        hasActiveWorkspace ||
-        (nextRoute && nextRoute !== '/app/workspace-access');
-
-      if (shouldSkipRequestWelcome) {
-        await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
-        return;
-      }
-
-      const postAuthRedirect = this.auth.consumePostAuthRedirect('/dashboard');
-      this.router.navigate(['/request-welcome'], {
-        queryParams: {
-          hasRequest: result.hasRequest ? '1' : '0',
-          email,
-          next: postAuthRedirect
-        }
-      });
+      this.closeAuth(false);
+      const nextRoute = await this.resolvePostLoginDestinationOrShowAccessError();
+      await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
     });
   }
 
   submitLogin() {
-    if (this.submitting) {
+    if (this.authBusy) {
       return;
     }
 
     this.submitting = true;
+    this.resolvingOrganizationAccess = false;
     this.feedback = 'Signing you in...';
     this.auth.login(this.login.email.trim(), this.login.password).pipe(
       timeout(this.authTimeoutMs),
@@ -221,10 +326,10 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       }
 
       this.submitting = false;
-      this.closeAuth(false);
 
       const inviteToken = this.resolveInviteTokenFromContext();
       if (inviteToken) {
+        this.closeAuth(false);
         await this.router.navigate(['/invites/claim'], {
           queryParams: { token: inviteToken },
           replaceUrl: true
@@ -232,7 +337,12 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         return;
       }
 
-      const nextRoute = await this.postLoginRouting.resolveDestination();
+      const nextRoute = await this.resolvePostLoginDestinationOrShowAccessError();
+      if (!nextRoute) {
+        return;
+      }
+
+      this.closeAuth(false);
       await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
     });
   }
@@ -262,6 +372,32 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
     if (mode === 'signup' || mode === 'login') {
       this.openAuth(mode);
+      return;
+    }
+
+    if (!this.hasInviteContext()) {
+      this.authMode = null;
+      this.feedback = '';
+      this.resolvingOrganizationAccess = false;
+    }
+  }
+
+  private async resolvePostLoginDestinationOrShowAccessError(): Promise<string | null> {
+    this.resolvingOrganizationAccess = true;
+    this.feedback = 'Preparing your organization access...';
+    this.cdr.detectChanges();
+
+    try {
+      const nextRoute = await this.postLoginRouting.resolveDestination();
+      this.resolvingOrganizationAccess = false;
+      this.feedback = '';
+      this.cdr.detectChanges();
+      return nextRoute;
+    } catch {
+      this.resolvingOrganizationAccess = false;
+      this.feedback = '';
+      this.cdr.detectChanges();
+      return '/app/workspace-access';
     }
   }
 
@@ -282,7 +418,8 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
     if (inviteToken) {
       try {
-        localStorage.setItem('pending_invite_token', inviteToken);
+        sessionStorage.setItem('pending_invite_token', inviteToken);
+        localStorage.removeItem('pending_invite_token');
       } catch {
         // ignore storage errors
       }
@@ -291,14 +428,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     }
 
     this.inviteMode = Boolean(inviteFlag || inviteToken || this.invites.getPendingInviteToken());
-
-    if (inviteToken && this.auth.isLoggedIn()) {
-      void this.router.navigate(['/invites/claim'], {
-        queryParams: { token: inviteToken },
-        replaceUrl: true
-      });
-      return;
-    }
 
     if (inviteFlag || inviteToken) {
       const requestedMode = (this.route.snapshot.queryParamMap.get('auth') ?? '').trim().toLowerCase();
@@ -334,17 +463,20 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     return this.invites.getPendingInviteToken();
   }
 
-  private hasActiveWorkspaceContext(): boolean {
-    if (typeof localStorage === 'undefined') {
-      return false;
+  private focusProductFragment(): void {
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      return;
     }
-
-    const activeBusinessProfileId =
-      localStorage.getItem('active_business_profile_id')?.trim() ??
-      localStorage.getItem('active_business_profile')?.trim() ??
-      '';
-    const activeRole = (localStorage.getItem('active_member_role') ?? '').trim().toLowerCase();
-    return Boolean(activeBusinessProfileId && activeRole);
+    if (this.route.snapshot.fragment !== 'product') {
+      return;
+    }
+    const product = document.getElementById('product');
+    if (!product) {
+      return;
+    }
+    const reduceMotion = this.prefersReducedMotion();
+    product.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    product.focus({ preventScroll: true });
   }
 
   private resolveSignupError(err: any): string {
@@ -404,38 +536,59 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     return 'Account created successfully. Please log in to continue.';
   }
 
-  /* ===== TEXT ROTATION ===== */
-  startTextRotation() {
-    const el = document.getElementById('rotating-text');
-    if (!el) {
+  startPresentationRotation() {
+    if (typeof window === 'undefined') {
       return;
     }
 
-    if (this.textRotationInterval) {
-      clearInterval(this.textRotationInterval);
-      this.textRotationInterval = null;
-    }
-    if (this.textRotationSwapTimer) {
-      clearTimeout(this.textRotationSwapTimer);
-      this.textRotationSwapTimer = null;
+    const reduceMotion = this.prefersReducedMotion();
+    if (reduceMotion) {
+      this.presentationProgress = 0;
+      return;
     }
 
-    let index = 0;
+    this.restartPresentationRotation();
+  }
 
-    const changeText = () => {
-      el.classList.remove('show');
-      if (this.textRotationSwapTimer) {
-        clearTimeout(this.textRotationSwapTimer);
-      }
-      this.textRotationSwapTimer = setTimeout(() => {
-        el.textContent = this.texts[index];
-        el.classList.add('show');
-        index = (index + 1) % this.texts.length;
-      }, 400);
-    };
+  private restartPresentationRotation(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
 
-    changeText();
-    this.textRotationInterval = setInterval(changeText, 3000);
+    const reduceMotion = this.prefersReducedMotion();
+    if (reduceMotion) {
+      return;
+    }
+
+    if (this.presentationTimer) {
+      clearInterval(this.presentationTimer);
+    }
+    if (this.presentationProgressTimer) {
+      clearInterval(this.presentationProgressTimer);
+    }
+
+    const intervalMs = 5000;
+    const progressStepMs = 100;
+    this.presentationProgress = 0;
+
+    this.presentationProgressTimer = setInterval(() => {
+      this.presentationProgress = Math.min(100, this.presentationProgress + (progressStepMs / intervalMs) * 100);
+      this.cdr.detectChanges();
+    }, progressStepMs);
+
+    this.presentationTimer = setInterval(() => {
+      this.activePresentationIndex = (this.activePresentationIndex + 1) % this.presentationStates.length;
+      this.presentationProgress = 0;
+      this.cdr.detectChanges();
+    }, intervalMs);
+  }
+
+  private prefersReducedMotion(): boolean {
+    return (
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
   }
 
   setupReveal() {
@@ -444,6 +597,16 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     }
 
     const elements = Array.from(document.querySelectorAll('.reveal')) as HTMLElement[];
+    const reduceMotion = this.prefersReducedMotion();
+
+    if (reduceMotion) {
+      elements.forEach((el) => {
+        el.classList.add('visible');
+        el.style.transitionDelay = '0ms';
+      });
+      return;
+    }
+
     if (!('IntersectionObserver' in window)) {
       elements.forEach((el) => el.classList.add('visible'));
       return;
@@ -467,7 +630,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     );
 
     elements.forEach((el, index) => {
-      el.style.transitionDelay = `${Math.min(index * 90, 450)}ms`;
+      el.style.transitionDelay = `${Math.min(index * 70, 280)}ms`;
       this.revealObserver?.observe(el);
     });
   }

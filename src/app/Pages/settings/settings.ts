@@ -1,15 +1,20 @@
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, HostListener, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { timeout } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
 import { CompanyContextService, type ActiveMembershipContext } from '../../core/context/company-context.service';
 import { AuthService } from '../../services/auth';
-import { BusinessCenterService } from '../../services/business-center.service';
+import {
+  WorkspaceContextApiError,
+  WorkspaceContextApiService,
+  type WorkspaceContextInvitation,
+  type WorkspaceContextMembership,
+  type WorkspaceContextPayload
+} from '../../services/workspace-context-api.service';
 
 const PREF_KEYS = {
   reduceMotion: 'wellar_ui_reduce_motion_v1',
@@ -66,70 +71,12 @@ type AuthSessionUser = {
   role?: string | { id?: string | null; name?: string | null } | null;
 };
 
-type MembershipRow = {
-  id?: string | number | null;
-  status?: string | null;
-  member_role?: string | null;
-  user?: string | number | null;
-  business_profile?:
-    | string
-    | number
-    | {
-        id?: string | number | null;
-        company_name?: string | null;
-        is_active?: boolean | null;
-        plan_code?: string | null;
-        billing_status?: string | null;
-        date_created?: string | null;
-        date_updated?: string | null;
-      }
-    | null;
-  department?:
-    | string
-    | number
-    | {
-        id?: string | number | null;
-        name?: string | null;
-      }
-    | null;
-};
-
-type InviteRow = {
-  id?: string | number | null;
-  email?: string | null;
-  member_role?: string | null;
-  status?: string | null;
-  sent_at?: string | null;
-  claimed_at?: string | null;
-  department?:
-    | string
-    | number
-    | {
-        id?: string | number | null;
-        name?: string | null;
-      }
-    | null;
-  requested_by_user?:
-    | string
-    | number
-    | {
-        id?: string | number | null;
-        first_name?: string | null;
-        last_name?: string | null;
-        email?: string | null;
-      }
-    | null;
-};
-
 type SettingsInvite = {
   id: string;
   email: string;
   role: string;
   status: string;
-  sentAt: string | null;
-  claimedAt: string | null;
   departmentName: string | null;
-  invitedBy: string;
 };
 
 type SettingsMembership = {
@@ -176,14 +123,14 @@ type SettingsViewState = 'loading' | 'ready' | 'empty' | 'forbidden' | 'error';
 @Component({
   selector: 'app-settings-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, DatePipe],
+  imports: [CommonModule, FormsModule, RouterModule],
   templateUrl: './settings.html',
   styleUrl: './settings.css'
 })
 export class SettingsPageComponent implements OnInit {
   readonly tabs: Array<{ id: SettingsTabId; label: string; icon: string }> = [
     { id: 'profile', label: 'Profile', icon: 'user' },
-    { id: 'workspace', label: 'Workspace', icon: 'workspace' },
+    { id: 'workspace', label: 'Organization', icon: 'workspace' },
     { id: 'preferences', label: 'Preferences', icon: 'preferences' },
     { id: 'security', label: 'Security', icon: 'security' }
   ];
@@ -239,7 +186,7 @@ export class SettingsPageComponent implements OnInit {
     private auth: AuthService,
     private router: Router,
     private companyContext: CompanyContextService,
-    private businessCenter: BusinessCenterService
+    private workspaceContextApi: WorkspaceContextApiService
   ) {}
 
   ngOnInit(): void {
@@ -278,7 +225,7 @@ export class SettingsPageComponent implements OnInit {
   }
 
   currentWorkspaceName(): string {
-    return this.activeMembership?.businessProfile.companyName ?? 'No active workspace';
+    return this.activeMembership?.businessProfile.companyName ?? 'No active organization';
   }
 
   displayName(): string {
@@ -311,16 +258,20 @@ export class SettingsPageComponent implements OnInit {
   }
 
   scopeLabel(): string {
-    return this.activeMembership?.department ? 'Department scope' : 'Company-wide scope';
+    return this.activeMembership?.department ? 'Department scope' : 'Organization-wide scope';
   }
 
   scopeDetail(): string {
-    return this.activeMembership?.department?.name ?? 'Company-wide scope';
+    return this.activeMembership?.department?.name ?? 'Organization-wide scope';
   }
 
   membershipStatusLabel(): string {
     const status = (this.activeMembership?.status ?? '').toLowerCase();
     return status === 'active' ? 'Active' : status || 'Unknown';
+  }
+
+  isOwnerAccess(): boolean {
+    return this.resolveAccessRole(this.activeMembership?.memberRoleRaw ?? this.user?.active_member_role) === 'owner';
   }
 
   activeDirectusRoleLabel(): string {
@@ -430,21 +381,20 @@ export class SettingsPageComponent implements OnInit {
     }
 
     this.switchingWorkspace = true;
-    this.switchingMessage = 'Switching workspace...';
+    this.switchingMessage = 'Switching organization...';
 
     try {
-      await this.persistActiveWorkspace(selected, token);
-      await this.activateMembershipInContext(selected);
-      this.activeMembership = selected;
+      await firstValueFrom(this.workspaceContextApi.switchMembership(selected.id));
+      await this.loadSettings(true, false);
       this.workspaceDropdownOpen = false;
-      this.pushToast('success', 'Workspace switched successfully.');
+      this.pushToast('success', 'Organization switched successfully.');
       await this.router.navigateByUrl('/app/dashboard');
-    } catch {
-      if (previous) {
-        await this.activateMembershipInContext(previous).catch(() => void 0);
-        this.activeMembership = previous;
-      }
-      this.pushToast('error', 'Workspace switch failed. Your previous workspace is still active.');
+    } catch (error) {
+      this.activeMembership = previous;
+      this.pushToast(
+        'error',
+        this.readWorkspaceContextError(error, 'Organization switch failed. Your previous organization is still active.')
+      );
     } finally {
       this.switchingWorkspace = false;
       this.switchingMessage = '';
@@ -454,24 +404,24 @@ export class SettingsPageComponent implements OnInit {
   roleSummaryText(): string {
     const role = this.resolveAccessRole(this.activeMembership?.memberRoleRaw ?? this.user?.active_member_role);
     if (role === 'owner') {
-      return 'Full operational control if backend permissions allow it.';
+      return 'Full operational control for organization administration, workforce, scan requests, alerts, reports, and settings.';
     }
     if (role === 'hr') {
-      return 'Workforce and scan-request operations if backend permissions allow it.';
+      return 'Workforce and scan-request operations with access to operational readiness data.';
     }
     if (role === 'manager') {
-      return 'Operational visibility for assigned scope if backend permissions allow it.';
+      return 'Operational visibility and follow-up tools for the assigned scope.';
     }
     if (role === 'employee') {
       return 'Mobile scan experience and limited web access.';
     }
-    return 'Role information is unavailable.';
+    return 'Access level information is unavailable.';
   }
 
   currentAccessChips(): string[] {
     const role = this.resolveAccessRole(this.activeMembership?.memberRoleRaw ?? this.user?.active_member_role);
     if (role === 'owner') {
-      return ['Manage workspace', 'Manage workforce', 'Send scan requests', 'Review reports'];
+      return ['Manage organization', 'Manage workforce', 'Send scan requests', 'Review reports'];
     }
     if (role === 'hr') {
       return ['Manage workforce', 'Send scan requests', 'Review operational data'];
@@ -503,6 +453,15 @@ export class SettingsPageComponent implements OnInit {
       return;
     }
 
+    const confirmed =
+      typeof window === 'undefined' ||
+      window.confirm(
+        'Clear the locally cached organization context from this browser? This does not delete any backend data, and the organization will reload.'
+      );
+    if (!confirmed) {
+      return;
+    }
+
     this.clearingWorkspaceCache = true;
 
     try {
@@ -510,9 +469,9 @@ export class SettingsPageComponent implements OnInit {
       await this.companyContext.ensureActiveContext();
       await firstValueFrom(this.companyContext.ensureLoaded(true));
       await this.loadSettings(true, false);
-      this.pushToast('success', 'Workspace cache cleared and reloaded.');
+      this.pushToast('success', 'Organization cache cleared and reloaded.');
     } catch (error) {
-      this.pushToast('error', this.readError(error, 'Could not refresh workspace context.'));
+      this.pushToast('error', this.readError(error, 'Could not refresh organization context.'));
     } finally {
       this.clearingWorkspaceCache = false;
     }
@@ -525,9 +484,8 @@ export class SettingsPageComponent implements OnInit {
 
     this.loggingOut = true;
     this.companyContext.clearActiveWorkspaceContext();
-    this.businessCenter.notifyAuthStateChanged();
     this.auth.logout();
-    void this.router.navigateByUrl('/login');
+    void this.router.navigateByUrl('/');
   }
 
   clearError(): void {
@@ -554,7 +512,7 @@ export class SettingsPageComponent implements OnInit {
       if (!userId) {
         this.viewState = 'error';
         if (allowRedirect) {
-          await this.router.navigateByUrl('/login');
+          await this.router.navigateByUrl('/?auth=login');
         }
         return;
       }
@@ -564,38 +522,42 @@ export class SettingsPageComponent implements OnInit {
       this.applyAccountForm();
       console.debug('[Settings] workspace context loaded');
 
-      const membershipResult = await this.fetchMemberships(userId);
-      if (membershipResult.forbidden) {
-        this.memberships = [];
-        this.membershipForbidden = true;
-        this.membershipError = 'Workspace memberships could not be loaded. Please check your access or contact an owner.';
-        this.viewState = 'forbidden';
-      } else {
-        this.memberships = membershipResult.items;
-        if (!this.memberships.length) {
-          this.viewState = 'empty';
-          this.companyContext.clearActiveWorkspaceContext();
-          if (allowRedirect) {
-            await this.router.navigateByUrl('/app/workspace-access');
-          }
-          return;
-        }
+      const workspaceContext = await firstValueFrom(this.workspaceContextApi.getContext());
+      this.memberships = workspaceContext.memberships.map((membership) => this.normalizeMembership(membership));
+      this.invites = workspaceContext.invitations.map((invite) => this.normalizeInvite(invite));
+      this.invitesError = '';
 
-        await this.ensureActiveMembershipConsistency(forceRefresh);
-        this.viewState = 'ready';
+      if (!this.memberships.length) {
+        this.viewState = 'empty';
+        this.companyContext.clearActiveWorkspaceContext();
+        if (allowRedirect) {
+          await this.router.navigateByUrl('/app/workspace-access');
+        }
+        return;
       }
 
+      await this.ensureActiveMembershipConsistency(workspaceContext, forceRefresh);
+      this.viewState = 'ready';
+
       await firstValueFrom(this.companyContext.ensureLoaded(forceRefresh));
-      // Optional: never block base settings rendering.
-      void this.loadInvitesSafely();
     } catch (error) {
+      if (error instanceof WorkspaceContextApiError && error.code === 'forbidden') {
+        this.memberships = [];
+        this.invites = [];
+        this.invitesError = '';
+        this.membershipForbidden = true;
+        this.membershipError = 'You do not have permission to view organization settings for the active workspace.';
+        this.viewState = 'forbidden';
+        return;
+      }
+
       const err = error as any;
       console.warn('[Settings] failed request', {
         status: err?.status ?? err?.error?.status ?? null,
         code: err?.error?.errors?.[0]?.extensions?.code ?? null,
         message: err?.message ?? null
       });
-      this.loadError = this.readError(error, 'Failed to load settings.');
+      this.loadError = this.readWorkspaceContextError(error, 'Failed to load settings.');
       this.viewState = 'error';
     } finally {
       this.loading = false;
@@ -603,11 +565,12 @@ export class SettingsPageComponent implements OnInit {
     }
   }
 
-  private async ensureActiveMembershipConsistency(forceRefresh: boolean): Promise<void> {
-    const activeProfileId = this.normalizeId(this.user?.active_business_profile);
-    let selected = this.memberships.find((item) => item.businessProfile.id === activeProfileId) ?? null;
-
-    const staleContext = Boolean(activeProfileId && !selected);
+  private async ensureActiveMembershipConsistency(
+    workspaceContext: WorkspaceContextPayload,
+    forceRefresh: boolean
+  ): Promise<void> {
+    const activeMembershipId = this.normalizeId(workspaceContext.active?.membership?.id);
+    let selected = this.memberships.find((item) => item.id === activeMembershipId) ?? null;
 
     if (!selected) {
       const contextMembership = this.companyContext.getActiveMembership();
@@ -621,41 +584,12 @@ export class SettingsPageComponent implements OnInit {
       return;
     }
 
-    if (staleContext) {
-      this.companyContext.clearActiveWorkspaceContext();
-      const token = this.auth.getStoredAccessToken();
-      if (token) {
-        try {
-          await this.persistActiveWorkspace(selected, token);
-        } catch {
-          this.pushToast('error', 'Active workspace context was stale and could not be refreshed.');
-        }
-      }
-    }
-
     this.activeMembership = selected;
     await this.activateMembershipInContext(selected);
 
     if (forceRefresh) {
-      this.businessCenter.notifyAuthStateChanged();
+      await firstValueFrom(this.companyContext.ensureLoaded(true));
     }
-  }
-
-  private async persistActiveWorkspace(membership: SettingsMembership, token: string): Promise<void> {
-    await firstValueFrom(
-      this.http.patch(
-        `${this.apiUrl()}/users/me`,
-        {
-          active_business_profile: membership.businessProfile.id,
-          active_department: membership.department?.id ?? null,
-          active_member_role: this.toBackendRole(membership.memberRoleRaw)
-        },
-        {
-          headers: this.auth.getAuthHeaders(token),
-          withCredentials: true
-        }
-      )
-    );
   }
 
   private async activateMembershipInContext(membership: SettingsMembership): Promise<void> {
@@ -683,7 +617,6 @@ export class SettingsPageComponent implements OnInit {
 
     this.companyContext.clearActiveWorkspaceContext();
     await this.companyContext.activateFromMembership(contextMembership as any);
-    this.businessCenter.notifyAuthStateChanged();
     await firstValueFrom(this.companyContext.ensureLoaded(true));
   }
 
@@ -744,187 +677,41 @@ export class SettingsPageComponent implements OnInit {
       provider: this.pickString(record['provider']),
       external_identifier: this.pickString(record['external_identifier']),
       phone: this.pickString(record['phone']),
-      active_business_profile: (record['active_business_profile'] as any) ?? null,
-      active_department: (record['active_department'] as any) ?? null,
-      active_member_role: this.pickString(record['active_member_role']),
+      active_business_profile: null,
+      active_department: null,
+      active_member_role: null,
       role: (record['role'] as any) ?? null
     };
   }
 
-  private async fetchMemberships(userId: string): Promise<{ items: SettingsMembership[]; forbidden: boolean }> {
-    const token = this.auth.getStoredAccessToken();
-    if (!token) {
-      return { items: [], forbidden: false };
-    }
-
-    const params = new URLSearchParams({
-      limit: '100',
-      sort: '-id',
-      fields: [
-        'id',
-        'status',
-        'member_role',
-        'business_profile.id',
-        'business_profile.company_name',
-        'business_profile.is_active',
-        'business_profile.plan_code',
-        'business_profile.billing_status',
-        'department.id',
-        'department.name'
-      ].join(',')
-    });
-    params.set('filter[user][_eq]', userId);
-    params.set('filter[status][_eq]', 'active');
-
-    try {
-      const response = await firstValueFrom(
-        this.http.get<{ data?: MembershipRow[] }>(
-          `${this.apiUrl()}/items/business_profile_members?${params.toString()}&_ts=${Date.now()}`,
-          {
-            headers: this.auth.getAuthHeaders(token),
-            withCredentials: true
-          }
-        )
-      );
-
-      const normalized = (response?.data ?? [])
-        .map((row) => this.normalizeMembership(row))
-        .filter((row): row is SettingsMembership => Boolean(row))
-        .sort((left, right) => left.businessProfile.companyName.localeCompare(right.businessProfile.companyName));
-
-      return { items: normalized, forbidden: false };
-    } catch (error: any) {
-      if (error?.status === 403) {
-        return {
-          items: [],
-          forbidden: true
-        };
-      }
-
-      throw error;
-    }
-  }
-
-  private async loadInvitesSafely(): Promise<void> {
-    this.invites = [];
-    this.invitesError = '';
-
-    if (!this.activeMembership?.businessProfile?.id) {
-      return;
-    }
-
-    const token = this.auth.getStoredAccessToken();
-    if (!token) {
-      return;
-    }
-
-    const params = new URLSearchParams({
-      limit: '50',
-      sort: '-sent_at',
-      fields: [
-        'id',
-        'email',
-        'member_role',
-        'status',
-        'sent_at',
-        'claimed_at',
-        'department.id',
-        'department.name',
-        'requested_by_user.id',
-        'requested_by_user.first_name',
-        'requested_by_user.last_name',
-        'requested_by_user.email'
-      ].join(',')
-    });
-    params.set('filter[business_profile][_eq]', this.activeMembership.businessProfile.id);
-
-    try {
-      const response = await firstValueFrom(
-        this.http.get<{ data?: InviteRow[] }>(
-          `${this.apiUrl()}/items/request_invites?${params.toString()}&_ts=${Date.now()}`,
-          {
-            headers: this.auth.getAuthHeaders(token),
-            withCredentials: true
-          }
-        ).pipe(timeout(9000))
-      );
-      this.invites = (response?.data ?? [])
-        .map((row) => this.normalizeInvite(row))
-        .filter((row): row is SettingsInvite => Boolean(row));
-    } catch (error: any) {
-      console.warn('[Settings] failed request', {
-        request: 'request_invites',
-        status: error?.status ?? error?.error?.status ?? null,
-        code: error?.error?.errors?.[0]?.extensions?.code ?? null
-      });
-      if (error?.status === 403) {
-        this.invitesError = 'Pending invites are not available for your current access.';
-        return;
-      }
-      this.invitesError = 'Could not load pending invites right now.';
-    }
-  }
-
-  private normalizeInvite(row: InviteRow): SettingsInvite | null {
-    const id = this.normalizeId(row?.id);
-    if (!id) {
-      return null;
-    }
-
-    const departmentRecord = this.objectRecord(row?.department);
-    const inviterRecord = this.objectRecord(row?.requested_by_user);
-    const inviterName = `${this.pickString(inviterRecord?.['first_name']) ?? ''} ${
-      this.pickString(inviterRecord?.['last_name']) ?? ''
-    }`.trim();
-    const inviterEmail = this.pickString(inviterRecord?.['email']);
-    const invitedBy = inviterName || inviterEmail || 'Inviter unavailable';
-
+  private normalizeInvite(row: WorkspaceContextInvitation): SettingsInvite {
     return {
-      id,
-      email: this.pickString(row?.email) ?? 'Unavailable',
-      role: this.roleBadgeLabel(this.pickString(row?.member_role) ?? 'employee'),
-      status: this.pickString(row?.status) ?? 'pending',
-      sentAt: this.pickString(row?.sent_at),
-      claimedAt: this.pickString(row?.claimed_at),
-      departmentName: this.pickString(departmentRecord?.['name']),
-      invitedBy
+      id: row.id,
+      email: row.email,
+      role: this.roleBadgeLabel(row.memberRole),
+      status: row.status,
+      departmentName: row.department?.name ?? null
     };
   }
 
-  private normalizeMembership(row: MembershipRow): SettingsMembership | null {
-    const id = this.normalizeId(row?.id);
-    const businessProfileRecord = this.objectRecord(row?.business_profile);
-    const businessProfileId = this.normalizeId(businessProfileRecord?.['id'] ?? row?.business_profile);
-
-    if (!id || !businessProfileId) {
-      return null;
-    }
-
-    const companyName =
-      this.pickString(businessProfileRecord?.['company_name']) ??
-      'Workspace';
-
-    const departmentRecord = this.objectRecord(row?.department);
-    const departmentId = this.normalizeId(departmentRecord?.['id'] ?? row?.department);
-    const departmentName = this.pickString(departmentRecord?.['name']);
-
+  private normalizeMembership(row: WorkspaceContextMembership): SettingsMembership {
     return {
-      id,
-      status: (this.pickString(row?.status) ?? 'active').toLowerCase(),
-      memberRoleRaw: (this.pickString(row?.member_role) ?? 'employee').toLowerCase(),
+      id: row.id,
+      status: row.status.toLowerCase(),
+      memberRoleRaw: row.memberRole.toLowerCase(),
       businessProfile: {
-        id: businessProfileId,
-        companyName,
-        isActive: businessProfileRecord?.['is_active'] === true,
-        planCode: this.pickString(businessProfileRecord?.['plan_code']),
-        billingStatus: this.pickString(businessProfileRecord?.['billing_status']),
+        id: row.workspace.id,
+        companyName: row.workspace.companyName,
+        isActive: row.workspace.isActive,
+        planCode: row.workspace.planCode,
+        billingStatus: row.workspace.billingStatus,
         dateCreated: null,
         dateUpdated: null
       },
-      department: departmentId
+      department: row.department
         ? {
-            id: departmentId,
-            name: departmentName ?? 'Department'
+            id: row.department.id,
+            name: row.department.name
           }
         : null
     };
@@ -1007,17 +794,6 @@ export class SettingsPageComponent implements OnInit {
     if (normalized === 'manager' || normalized === 'manger') return 'manager';
     if (normalized === 'employee' || normalized === 'member' || normalized === 'viewer') return 'employee';
     return null;
-  }
-
-  private toBackendRole(value: unknown): string {
-    const normalized = this.pickString(value)?.toLowerCase() ?? '';
-    if (normalized === 'manager' || normalized === 'manger') {
-      return 'manager';
-    }
-    if (normalized === 'owner' || normalized === 'hr' || normalized === 'employee') {
-      return normalized;
-    }
-    return 'employee';
   }
 
   private loadPreferences(): void {
@@ -1114,6 +890,14 @@ export class SettingsPageComponent implements OnInit {
       err?.message ||
       fallback
     );
+  }
+
+  private readWorkspaceContextError(error: unknown, fallback: string): string {
+    if (error instanceof WorkspaceContextApiError) {
+      return error.userMessage || fallback;
+    }
+
+    return this.readError(error, fallback);
   }
 
   private normalizeId(value: unknown): string | null {

@@ -76,20 +76,18 @@ export class SidebarComponent {
         role,
         companyName,
         companyInitial: this.companyInitial(companyName),
-        scopeLabel: departmentName ? 'Department scope' : 'Company-wide scope',
+        scopeLabel: departmentName ? 'Department' : 'Organization-wide',
         scopeDetail: departmentName ?? null,
         groups: navGroups,
-        emptyStateTitle: isEmployee ? 'Employee access' : 'Workspace unavailable',
+        emptyStateTitle: isEmployee ? 'Employee access' : 'Organization unavailable',
         emptyStateDescription: isEmployee
-          ? 'Operational controls are reserved for company leads.'
-          : 'Resolve your workspace context to continue.'
+          ? 'Operational controls are reserved for organization leads.'
+          : 'Resolve your organization access to continue.'
       } satisfies SidebarVm;
     })
   );
 
-  onNavigate(item: SidebarNavItem): void {
-    console.log('[Sidebar] navigate', item.label, item.route);
-  }
+  onNavigate(_item: SidebarNavItem): void {}
 
   private isActive(matchRoutes: string[], currentUrl: string): boolean {
     const normalizedCurrent = this.normalizeUrl(currentUrl);

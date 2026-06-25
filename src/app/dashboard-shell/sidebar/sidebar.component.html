@@ -19,8 +19,8 @@
         </div>
 
         <div class="app-sidebar__company-copy">
-          <p class="app-sidebar__eyebrow">Active workspace</p>
-          <h3>{{ vm.companyName || 'Loading workspace...' }}</h3>
+          <p class="app-sidebar__eyebrow">Active Organization</p>
+          <h3>{{ vm.companyName || 'Loading organization...' }}</h3>
           <span>{{ vm.scopeLabel }}</span>
           <small *ngIf="vm.scopeDetail">{{ vm.scopeDetail }}</small>
         </div>
@@ -29,7 +29,7 @@
       </section>
 
       <ng-container *ngIf="vm.groups.length">
-        <nav class="app-sidebar__nav sidebar-nav" aria-label="Workspace navigation">
+        <nav class="app-sidebar__nav sidebar-nav" aria-label="Organization navigation">
           <section *ngFor="let group of vm.groups" class="app-sidebar__group">
             <p class="app-sidebar__group-label">{{ group.group }}</p>
 
@@ -115,10 +115,10 @@
 
   <ng-template #sidebarLoading>
     <div class="app-sidebar__loading">
-      <div class="app-sidebar__loading-line app-sidebar__loading-line--title">Loading workspace...</div>
-      <div class="app-sidebar__loading-line">Loading role...</div>
+      <div class="app-sidebar__loading-line app-sidebar__loading-line--title">Loading organization...</div>
+      <div class="app-sidebar__loading-line">Loading access level...</div>
       <div class="app-sidebar__loading-line app-sidebar__loading-line--body">
-        Restoring your company context.
+        Restoring your organization context.
       </div>
     </div>
   </ng-template>

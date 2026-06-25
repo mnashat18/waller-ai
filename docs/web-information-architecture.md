@@ -44,7 +44,6 @@ Manager-only department-scoped routes also require:
 | Path | Purpose | Roles |
 | --- | --- | --- |
 | `/profile` | User profile menu target | owner, hr, manager |
-| `/business-center` | Compatibility redirect to `/company` | owner, hr |
 | `/history` | Compatibility redirect to `/compliance` | owner, hr, manager |
 
 ## Sidebar Structure

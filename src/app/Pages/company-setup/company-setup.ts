@@ -2,12 +2,10 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
-import { catchError, finalize, of, switchMap, take } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { catchError, of, switchMap, take } from 'rxjs';
 
 import { AuthService } from '../../services/auth';
-import { BusinessCenterService } from '../../services/business-center.service';
-import { CompanyContextService } from '../../core/context/company-context.service';
+import { WorkspaceApplicationsService } from '../../services/workspace-applications.service';
 
 type CompanySetupForm = {
   companyName: string;
@@ -37,7 +35,7 @@ type CompanySetupForm = {
             <p class="setup-shell__eyebrow">Workspace Setup</p>
             <h1>Create Workspace</h1>
             <p class="setup-shell__copy">
-              Set up your company workspace and start inviting your team.
+              Request a company workspace for review before activation.
             </p>
           </div>
 
@@ -80,7 +78,7 @@ type CompanySetupForm = {
               type="submit"
               class="setup-shell__button setup-shell__button--primary"
               [disabled]="submitting || formRef.invalid">
-              {{ submitting ? 'Creating...' : 'Create Workspace' }}
+              {{ submitting ? 'Submitting...' : 'Submit Workspace Request' }}
             </button>
             <a routerLink="/app/workspace-access" class="setup-shell__button">
               Back to Workspace Access
@@ -267,8 +265,7 @@ export class CompanySetupPageComponent implements OnInit {
 
   constructor(
     private auth: AuthService,
-    private businessCenter: BusinessCenterService,
-    private companyContext: CompanyContextService,
+    private workspaceApplications: WorkspaceApplicationsService,
     private router: Router
   ) {}
 
@@ -278,7 +275,7 @@ export class CompanySetupPageComponent implements OnInit {
       take(1),
       switchMap((ready) => {
         if (!ready) {
-          this.router.navigateByUrl('/login');
+          this.router.navigateByUrl('/?auth=login');
           return of(null);
         }
 
@@ -296,13 +293,13 @@ export class CompanySetupPageComponent implements OnInit {
         this.currentUserId = userId;
 
         if (!userId) {
-          this.router.navigateByUrl('/login');
+          this.router.navigateByUrl('/?auth=login');
         }
       },
       error: () => {
         this.loading = false;
         this.statusMessage = '';
-        this.router.navigateByUrl('/login');
+        this.router.navigateByUrl('/?auth=login');
       }
     });
   }
@@ -322,57 +319,60 @@ export class CompanySetupPageComponent implements OnInit {
     }
 
     this.submitting = true;
-    this.statusMessage = 'Creating your workspace...';
+    this.statusMessage = 'Submitting your workspace request...';
 
-    this.businessCenter.createWorkspace(
+    this.workspaceApplications.createApplication(
       {
-        companyName,
-        contactName,
-        workEmail,
+        company_name: companyName,
+        contact_name: contactName,
+        work_email: workEmail,
+        job_title: 'Workspace administrator',
         phone: this.emptyToNull(this.form.phone),
-        industry: this.emptyToNull(this.form.industry),
-        teamSize: this.emptyToNull(this.form.teamSize),
-        country: this.emptyToNull(this.form.country),
+        industry: this.emptyToNull(this.form.industry) ?? 'Unspecified',
+        team_size: this.parseTeamSize(this.form.teamSize),
+        country: this.emptyToNull(this.form.country) ?? 'Unspecified',
         city: this.emptyToNull(this.form.city),
         website: this.emptyToNull(this.form.website),
-        timezone: this.emptyToNull(this.form.timezone),
-        defaultLanguage: this.emptyToNull(this.form.defaultLanguage) ?? 'en'
+        use_case: 'Workspace access request submitted from company setup.',
+        message: this.buildApplicationMessage()
       },
       this.currentUserId,
       this.token
     ).pipe(
-      switchMap((result) => {
-        if (!result.ok || !result.businessProfileId) {
-          return of(result);
-        }
-
-        return this.companyContext.activateWorkspace(result.businessProfileId, 'owner', null).pipe(
-          map(() => result),
-          catchError((error) =>
-            of({
-              ok: false,
-              message: this.normalizeError(error, 'We created the workspace, but could not activate it.'),
-              businessProfileId: result.businessProfileId
-            })
-          )
-        );
-      }),
-      finalize(() => {
-        this.submitting = false;
+      catchError((error) => {
+        this.statusMessage = this.normalizeError(error, 'We could not submit the workspace request.');
+        return of(null);
       })
     ).subscribe({
       next: (result) => {
-        if (!result.ok) {
-          this.statusMessage = result.message;
+        this.submitting = false;
+        if (!result) {
+          if (!this.statusMessage) {
+            this.statusMessage = 'We could not submit the workspace request.';
+          }
           return;
         }
 
-        this.router.navigateByUrl('/app/dashboard');
+        this.router.navigateByUrl('/app/workspace-access');
       },
       error: (error) => {
-        this.statusMessage = this.normalizeError(error, 'We could not create the workspace.');
+        this.submitting = false;
+        this.statusMessage = this.normalizeError(error, 'We could not submit the workspace request.');
       }
     });
+  }
+
+  private parseTeamSize(value: string): number {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  }
+
+  private buildApplicationMessage(): string {
+    const lines = [
+      `Timezone: ${this.emptyToNull(this.form.timezone) ?? 'Not provided'}`,
+      `Default language: ${this.emptyToNull(this.form.defaultLanguage) ?? 'Not provided'}`
+    ];
+    return lines.join('\n');
   }
 
   private emptyToNull(value: string): string | null {

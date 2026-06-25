@@ -132,23 +132,10 @@ export class TopbarComponent implements OnInit {
     });
   }
 
-  clearDepartmentScope(): void {
-    this.companyContext.clearDepartmentScope().subscribe({
-      next: () => {
-        this.companyMenuOpen = false;
-        if (typeof window !== 'undefined') {
-          window.location.assign('/app/dashboard');
-          return;
-        }
-        this.router.navigateByUrl('/app/dashboard');
-      }
-    });
-  }
-
   logout(): void {
     this.auth.logout();
     this.userMenuOpen = false;
-    this.router.navigateByUrl('/login');
+    this.router.navigateByUrl('/');
   }
 
   goToWorkspaceAccess(): void {

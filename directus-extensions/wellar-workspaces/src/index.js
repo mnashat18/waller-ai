@@ -1,0 +1,1283 @@
+const MAX_TEXT = 255;
+const MAX_COMPANY_NAME = 120;
+
+const FORBIDDEN_INPUT_KEYS = new Set([
+  'user',
+  'user_id',
+  'userId',
+  'requested_by_user',
+  'role',
+  'member_role',
+  'memberRole',
+  'owner',
+  'is_owner',
+  'isOwner',
+  'business_profile',
+  'businessProfile',
+  'business_profile_id',
+  'businessProfileId',
+  'workspace',
+  'workspace_id',
+  'workspaceId',
+  'membership',
+  'membership_id',
+  'membershipId'
+]);
+
+function badRequest(res, message, details = undefined) {
+  return res.status(400).json({ error: { code: 'BAD_REQUEST', message, details } });
+}
+function unauthorized(res, message) {
+  return res.status(401).json({ error: { code: 'UNAUTHORIZED', message } });
+}
+
+function forbidden(res, message) {
+  return res.status(403).json({ error: { code: 'FORBIDDEN', message } });
+}
+
+function notFound(res, message) {
+  return res.status(404).json({ error: { code: 'NOT_FOUND', message } });
+}
+
+function conflict(res, message) {
+  return res.status(409).json({ error: { code: 'CONFLICT', message } });
+}
+
+function serverError(res, message) {
+  return res.status(500).json({ error: { code: 'SERVER_ERROR', message } });
+}
+
+function pickString(value, max = MAX_TEXT) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.slice(0, max);
+}
+
+function pickInteger(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100000) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function normalizeWebsite(value) {
+  const raw = pickString(value, MAX_TEXT);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const normalized = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return normalized.toString().replace(/\/$/, '').slice(0, MAX_TEXT);
+  } catch {
+    return null;
+  }
+}
+
+function hasForbiddenInput(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return false;
+  }
+
+  return Object.keys(body).some((key) => FORBIDDEN_INPUT_KEYS.has(key));
+}
+
+function buildCompanyPayload(body, userId, now) {
+  const companyName = pickString(body?.company_name ?? body?.companyName, MAX_COMPANY_NAME);
+  if (!companyName) {
+    return { error: 'Company name is required.' };
+  }
+
+  const userEmail = pickString(body?.work_email ?? body?.workEmail);
+  const contactName = pickString(body?.contact_name ?? body?.contactName) ?? companyName;
+
+  return {
+    value: {
+      owner_user: userId,
+      company_name: companyName,
+      contact_name: contactName,
+      work_email: userEmail ?? 'not-provided@wellar.local',
+      phone: pickString(body?.phone, 30) ?? 'not-provided',
+      industry: pickString(body?.industry, 80),
+      team_size: pickInteger(body?.team_size ?? body?.teamSize),
+      country: pickString(body?.country, 80),
+      city: pickString(body?.city, 80),
+      website: normalizeWebsite(body?.website),
+      billing_status: 'trialing',
+      is_active: true,
+      plan_code: 'free',
+      trial_started_at: now,
+      timezone: pickString(body?.timezone, 80),
+      default_language: pickString(body?.default_language ?? body?.defaultLanguage, 20)
+    }
+  };
+}
+
+function normalizeRole(value) {
+  const normalized = pickString(value)?.toLowerCase() ?? '';
+  if (normalized === 'admin') return 'hr';
+  if (normalized === 'manger') return 'manager';
+  if (normalized === 'member' || normalized === 'viewer') return 'employee';
+  return normalized || null;
+}
+
+function rolePriority(role) {
+  if (role === 'owner') return 4;
+  if (role === 'hr') return 3;
+  if (role === 'manager') return 2;
+  if (role === 'employee') return 1;
+  return 0;
+}
+
+function publicWorkspace(row) {
+  return {
+    id: String(row.workspace_id ?? row.id ?? ''),
+    companyName: row.company_name ?? 'Organization',
+    isActive: row.workspace_is_active === true || row.is_active === true,
+    planCode: row.plan_code ?? null,
+    billingStatus: row.billing_status ?? null
+  };
+}
+
+function publicDepartment(row) {
+  const departmentId = pickString(row.department_id ?? row.department);
+  if (!departmentId) {
+    return null;
+  }
+
+  return {
+    id: departmentId,
+    name: row.department_name ?? 'Department'
+  };
+}
+
+function publicMembershipSummary(row) {
+  return {
+    id: String(row.id),
+    status: row.status ?? 'active',
+    memberRole: normalizeRole(row.member_role) ?? 'employee'
+  };
+}
+
+function publicMembership(row) {
+  return {
+    id: String(row.id),
+    status: row.status ?? 'active',
+    memberRole: normalizeRole(row.member_role) ?? 'employee',
+    workspace: publicWorkspace(row),
+    department: publicDepartment(row)
+  };
+}
+
+function publicInvitation(row) {
+  return {
+    id: String(row.id),
+    email: row.email ?? 'Unavailable',
+    memberRole: normalizeRole(row.member_role) ?? 'employee',
+    status: row.status ?? 'pending',
+    department: publicDepartment(row)
+  };
+}
+
+function buildExistingContext(row) {
+  return {
+    workspace: publicWorkspace({
+      workspace_id: row.business_profile,
+      company_name: row.company_name,
+      workspace_is_active: row.is_active,
+      plan_code: row.plan_code,
+      billing_status: row.billing_status
+    }),
+    membership: {
+      id: String(row.id),
+      status: row.status ?? 'active',
+      memberRole: normalizeRole(row.member_role) ?? 'owner'
+    },
+    department: null
+  };
+}
+
+function isPendingInviteStatus(status) {
+  const normalized = pickString(status)?.toLowerCase() ?? '';
+  return normalized === 'pending' || normalized === 'sent';
+}
+
+function validateMembershipRow(row) {
+  if (!row) {
+    return { ok: false, code: 'NOT_FOUND', message: 'The requested workspace membership was not found.' };
+  }
+
+  if ((row.status ?? '').toLowerCase() !== 'active') {
+    return { ok: false, code: 'CONFLICT', message: 'The requested workspace membership is not active.' };
+  }
+
+  if (row.workspace_is_active !== true) {
+    return { ok: false, code: 'CONFLICT', message: 'The requested workspace is not active.' };
+  }
+
+  if (row.department_id) {
+    if (!row.department_match_id) {
+      return { ok: false, code: 'CONFLICT', message: 'The membership department is no longer valid.' };
+    }
+    if (pickString(row.department_business_profile) !== pickString(row.workspace_id)) {
+      return { ok: false, code: 'CONFLICT', message: 'The membership department does not belong to the active workspace.' };
+    }
+    if (row.department_is_active === false) {
+      return { ok: false, code: 'CONFLICT', message: 'The membership department is inactive.' };
+    }
+  }
+
+  return { ok: true };
+}
+
+function selectCanonicalMembership(rows) {
+  if (!rows.length) {
+    return null;
+  }
+
+  return [...rows].sort((left, right) => {
+    const roleDifference = rolePriority(normalizeRole(right.member_role)) - rolePriority(normalizeRole(left.member_role));
+    if (roleDifference !== 0) {
+      return roleDifference;
+    }
+
+    const leftJoined = new Date(left.joined_at ?? 0).getTime();
+    const rightJoined = new Date(right.joined_at ?? 0).getTime();
+    if (Number.isFinite(rightJoined) && Number.isFinite(leftJoined) && rightJoined !== leftJoined) {
+      return rightJoined - leftJoined;
+    }
+
+    const leftCompany = pickString(left.company_name) ?? '';
+    const rightCompany = pickString(right.company_name) ?? '';
+    return leftCompany.localeCompare(rightCompany);
+  })[0];
+}
+
+async function loadActiveMembershipRows(trx, userId) {
+  return trx('business_profile_members as member')
+    .innerJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
+    .leftJoin('departments as department', 'department.id', 'member.department')
+    .select(
+      'member.id',
+      'member.user',
+      'member.status',
+      'member.member_role',
+      'member.business_profile as workspace_id',
+      'member.department as department_id',
+      'member.joined_at',
+      'profile.company_name',
+      'profile.is_active as workspace_is_active',
+      'profile.plan_code',
+      'profile.billing_status',
+      'department.id as department_match_id',
+      'department.name as department_name',
+      'department.business_profile as department_business_profile',
+      'department.is_active as department_is_active'
+    )
+    .where('member.user', userId)
+    .andWhere('member.status', 'active')
+    .andWhere('profile.is_active', true);
+}
+
+async function loadMembershipForSwitch(trx, membershipId, userId) {
+  return trx('business_profile_members as member')
+    .innerJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
+    .leftJoin('departments as department', 'department.id', 'member.department')
+    .select(
+      'member.id',
+      'member.user',
+      'member.status',
+      'member.member_role',
+      'member.business_profile as workspace_id',
+      'member.department as department_id',
+      'member.joined_at',
+      'profile.company_name',
+      'profile.is_active as workspace_is_active',
+      'profile.plan_code',
+      'profile.billing_status',
+      'department.id as department_match_id',
+      'department.name as department_name',
+      'department.business_profile as department_business_profile',
+      'department.is_active as department_is_active'
+    )
+    .where('member.id', membershipId)
+    .andWhere('member.user', userId)
+    .first();
+}
+
+async function syncDirectusUserContext(trx, userId, membershipRow) {
+  await trx('directus_users')
+    .where({ id: userId })
+    .update({
+      active_business_profile: membershipRow.workspace_id,
+      active_department: membershipRow.department_id ?? null,
+      active_member_role: normalizeRole(membershipRow.member_role) ?? null
+    });
+}
+
+async function loadPendingInvitations(trx, workspaceId) {
+  return trx('request_invites as invite')
+    .leftJoin('departments as department', 'department.id', 'invite.department')
+    .select(
+      'invite.id',
+      'invite.email',
+      'invite.member_role',
+      'invite.status',
+      'invite.department as department_id',
+      'department.name as department_name'
+    )
+    .where('invite.business_profile', workspaceId)
+    .whereIn('invite.status', ['pending', 'sent'])
+    .orderBy('invite.id', 'desc');
+}
+
+function publicOrganizationProfile(row) {
+  return {
+    id: String(row.id),
+    company_name: row.company_name ?? null,
+    contact_name: row.contact_name ?? null,
+    phone: row.phone ?? null,
+    industry: row.industry ?? null,
+    team_size: row.team_size ?? null,
+    country: row.country ?? null,
+    city: row.city ?? null,
+    website: row.website ?? null,
+    timezone: row.timezone ?? null,
+    default_language: row.default_language ?? null,
+    is_active: row.is_active === true,
+    plan_code: row.plan_code ?? null,
+    billing_status: row.billing_status ?? null,
+    date_created: row.date_created ?? null,
+    date_updated: row.date_updated ?? null
+  };
+}
+
+function publicOrganizationDepartment(row) {
+  return {
+    id: String(row.id),
+    name: row.name ?? 'Department',
+    is_active: row.is_active === true,
+    business_profile: String(row.business_profile),
+    manager_member_id: row.manager_member ?? null,
+    date_created: row.date_created ?? null,
+    date_updated: row.date_updated ?? null
+  };
+}
+
+function publicOrganizationMember(row) {
+  return {
+    id: String(row.id),
+    status: row.status ?? null,
+    member_role: normalizeRole(row.member_role) ?? null,
+    user_id: row.user_id ?? null,
+    user_name: [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || row.user_email || 'Member',
+    user_email: row.user_email ?? null,
+    business_profile: row.business_profile ?? null,
+    department_id: row.department_id ?? null,
+    department_name: row.department_name ?? null,
+    joined_at: row.joined_at ?? null,
+    date_created: row.date_created ?? null,
+    date_updated: row.date_updated ?? null
+  };
+}
+
+function publicOrganizationInvite(row) {
+  return {
+    id: String(row.id),
+    email: row.email ?? 'Unavailable',
+    member_role: normalizeRole(row.member_role) ?? null,
+    status: row.status ?? null,
+    department_id: row.department_id ?? null,
+    department_name: row.department_name ?? null
+  };
+}
+
+function publicOrganizationPermissions(role) {
+  const normalized = normalizeRole(role);
+  return {
+    canEditProfile: normalized === 'owner',
+    canManageDepartments: normalized === 'owner' || normalized === 'hr',
+    canViewMembers: normalized === 'owner' || normalized === 'hr',
+    canViewInvites: normalized === 'owner' || normalized === 'hr',
+    canUseComingSoonControls: false
+  };
+}
+
+function validateOrganizationProfilePayload(body) {
+  const allowed = new Set([
+    'company_name',
+    'contact_name',
+    'phone',
+    'industry',
+    'team_size',
+    'country',
+    'city',
+    'website',
+    'timezone',
+    'default_language'
+  ]);
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const keys = Object.keys(body);
+  if (!keys.length) {
+    return { ok: false, message: 'At least one editable organization field is required.' };
+  }
+
+  if (keys.some((key) => !allowed.has(key))) {
+    return { ok: false, message: 'Request contains unsupported organization fields.' };
+  }
+
+  const payload = {};
+  for (const key of keys) {
+    const value = body[key];
+    if (key === 'team_size') {
+      const parsed = pickInteger(value);
+      if (parsed === null) {
+        return { ok: false, message: 'team_size must be a positive integer.' };
+      }
+      payload[key] = parsed;
+      continue;
+    }
+
+    if (key === 'website') {
+      payload[key] = normalizeWebsite(value);
+      continue;
+    }
+
+    const normalized = pickString(value, key === 'company_name' || key === 'contact_name' ? MAX_COMPANY_NAME : MAX_TEXT);
+    payload[key] = normalized;
+  }
+
+  if (!payload.company_name) {
+    return { ok: false, message: 'company_name is required.' };
+  }
+
+  return { ok: true, payload };
+}
+
+function validateDepartmentPayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== 'name') {
+    return { ok: false, message: 'Only name can be changed for departments in this release.' };
+  }
+
+  const name = pickString(body.name, MAX_COMPANY_NAME);
+  if (!name) {
+    return { ok: false, message: 'Department name is required.' };
+  }
+
+  return { ok: true, payload: { name } };
+}
+
+async function loadOrganizationMembership(trx, userId) {
+  const rows = await loadActiveMembershipRows(trx, userId);
+  const normalized = rows.filter((row) => validateMembershipRow(row).ok);
+  const userRow = await trx('directus_users')
+    .select('id', 'active_business_profile', 'active_department', 'active_member_role')
+    .where({ id: userId })
+    .first();
+  const active = selectCanonicalMembership(normalized);
+  return { rows: normalized, active, userRow };
+}
+
+async function loadOrganizationProfile(trx, workspaceId) {
+  return trx('business_profiles')
+    .select([
+      'id',
+      'company_name',
+      'contact_name',
+      'phone',
+      'industry',
+      'team_size',
+      'country',
+      'city',
+      'website',
+      'timezone',
+      'default_language',
+      'is_active',
+      'plan_code',
+      'billing_status',
+      'date_created',
+      'date_updated'
+    ])
+    .where({ id: workspaceId })
+    .first();
+}
+
+async function loadOrganizationDepartments(trx, workspaceId) {
+  return trx('departments')
+    .select([
+      'id',
+      'name',
+      'is_active',
+      'business_profile',
+      'manager_member',
+      'date_created',
+      'date_updated'
+    ])
+    .where({ business_profile: workspaceId })
+    .orderBy('name', 'asc');
+}
+
+async function loadOrganizationMembers(trx, workspaceId) {
+  return trx('business_profile_members as member')
+    .leftJoin('departments as department', 'department.id', 'member.department')
+    .leftJoin('directus_users as user', 'user.id', 'member.user')
+    .select(
+      'member.id',
+      'member.status',
+      'member.member_role',
+      'member.user as user_id',
+      'member.business_profile',
+      'member.department as department_id',
+      'member.joined_at',
+      'member.date_created',
+      'member.date_updated',
+      'department.name as department_name',
+      'user.first_name',
+      'user.last_name',
+      'user.email as user_email'
+    )
+    .where('member.business_profile', workspaceId)
+    .orderBy('member.id', 'desc');
+}
+
+async function loadOrganizationInvites(trx, workspaceId) {
+  return trx('request_invites as invite')
+    .leftJoin('departments as department', 'department.id', 'invite.department')
+    .select(
+      'invite.id',
+      'invite.email',
+      'invite.member_role',
+      'invite.status',
+      'invite.department as department_id',
+      'department.name as department_name'
+    )
+    .where('invite.business_profile', workspaceId)
+    .whereIn('invite.status', ['pending', 'sent'])
+    .orderBy('invite.id', 'desc');
+}
+
+async function loadDepartmentById(trx, workspaceId, departmentId) {
+  return trx('departments')
+    .select([
+      'id',
+      'name',
+      'is_active',
+      'business_profile',
+      'manager_member',
+      'date_created',
+      'date_updated'
+    ])
+    .where({ id: departmentId, business_profile: workspaceId })
+    .first();
+}
+
+export default {
+  id: 'wellar',
+  handler: (router, context) => {
+    const { database, logger } = context;
+
+    router.get('/organization', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-organization-context:user:${userId}`
+          ]);
+
+          const { rows, active, userRow } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const activeRole = normalizeRole(active.member_role);
+          if (activeRole !== 'owner' && activeRole !== 'hr') {
+            throw Object.assign(new Error('Owner or HR access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const workspaceId = active.workspace_id;
+          const [profile, departments, members, invites] = await Promise.all([
+            loadOrganizationProfile(trx, workspaceId),
+            loadOrganizationDepartments(trx, workspaceId),
+            loadOrganizationMembers(trx, workspaceId),
+            loadPendingInvitations(trx, workspaceId)
+          ]);
+
+          if (!profile) {
+            throw Object.assign(new Error('The active organization profile was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const currentPermissions = publicOrganizationPermissions(activeRole);
+
+          const shouldSync =
+            pickString(userRow?.active_business_profile) !== pickString(workspaceId) ||
+            pickString(userRow?.active_department) !== pickString(active.department_id) ||
+            normalizeRole(userRow?.active_member_role) !== activeRole;
+
+          if (shouldSync) {
+            await syncDirectusUserContext(trx, userId, active);
+          }
+
+          return {
+            profile: publicOrganizationProfile(profile),
+            departments: departments.map((row) => publicOrganizationDepartment(row)),
+            members: members.map((row) => publicOrganizationMember(row)),
+            invites: invites.map((row) => publicOrganizationInvite(row)),
+            permissions: currentPermissions
+          };
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] organization context failed');
+        return serverError(res, 'Organization data could not be loaded.');
+      }
+    });
+
+    router.patch('/organization/profile', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const validation = validateOrganizationProfilePayload(req.body ?? {});
+      if (!validation.ok) {
+        return badRequest(res, validation.message);
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-organization-profile:user:${userId}`
+          ]);
+
+          const { active } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const activeRole = normalizeRole(active.member_role);
+          if (activeRole !== 'owner') {
+            throw Object.assign(new Error('Only owners can edit the organization profile.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const profile = await loadOrganizationProfile(trx, active.workspace_id);
+          if (!profile) {
+            throw Object.assign(new Error('The active organization profile was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const payload = validation.payload;
+          await trx('business_profiles')
+            .where({ id: active.workspace_id })
+            .update(payload);
+
+          const updatedProfile = await loadOrganizationProfile(trx, active.workspace_id);
+          await trx('activity_events').insert({
+            actor: userId,
+            target_user: userId,
+            action: 'organization_profile_updated',
+            entity_type: 'company',
+            entity_id: String(active.workspace_id),
+            business_profile: active.workspace_id,
+            payload: JSON.stringify({
+              source: 'web_organization_admin',
+              changed_fields: Object.keys(payload)
+            })
+          });
+
+          return publicOrganizationProfile(updatedProfile ?? profile);
+        });
+
+        return res.status(200).json({ data: { profile: result } });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] organization profile update failed');
+        return serverError(res, 'Organization profile could not be updated.');
+      }
+    });
+
+    router.post('/organization/departments', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const validation = validateDepartmentPayload(req.body ?? {});
+      if (!validation.ok) {
+        return badRequest(res, validation.message);
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-organization-department-create:user:${userId}`
+          ]);
+
+          const { active } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const role = normalizeRole(active.member_role);
+          if (role !== 'owner' && role !== 'hr') {
+            throw Object.assign(new Error('Owner or HR access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const [created] = await trx('departments')
+            .insert({
+              business_profile: active.workspace_id,
+              name: validation.payload.name,
+              is_active: true,
+              manager_member: null
+            })
+            .returning([
+              'id',
+              'name',
+              'is_active',
+              'business_profile',
+              'manager_member',
+              'date_created',
+              'date_updated'
+            ]);
+
+          if (!created?.id) {
+            throw new Error('Department creation did not return an id.');
+          }
+
+          await trx('activity_events').insert({
+            actor: userId,
+            target_user: userId,
+            action: 'organization_department_created',
+            entity_type: 'department',
+            entity_id: String(created.id),
+            business_profile: active.workspace_id,
+            payload: JSON.stringify({
+              source: 'web_organization_admin',
+              department_name: validation.payload.name
+            })
+          });
+
+          return publicOrganizationDepartment(created);
+        });
+
+        return res.status(201).json({ data: { department: result } });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] organization department creation failed');
+        return serverError(res, 'Department could not be created.');
+      }
+    });
+
+    router.patch('/organization/departments/:departmentId', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const departmentId = pickString(req?.params?.departmentId);
+      if (!departmentId) {
+        return badRequest(res, 'departmentId is required.');
+      }
+
+      const validation = validateDepartmentPayload(req.body ?? {});
+      if (!validation.ok) {
+        return badRequest(res, validation.message);
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-organization-department-update:user:${userId}:${departmentId}`
+          ]);
+
+          const { active } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const role = normalizeRole(active.member_role);
+          if (role !== 'owner' && role !== 'hr') {
+            throw Object.assign(new Error('Owner or HR access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const department = await loadDepartmentById(trx, active.workspace_id, departmentId);
+          if (!department) {
+            throw Object.assign(new Error('The requested department was not found in the active organization.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          await trx('departments')
+            .where({ id: departmentId, business_profile: active.workspace_id })
+            .update({ name: validation.payload.name });
+
+          const updatedDepartment = await loadDepartmentById(trx, active.workspace_id, departmentId);
+          await trx('activity_events').insert({
+            actor: userId,
+            target_user: userId,
+            action: 'organization_department_updated',
+            entity_type: 'department',
+            entity_id: String(departmentId),
+            business_profile: active.workspace_id,
+            payload: JSON.stringify({
+              source: 'web_organization_admin',
+              changed_fields: ['name']
+            })
+          });
+
+          return publicOrganizationDepartment(updatedDepartment ?? department);
+        });
+
+        return res.status(200).json({ data: { department: result } });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] organization department update failed');
+        return serverError(res, 'Department could not be updated.');
+      }
+    });
+
+    router.post('/organization/departments/:departmentId/deactivate', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const departmentId = pickString(req?.params?.departmentId);
+      if (!departmentId) {
+        return badRequest(res, 'departmentId is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-organization-department-deactivate:user:${userId}:${departmentId}`
+          ]);
+
+          const { active } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const role = normalizeRole(active.member_role);
+          if (role !== 'owner' && role !== 'hr') {
+            throw Object.assign(new Error('Owner or HR access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const department = await loadDepartmentById(trx, active.workspace_id, departmentId);
+          if (!department) {
+            throw Object.assign(new Error('The requested department was not found in the active organization.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const assignedActiveMembers = await trx('business_profile_members')
+            .count('* as count')
+            .where({
+              business_profile: active.workspace_id,
+              department: departmentId,
+              status: 'active'
+            })
+            .first();
+
+          const activeMemberCount = Number(assignedActiveMembers?.count ?? 0);
+          if (activeMemberCount > 0) {
+            throw Object.assign(new Error('Deactivate the department after reassigning its active members.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          await trx('departments')
+            .where({ id: departmentId, business_profile: active.workspace_id })
+            .update({ is_active: false });
+
+          const updatedDepartment = await loadDepartmentById(trx, active.workspace_id, departmentId);
+          await trx('activity_events').insert({
+            actor: userId,
+            target_user: userId,
+            action: 'organization_department_deactivated',
+            entity_type: 'department',
+            entity_id: String(departmentId),
+            business_profile: active.workspace_id,
+            payload: JSON.stringify({
+              source: 'web_organization_admin'
+            })
+          });
+
+          return publicOrganizationDepartment(updatedDepartment ?? department);
+        });
+
+        return res.status(200).json({ data: { department: result } });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] organization department deactivation failed');
+        return serverError(res, 'Department could not be deactivated.');
+      }
+    });
+
+    router.get('/workspaces/context', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-workspace-context:user:${userId}`
+          ]);
+
+          const userRow = await trx('directus_users')
+            .select('id', 'active_business_profile', 'active_department', 'active_member_role')
+            .where({ id: userId })
+            .first();
+
+          const membershipRows = await loadActiveMembershipRows(trx, userId);
+          const validMembershipRows = membershipRows.filter((row) => validateMembershipRow(row).ok);
+          const activeRow = selectCanonicalMembership(validMembershipRows);
+
+          if (activeRow) {
+            const activeWorkspaceId = pickString(userRow?.active_business_profile);
+            const activeDepartmentId = pickString(userRow?.active_department);
+            const activeRole = normalizeRole(userRow?.active_member_role);
+            const shouldSync =
+              activeWorkspaceId !== pickString(activeRow.workspace_id) ||
+              activeDepartmentId !== pickString(activeRow.department_id) ||
+              activeRole !== normalizeRole(activeRow.member_role);
+
+            if (shouldSync) {
+              await syncDirectusUserContext(trx, userId, activeRow);
+            }
+          }
+
+          const invitations =
+            activeRow && ['owner', 'hr'].includes(normalizeRole(activeRow.member_role) ?? '')
+              ? (await loadPendingInvitations(trx, activeRow.workspace_id))
+                .filter((row) => isPendingInviteStatus(row.status))
+                .map((row) => publicInvitation(row))
+              : [];
+
+          return {
+            active: activeRow
+              ? {
+                workspace: publicWorkspace(activeRow),
+                membership: publicMembershipSummary(activeRow),
+                department: publicDepartment(activeRow)
+              }
+              : null,
+            memberships: validMembershipRows.map((row) => publicMembership(row)),
+            invitations
+          };
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        logger?.error?.(error, '[wellar] workspace context failed');
+        return serverError(res, 'Workspace context could not be loaded.');
+      }
+    });
+
+    router.post('/workspaces/switch', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const body = req.body ?? {};
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return badRequest(res, 'Request body must be a JSON object.');
+      }
+
+      const membershipId = pickString(body.membership_id);
+      if (!membershipId) {
+        return badRequest(res, 'membership_id is required.');
+      }
+
+      const unexpectedKeys = Object.keys(body).filter((key) => key !== 'membership_id');
+      if (unexpectedKeys.length) {
+        return badRequest(res, 'Only membership_id is accepted.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-workspace-switch:user:${userId}`
+          ]);
+
+          const membershipRow = await loadMembershipForSwitch(trx, membershipId, userId);
+          const validation = validateMembershipRow(membershipRow);
+          if (!validation.ok) {
+            const error = new Error(validation.message);
+            error.code = validation.code;
+            throw error;
+          }
+
+          await syncDirectusUserContext(trx, userId, membershipRow);
+
+          return {
+            workspace: publicWorkspace(membershipRow),
+            membership: publicMembershipSummary(membershipRow),
+            department: publicDepartment(membershipRow)
+          };
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] workspace switch failed');
+        return serverError(res, 'Workspace context could not be switched.');
+      }
+    });
+
+    router.post('/workspaces/create', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return forbidden(res, 'Authentication is required.');
+      }
+
+      const body = req.body ?? {};
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return badRequest(res, 'Request body must be a JSON object.');
+      }
+
+      if (hasForbiddenInput(body)) {
+        return badRequest(res, 'Request contains forbidden ownership or workspace fields.');
+      }
+
+      const idempotencyKey = pickString(body.idempotency_key ?? body.idempotencyKey, 120);
+      if (!idempotencyKey) {
+        return badRequest(res, 'idempotency_key is required.');
+      }
+
+      const now = new Date().toISOString();
+      const companyPayload = buildCompanyPayload(body, userId, now);
+      if (companyPayload.error) {
+        return badRequest(res, companyPayload.error);
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-workspace-create:user:${userId}`
+          ]);
+
+          const existingMembership = await trx('business_profile_members as member')
+            .leftJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
+            .select(
+              'member.id',
+              'member.business_profile',
+              'member.member_role',
+              'member.status',
+              'profile.owner_user',
+              'profile.company_name',
+              'profile.is_active',
+              'profile.plan_code',
+              'profile.billing_status'
+            )
+            .where('member.user', userId)
+            .first();
+
+          if (existingMembership) {
+            const isExistingSelfOwnedWorkspace =
+              existingMembership.owner_user === userId &&
+              existingMembership.member_role === 'owner' &&
+              existingMembership.status === 'active' &&
+              existingMembership.business_profile;
+
+            if (isExistingSelfOwnedWorkspace) {
+              await trx('directus_users')
+                .where({ id: userId })
+                .update({
+                  active_business_profile: existingMembership.business_profile,
+                  active_department: null,
+                  active_member_role: 'owner'
+                });
+
+              return {
+                status: 200,
+                data: buildExistingContext(existingMembership)
+              };
+            }
+
+            const error = new Error('This user already belongs to another workspace.');
+            error.code = 'EXISTING_MEMBERSHIP';
+            throw error;
+          }
+
+          const duplicateOwnerMembership = await trx('business_profile_members')
+            .select('id')
+            .where({ user: userId })
+            .where({ member_role: 'owner' })
+            .first();
+
+          if (duplicateOwnerMembership) {
+            const error = new Error('This user already has an owner membership.');
+            error.code = 'EXISTING_OWNER_MEMBERSHIP';
+            throw error;
+          }
+
+          const [profile] = await trx('business_profiles')
+            .insert(companyPayload.value)
+            .returning(['id', 'company_name', 'is_active', 'plan_code', 'billing_status']);
+
+          if (!profile?.id) {
+            throw new Error('Workspace creation did not return an id.');
+          }
+
+          const [membership] = await trx('business_profile_members')
+            .insert({
+              user: userId,
+              business_profile: profile.id,
+              member_role: 'owner',
+              status: 'active',
+              joined_at: now
+            })
+            .returning(['id', 'business_profile', 'member_role', 'status']);
+
+          if (!membership?.id) {
+            throw new Error('Owner membership creation did not return an id.');
+          }
+
+          await trx('activity_events').insert({
+            actor: userId,
+            target_user: userId,
+            action: 'workspace_created',
+            entity_type: 'company',
+            entity_id: String(profile.id),
+            business_profile: profile.id,
+            payload: JSON.stringify({
+              source: 'web_self_service_onboarding',
+              idempotency_key: idempotencyKey,
+              membership_id: membership.id,
+              member_role: 'owner'
+            })
+          });
+
+          await trx('directus_users')
+            .where({ id: userId })
+            .update({
+              active_business_profile: profile.id,
+              active_department: null,
+              active_member_role: 'owner'
+            });
+
+          return {
+            status: 201,
+            data: {
+              workspace: publicWorkspace({
+                workspace_id: profile.id,
+                company_name: profile.company_name,
+                workspace_is_active: profile.is_active,
+                plan_code: profile.plan_code,
+                billing_status: profile.billing_status
+              }),
+              membership: {
+                id: String(membership.id),
+                status: membership.status ?? 'active',
+                memberRole: normalizeRole(membership.member_role) ?? 'owner'
+              },
+              department: null
+            }
+          };
+        });
+
+        return res.status(result.status).json({ data: result.data });
+      } catch (error) {
+        if (error?.code === 'EXISTING_MEMBERSHIP' || error?.code === 'EXISTING_OWNER_MEMBERSHIP') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] workspace creation failed');
+        return serverError(res, 'Workspace could not be created.');
+      }
+    });
+  }
+};

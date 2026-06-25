@@ -3,8 +3,6 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { Observable, firstValueFrom, from, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, tap, timeout } from 'rxjs/operators';
-import { SubscriptionService } from './subscription.service';
-import { BusinessCenterService } from './business-center.service';
 
 type AuthCaptureResult = {
   stored: boolean;
@@ -25,11 +23,7 @@ export class AuthService {
   private readonly api = environment.API_URL;
   private readonly refreshEndpointMissingSessionKey = 'auth_refresh_endpoint_missing';
 
-  constructor(
-    private http: HttpClient,
-    private subscriptions: SubscriptionService,
-    private businessCenter: BusinessCenterService
-  ) {}
+  constructor(private http: HttpClient) {}
 
   captureAuthFromUrl(): AuthCaptureResult {
     if (typeof window === 'undefined') {
@@ -405,22 +399,8 @@ export class AuthService {
           localStorage.setItem('user_role_name', roleName);
         }
 
-        const token = accessToken ?? this.getStoredAccessToken() ?? undefined;
-        return this.businessCenter.claimPendingInviteForUser(user, token).pipe(
-          timeout(12000),
-          catchError(() => of(false)),
-          switchMap(() =>
-            this.businessCenter.ensureBusinessProfileForUser(user, token).pipe(
-              timeout(12000),
-              catchError(() => of(null)),
-              map(() => user)
-            )
-          ),
-          timeout(15000),
-          tap(() => {
-            this.subscriptions.notifyAuthStateChanged();
-          })
-        );
+        this.notifyAuthStateChanged();
+        return of(user);
       }),
       catchError((err) => {
         sessionStorage.removeItem('is_logged_in');
@@ -476,7 +456,7 @@ export class AuthService {
     sessionStorage.setItem('is_logged_in', '1');
     sessionStorage.setItem('auth_session_established_at', Date.now().toString());
     localStorage.removeItem('auth_error');
-    this.subscriptions.notifyAuthStateChanged();
+    this.notifyAuthStateChanged();
   }
 
   storeRefreshToken(token: string) {
@@ -499,7 +479,6 @@ export class AuthService {
     localStorage.removeItem('user_role_id');
     localStorage.removeItem('user_role_name');
     localStorage.removeItem('wellar_sidebar_business_state_v1');
-    localStorage.removeItem('wellar_business_hub_access_state_v1');
 
     sessionStorage.removeItem('is_logged_in');
     sessionStorage.removeItem('auth_callback_pending');
@@ -508,7 +487,7 @@ export class AuthService {
     sessionStorage.removeItem('auth_session_established_at');
     sessionStorage.removeItem('post_auth_redirect');
     sessionStorage.removeItem(this.refreshEndpointMissingSessionKey);
-    this.subscriptions.notifyAuthStateChanged();
+    this.notifyAuthStateReset('auth-cleared');
   }
 
   getAuthHeaders(accessToken?: string): HttpHeaders {
@@ -556,18 +535,7 @@ export class AuthService {
   }
 
   ensureTrialAccess() {
-    const maybeEnsureTrial = (
-      this.subscriptions as { ensureBusinessTrial?: () => Observable<unknown> }
-    ).ensureBusinessTrial;
-
-    if (typeof maybeEnsureTrial !== 'function') {
-      return of(true);
-    }
-
-    return maybeEnsureTrial.call(this.subscriptions).pipe(
-      map(() => true),
-      catchError(() => of(false))
-    );
+    return of(true);
   }
 
   async getCurrentUserAfterRestore(): Promise<any | null> {
@@ -766,7 +734,6 @@ export class AuthService {
     localStorage.removeItem('token');
     localStorage.removeItem('access_token');
     localStorage.removeItem('directus_token');
-    localStorage.removeItem('wellar_business_hub_access_state_v1');
     sessionStorage.removeItem('is_logged_in');
   }
 
@@ -822,7 +789,8 @@ export class AuthService {
     }
 
     try {
-      localStorage.setItem('pending_invite_token', normalized);
+      sessionStorage.setItem('pending_invite_token', normalized);
+      localStorage.removeItem('pending_invite_token');
     } catch {
       // ignore storage errors
     }
@@ -839,11 +807,11 @@ export class AuthService {
     }
 
     if (this.isInviteLikeToken(token)) {
-      console.error('[Auth] invalid auth token storage contained invite token', { source, token });
+      console.error('[Auth] invalid auth credential storage contained an invite credential', { source });
       return;
     }
 
-    console.error('[Auth] invalid auth token storage', { source, token });
+    console.error('[Auth] invalid auth credential storage', { source });
   }
 
   private syncAccessTokenAliases(token: string): void {
@@ -867,6 +835,30 @@ export class AuthService {
     }
   }
 
+  private notifyAuthStateChanged(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.dispatchEvent(new Event('wellar-auth-state-changed'));
+    } catch {
+      // ignore browser event errors
+    }
+  }
+
+  private notifyAuthStateReset(reason: string): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.dispatchEvent(new CustomEvent('wellar-auth-state-reset', { detail: { reason } }));
+    } catch {
+      // ignore browser event errors
+    }
+  }
+
   private clearInviteFlowState(): void {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('pending_invite_token');
@@ -885,6 +877,7 @@ export class AuthService {
     }
 
     if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('pending_invite_token');
       sessionStorage.removeItem('invite_claim_error');
       sessionStorage.removeItem('invite_claim_completed');
 
@@ -932,4 +925,3 @@ export class AuthService {
     return false;
   }
 }
-

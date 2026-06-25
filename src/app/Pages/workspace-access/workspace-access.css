@@ -198,13 +198,44 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.workspace-access-page__create-form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 1.35rem;
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 45%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.workspace-access-page__form-header h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.05rem;
+}
+
+.workspace-access-page__form-header p {
+  margin: 0.35rem 0 0;
+  color: rgba(226, 232, 240, 0.68);
+  line-height: 1.6;
+}
+
+.workspace-access-page__create-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .workspace-access-page__invite-form label {
   flex: 1 1 auto;
   display: grid;
   gap: 0.35rem;
 }
 
-.workspace-access-page__invite-form span {
+.workspace-access-page__invite-form span,
+.workspace-access-page__create-form span {
   color: rgba(226, 232, 240, 0.62);
   font-size: 0.78rem;
   font-weight: 700;
@@ -266,6 +297,31 @@
   background:
     radial-gradient(circle at top left, rgba(56, 189, 248, 0.1), transparent 42%),
     rgba(255, 255, 255, 0.03);
+}
+
+.workspace-access-card--primary {
+  border-color: rgba(56, 189, 248, 0.3);
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 48%),
+    rgba(255, 255, 255, 0.04);
+}
+
+.workspace-access-card__tag {
+  justify-self: start;
+  border-radius: 999px;
+  border: 1px solid rgba(125, 211, 252, 0.3);
+  background: rgba(56, 189, 248, 0.1);
+  color: #7dd3fc;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.6rem;
+}
+
+.workspace-access-card__note {
+  color: rgba(226, 232, 240, 0.55) !important;
+  font-size: 0.85rem;
 }
 
 .workspace-access-card__top {
@@ -386,6 +442,11 @@
   padding: 1.2rem;
 }
 
+.workspace-access-loading__hint {
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 0.92rem;
+}
+
 .workspace-access-loading__bar,
 .workspace-access-loading__card {
   border-radius: 1rem;
@@ -466,6 +527,10 @@
   .workspace-access-page__invite-form {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .workspace-access-page__create-grid {
+    grid-template-columns: 1fr;
   }
 }
 

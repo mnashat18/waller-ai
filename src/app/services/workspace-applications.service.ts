@@ -6,7 +6,12 @@ import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth';
 
-export type WorkspaceApplicationStatus = 'pending_review' | 'approved' | 'rejected' | 'closed';
+export type WorkspaceApplicationStatus =
+  | 'pending_review'
+  | 'needs_more_info'
+  | 'approved'
+  | 'rejected'
+  | 'closed';
 
 export type WorkspaceApplicationRecord = {
   id: string;
@@ -25,7 +30,7 @@ export type WorkspaceApplicationRecord = {
   companyRegistrationNumber: string | null;
   expectedLaunchDate: string | null;
   message: string | null;
-  status: WorkspaceApplicationStatus | string;
+  status: WorkspaceApplicationStatus;
   submittedAt: string | null;
   reviewNote: string | null;
   createdBusinessProfileId: string | null;
@@ -169,24 +174,7 @@ export class WorkspaceApplicationsService {
       return of(null);
     }
 
-    const payload = {
-      requested_by_user: normalizedUserId,
-      status: 'pending_review',
-      company_name: input.company_name,
-      contact_name: input.contact_name,
-      job_title: input.job_title,
-      work_email: input.work_email,
-      industry: input.industry,
-      team_size: input.team_size,
-      country: input.country,
-      use_case: input.use_case,
-      phone: input.phone ?? null,
-      city: input.city ?? null,
-      website: input.website ?? null,
-      company_registration_number: input.company_registration_number ?? null,
-      expected_launch_date: input.expected_launch_date ?? null,
-      message: input.message ?? null
-    };
+    const payload = this.buildApplicantPayload(input);
 
     return this.http.post<{ data?: any }>(
       `${this.api}/items/workspace_applications`,
@@ -218,24 +206,7 @@ export class WorkspaceApplicationsService {
       return of(null);
     }
 
-    const payload = {
-      requested_by_user: normalizedUserId,
-      status: 'pending_review',
-      company_name: input.company_name,
-      contact_name: input.contact_name,
-      job_title: input.job_title,
-      work_email: input.work_email,
-      industry: input.industry,
-      team_size: input.team_size,
-      country: input.country,
-      use_case: input.use_case,
-      phone: input.phone ?? null,
-      city: input.city ?? null,
-      website: input.website ?? null,
-      company_registration_number: input.company_registration_number ?? null,
-      expected_launch_date: input.expected_launch_date ?? null,
-      message: input.message ?? null
-    };
+    const payload = this.buildApplicantPayload(input);
 
     return this.http.patch<{ data?: any }>(
       `${this.api}/items/workspace_applications/${encodeURIComponent(normalizedApplicationId)}`,
@@ -271,11 +242,44 @@ export class WorkspaceApplicationsService {
       companyRegistrationNumber: this.pickString(raw?.company_registration_number),
       expectedLaunchDate: this.pickString(raw?.expected_launch_date),
       message: this.pickString(raw?.message),
-      status: this.pickString(raw?.status) ?? 'pending_review',
+      status: this.normalizeStatus(raw?.status),
       submittedAt: this.pickString(raw?.date_created),
       reviewNote: this.pickString(raw?.review_note),
       createdBusinessProfileId: this.normalizeId(raw?.created_business_profile)
     };
+  }
+
+  private buildApplicantPayload(input: WorkspaceApplicationInput): Record<string, unknown> {
+    return {
+      company_name: input.company_name,
+      contact_name: input.contact_name,
+      job_title: input.job_title,
+      work_email: input.work_email,
+      industry: input.industry,
+      team_size: input.team_size,
+      country: input.country,
+      use_case: input.use_case,
+      phone: input.phone ?? null,
+      city: input.city ?? null,
+      website: input.website ?? null,
+      company_registration_number: input.company_registration_number ?? null,
+      expected_launch_date: input.expected_launch_date ?? null,
+      message: input.message ?? null
+    };
+  }
+
+  private normalizeStatus(value: unknown): WorkspaceApplicationStatus {
+    const raw = (this.pickString(value) ?? '').toLowerCase();
+    const known: WorkspaceApplicationStatus[] = [
+      'pending_review',
+      'needs_more_info',
+      'approved',
+      'rejected',
+      'closed'
+    ];
+    return (known as string[]).includes(raw)
+      ? (raw as WorkspaceApplicationStatus)
+      : 'pending_review';
   }
 
   private normalizeId(value: unknown): string | null {

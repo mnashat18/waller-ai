@@ -16,7 +16,7 @@ import { LoadingStateComponent } from '../shared/ui/loading-state/loading-state.
       <app-loading-state
         *ngIf="status === 'loading'"
         title="Signing you in..."
-        description="Please wait while we restore your workspace session."
+        description="Please wait while we restore your organization session."
       />
 
       <div class="auth-callback-error" *ngIf="status === 'error'">

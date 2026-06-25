@@ -1,6 +1,4 @@
 const AUTH_ONLY_PATHS = new Set([
-  '/login',
-  '/signup',
   '/auth-callback',
   '/verify-email',
   '/download-app'

@@ -46,21 +46,21 @@ export class DashboardPlaceholderPageComponent {
 
   roleScopeSummary(role: string | null, departmentName: string | null, departmentId: string | null): string {
     if (role === 'owner') {
-      return 'Owner scope: company-wide control across operational and administrative dashboard routes.';
+      return 'Owner access: organization-wide control across operational and administrative dashboard pages.';
     }
     if (role === 'hr') {
-      return 'HR scope: company-wide operational access across dashboard workflows.';
+      return 'HR access: organization-wide operational access across dashboard workflows.';
     }
     if (role === 'manager') {
       const department = departmentName || departmentId || 'active department';
       return `Manager scope: restricted to department-level operations for ${department}.`;
     }
-    return 'No dashboard role is currently active.';
+    return 'No dashboard access level is currently active.';
   }
 
   companyScopeSummary(companyName: string | null, companyId: string | null): string {
-    const company = companyName || companyId || 'No active company';
-    return `All page data is expected to remain scoped to ${company} through active_business_profile.`;
+    const company = companyName || companyId || 'No active organization';
+    return `All page data is expected to remain scoped to ${company}.`;
   }
 
   private resolvePage(): WorkspaceRouteDefinition {

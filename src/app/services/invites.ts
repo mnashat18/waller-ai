@@ -1,6 +1,6 @@
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable, map } from 'rxjs';
+import { Observable, catchError, defer, map, throwError } from 'rxjs';
 
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth';
@@ -13,6 +13,38 @@ export type ClaimInviteResponse = {
   departmentId: string | null;
   raw: unknown;
 };
+
+/** Stable classification of why an invite claim failed. */
+export type ClaimInviteErrorKind =
+  | 'missing-token'
+  | 'not-authenticated'
+  | 'configuration'
+  | 'permission'
+  | 'not-found'
+  | 'expired'
+  | 'already-claimed'
+  | 'wrong-email'
+  | 'already-member'
+  | 'network'
+  | 'invalid-response'
+  | 'flow-failed'
+  | 'unknown';
+
+/**
+ * Typed error surfaced by {@link InviteService.claimInvite}. It augments the
+ * original error (HttpErrorResponse, plain Error, etc.) with classification and
+ * a human-readable message, while PRESERVING the original fields (`error`,
+ * `status`, `message`) so existing helpers such as `getReadableInviteError`,
+ * `extractInviteErrorDetail`, and `isAlreadyClaimedError` keep working unchanged.
+ */
+export interface ClaimInviteError extends Error {
+  isClaimInviteError: true;
+  kind: ClaimInviteErrorKind;
+  status: number;
+  detail: string | null;
+  readableMessage: string;
+  original: unknown;
+}
 
 const PENDING_INVITE_TOKEN_KEY = 'pending_invite_token';
 const INVITE_CLAIM_ERROR_KEY = 'invite_claim_error';
@@ -28,40 +60,148 @@ export class InviteService {
   ) {}
 
   claimInvite(token: string): Observable<ClaimInviteResponse> {
-    const normalizedToken = token.trim();
-    if (!normalizedToken) {
-      throw new Error('Invite token is missing.');
-    }
-
-    const accessToken = this.auth.getStoredAccessToken();
-    if (!accessToken) {
-      throw new Error('Please sign in first.');
-    }
-
-    const endpoint = this.resolveClaimInviteEndpoint();
-    this.debugFlow('claim started', { token: normalizedToken, endpoint });
-    const headers = new HttpHeaders({
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`
-    });
-
-    return this.http.post<unknown>(
-      endpoint,
-      { token: normalizedToken },
-      {
-        headers,
-        withCredentials: true
+    // defer() ensures that even the synchronous setup throws below (missing
+    // token, not signed in, bad flow configuration) are emitted as catchable
+    // stream errors instead of being thrown before the Observable is returned.
+    // This keeps callers that rely on `.pipe(catchError(...))` from crashing.
+    return defer(() => {
+      const normalizedToken = token.trim();
+      if (!normalizedToken) {
+        throw new Error('Invite token is missing.');
       }
-    ).pipe(
-      map((response) => {
-        const normalized = this.normalizeClaimResponse(response);
-        this.debugFlow('claim success', {
-          businessProfileId: normalized.businessProfileId,
-          memberRole: normalized.memberRole
-        });
-        return normalized;
-      })
+
+      const accessToken = this.auth.getStoredAccessToken();
+      if (!accessToken) {
+        throw new Error('Please sign in first.');
+      }
+
+      const endpoint = this.resolveClaimInviteEndpoint();
+      this.debugFlow('claim started', { endpoint: this.maskSensitiveUrl(endpoint) });
+      const headers = new HttpHeaders({
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      });
+
+      return this.http.post<unknown>(
+        endpoint,
+        { token: normalizedToken },
+        {
+          headers,
+          withCredentials: true
+        }
+      ).pipe(
+        map((response) => {
+          const normalized = this.normalizeClaimResponse(response);
+          this.debugFlow('claim success', { memberRole: normalized.memberRole });
+          return normalized;
+        })
+      );
+    }).pipe(
+      catchError((error) => throwError(() => this.toClaimInviteError(error)))
     );
+  }
+
+  /** True when an error originated from {@link claimInvite}. */
+  isClaimInviteError(error: unknown): error is ClaimInviteError {
+    return Boolean((error as { isClaimInviteError?: unknown })?.isClaimInviteError);
+  }
+
+  /**
+   * Normalize any failure from the claim pipeline into a typed ClaimInviteError.
+   * The original error is preserved as both `.original` and via copied
+   * `status` / `error` / `message` fields, so the existing readable-error and
+   * already-claimed helpers continue to classify it exactly as before.
+   */
+  private toClaimInviteError(error: unknown): ClaimInviteError {
+    if (this.isClaimInviteError(error)) {
+      return error;
+    }
+
+    const status = this.extractStatus(error);
+    const detail = this.extractInviteErrorDetail(error);
+    const readableMessage = this.getReadableInviteError(error);
+    const kind = this.classifyClaimError(error, status, detail);
+
+    // Build on top of the original error so that downstream helpers reading
+    // `error.error.errors[0]...`, `error.status`, or `error.message` still work.
+    const typed = new Error(readableMessage) as ClaimInviteError;
+    typed.name = 'ClaimInviteError';
+    typed.isClaimInviteError = true;
+    typed.kind = kind;
+    typed.status = status;
+    typed.detail = detail;
+    typed.readableMessage = readableMessage;
+    typed.original = error;
+
+    // Preserve the raw Directus/HTTP shape for the existing detail extractors.
+    const rawErrorBody = (error as { error?: unknown })?.error;
+    if (rawErrorBody !== undefined) {
+      (typed as unknown as { error: unknown }).error = rawErrorBody;
+    }
+    if (status) {
+      (typed as unknown as { status: number }).status = status;
+    }
+
+    this.debugFlow('claim failed', { kind, status, detail: detail ? 'present' : null });
+    return typed;
+  }
+
+  private classifyClaimError(error: unknown, status: number, detail: string | null): ClaimInviteErrorKind {
+    const message = (this.pickString((error as { message?: unknown })?.message) ?? '').toLowerCase();
+    const normalizedDetail = (detail ?? '').toLowerCase();
+
+    if (message.includes('invite token is missing') || (normalizedDetail.includes('missing') && normalizedDetail.includes('token'))) {
+      return 'missing-token';
+    }
+    if (message.includes('please sign in first')) {
+      return 'not-authenticated';
+    }
+    if (
+      message.includes('directus url is not configured') ||
+      message.includes('claim invite flow id is not configured') ||
+      message.includes('claim invite flow must use a directus flow uuid')
+    ) {
+      return 'configuration';
+    }
+    if (this.isAlreadyClaimedError(error)) {
+      return 'already-claimed';
+    }
+    if (status === 401 || status === 403) {
+      return 'permission';
+    }
+    // Network / connection failures present as status 0 (no HTTP response).
+    if (status === 0 && !normalizedDetail) {
+      return 'network';
+    }
+    if (normalizedDetail.includes('expired')) {
+      return 'expired';
+    }
+    if (normalizedDetail.includes('not found') || normalizedDetail.includes('invalid')) {
+      return 'not-found';
+    }
+    if (
+      normalizedDetail.includes('another email') ||
+      normalizedDetail.includes('different email') ||
+      normalizedDetail.includes('sent to another email')
+    ) {
+      return 'wrong-email';
+    }
+    if (normalizedDetail.includes('already a member')) {
+      return 'already-member';
+    }
+    // Reached when normalizeClaimResponse rejected an unexpected/non-ok payload.
+    if (!status && (message.includes('could not accept invite') || normalizedDetail)) {
+      return 'flow-failed';
+    }
+    if (!status && !normalizedDetail) {
+      return 'invalid-response';
+    }
+    return 'unknown';
+  }
+
+  private extractStatus(error: unknown): number {
+    const status = (error as { status?: unknown })?.status;
+    return typeof status === 'number' ? status : 0;
   }
 
   setPendingInviteToken(token: string): void {
@@ -75,12 +215,13 @@ export class InviteService {
     }
 
     try {
-      window.localStorage.setItem(PENDING_INVITE_TOKEN_KEY, normalized);
+      window.sessionStorage.setItem(PENDING_INVITE_TOKEN_KEY, normalized);
+      window.localStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
     } catch {
       // ignore storage errors
     }
 
-    this.debugFlow('token saved', { token: normalized });
+    this.debugFlow('token saved');
   }
 
   getPendingInviteToken(): string | null {
@@ -89,7 +230,8 @@ export class InviteService {
     }
 
     try {
-      const token = window.localStorage.getItem(PENDING_INVITE_TOKEN_KEY)?.trim();
+      const token = window.sessionStorage.getItem(PENDING_INVITE_TOKEN_KEY)?.trim();
+      window.localStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
       return token || null;
     } catch {
       return null;
@@ -120,6 +262,7 @@ export class InviteService {
     }
 
     try {
+      window.sessionStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
       window.localStorage.removeItem(PENDING_INVITE_TOKEN_KEY);
     } catch {
       // ignore storage errors
@@ -137,9 +280,9 @@ export class InviteService {
     }
 
     try {
-      const localValue = window.localStorage.getItem(key);
       const sessionValue = window.sessionStorage.getItem(key);
-      return localValue === 'true' || sessionValue === 'true' || sessionValue === '1';
+      window.localStorage.removeItem(key);
+      return sessionValue === 'true' || sessionValue === '1';
     } catch {
       return false;
     }
@@ -156,9 +299,9 @@ export class InviteService {
     }
 
     try {
-      window.localStorage.setItem(key, 'true');
       window.sessionStorage.setItem(key, '1');
       window.sessionStorage.setItem(INVITE_CLAIM_COMPLETED_KEY, '1');
+      window.localStorage.removeItem(key);
     } catch {
       // ignore storage errors
     }
@@ -193,7 +336,7 @@ export class InviteService {
     try {
       window.sessionStorage.setItem(INVITE_CLAIM_COMPLETED_KEY, '1');
       window.sessionStorage.setItem(key, '1');
-      window.localStorage.setItem(key, 'true');
+      window.localStorage.removeItem(key);
     } catch {
       // ignore storage errors
     }
@@ -604,6 +747,48 @@ export class InviteService {
       console.debug(`[InviteFlow] ${message}`);
       return;
     }
-    console.debug(`[InviteFlow] ${message}`, data);
+    console.debug(`[InviteFlow] ${message}`, this.maskDebugData(data));
+  }
+
+  private maskDebugData(data: unknown): unknown {
+    if (!data || typeof data !== 'object') {
+      return data;
+    }
+
+    const record = data as Record<string, unknown>;
+    const safe: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(record)) {
+      const normalizedKey = key.toLowerCase();
+      if (
+        normalizedKey.includes('token') ||
+        normalizedKey.includes('userid') ||
+        normalizedKey.includes('membershipid') ||
+        normalizedKey.includes('businessprofileid') ||
+        normalizedKey.includes('departmentid')
+      ) {
+        safe[key] = value ? '[redacted]' : value;
+      } else if (normalizedKey.includes('detail')) {
+        safe[key] = value ? 'present' : value;
+      } else if (typeof value === 'string' && value.includes('token=')) {
+        safe[key] = this.maskSensitiveUrl(value);
+      } else {
+        safe[key] = value;
+      }
+    }
+    return safe;
+  }
+
+  private maskSensitiveUrl(value: string): string {
+    try {
+      const parsed = new URL(value, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+      ['token', 'code', 'invite', 'access_token', 'refresh_token'].forEach((key) => {
+        if (parsed.searchParams.has(key)) {
+          parsed.searchParams.set(key, '[redacted]');
+        }
+      });
+      return parsed.pathname + (parsed.search ? parsed.search : '');
+    } catch {
+      return value.includes('token=') ? '[redacted-url]' : value;
+    }
   }
 }

@@ -123,7 +123,7 @@ export const PUBLIC_ROUTE_MAP: readonly PublicRouteDefinition[] = [
     path: 'contact',
     label: 'Request Demo',
     title: 'Request Demo',
-    description: 'Contact the Wellar team for rollout planning and company onboarding.'
+    description: 'Contact the Wellar team for rollout planning and organization onboarding.'
   },
   {
     id: 'login',
@@ -147,7 +147,7 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
     path: 'dashboard',
     label: 'Dashboard',
     title: 'Dashboard',
-    description: "Company-scoped readiness overview for today's operation.",
+    description: "Organization-scoped readiness overview for today's operation.",
     icon: 'dashboard',
     roles: ['owner', 'hr', 'manager'],
     sidebar: true,
@@ -158,7 +158,7 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
     path: 'workforce',
     label: 'Workforce',
     title: 'Workforce',
-    description: 'Workforce roster, access roles, and readiness participation.',
+    description: 'Workforce roster, access levels, and readiness participation.',
     icon: 'workforce',
     roles: ['owner', 'hr', 'manager'],
     sidebar: true,
@@ -167,11 +167,11 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
   {
     id: 'company',
     path: 'company',
-    label: 'Company',
-    title: 'Company',
-    description: 'Business profile, activation status, and company-level controls.',
+    label: 'Organization',
+    title: 'Organization',
+    description: 'Organization overview, department structure, invitations, and access management.',
     icon: 'company',
-    roles: ['owner', 'hr', 'manager'],
+    roles: ['owner', 'hr'],
     sidebar: true,
     section: 'organization'
   },
@@ -191,7 +191,7 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
     path: 'departments',
     label: 'Departments',
     title: 'Departments',
-    description: 'Department structure and access boundaries for company operations.',
+    description: 'Department structure and access boundaries for organization operations.',
     icon: 'departments',
     roles: ['owner', 'hr'],
     sidebar: false,
@@ -200,9 +200,9 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
   {
     id: 'invites',
     path: 'invites',
-    label: 'Invites',
-    title: 'Invites',
-    description: 'Pending access invites and workforce onboarding progress.',
+    label: 'Invitations',
+    title: 'Invitations',
+    description: 'Pending access invitations and workforce onboarding progress.',
     icon: 'invites',
     roles: ['owner', 'hr'],
     sidebar: false,
@@ -235,7 +235,7 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
     path: 'activity',
     label: 'Activity',
     title: 'Activity',
-    description: 'Company activity stream across requests, scans, alerts, and exports.',
+    description: 'Organization activity stream across requests, scans, alerts, and exports.',
     icon: 'activity',
     roles: ['owner', 'hr'],
     sidebar: false,
@@ -257,9 +257,9 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
     path: 'settings',
     label: 'Settings',
     title: 'Settings',
-    description: 'Workspace settings, notifications, integrations, API keys, privacy, and security.',
+    description: 'User profile, verified workspace context, local preferences, and session controls.',
     icon: 'settings',
-    roles: ['owner', 'hr', 'manager'],
+    roles: ['owner', 'hr'],
     sidebar: true,
     section: 'admin'
   },
@@ -268,7 +268,7 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
     path: 'scan-requests',
     label: 'Scan Requests',
     title: 'Scan Requests',
-    description: 'Scan requests scoped to the active company and department.',
+    description: 'Scan requests scoped to the active organization and department.',
     icon: 'requests',
     roles: ['owner', 'hr', 'manager'],
     sidebar: true,
@@ -307,7 +307,7 @@ export const SIDEBAR_NAV: readonly SidebarNavGroup[] = [
         label: 'Workforce',
         route: '/app/workforce',
         icon: 'users',
-        description: 'Manage the workforce roster, roles, and departments.',
+        description: 'Manage the workforce roster, access levels, and departments.',
         matchRoutes: ['/app/workforce', '/app/members', '/app/departments', '/app/invites'],
         roles: ['owner', 'hr', 'manager']
       },
@@ -354,20 +354,20 @@ export const SIDEBAR_NAV: readonly SidebarNavGroup[] = [
     group: 'Admin',
     items: [
       {
-        label: 'Company',
+        label: 'Organization',
         route: '/app/company',
         icon: 'company',
-        description: 'Manage company profile, limits, timezone, and workspace status.',
+        description: 'Open the organization overview, departments, and access management surface.',
         matchRoutes: ['/app/company'],
-        roles: ['owner', 'hr', 'manager']
+        roles: ['owner', 'hr']
       },
       {
         label: 'Settings',
         route: '/app/settings',
         icon: 'settings',
-        description: 'Manage workspace settings, integrations, security, and privacy.',
+        description: 'Manage your profile, verified workspace context, preferences, and session controls.',
         matchRoutes: ['/app/settings'],
-        roles: ['owner', 'hr', 'manager']
+        roles: ['owner', 'hr']
       }
     ]
   }
@@ -414,13 +414,11 @@ export const ROLE_TO_PAGE_MATRIX: Record<ActiveMemberRole, WorkspacePageId[]> = 
   manager: [
     'dashboard',
     'workforce',
-    'company',
     'members',
     'compliance',
     'alerts',
     'reports',
     'requests',
-    'settings',
     'profile'
   ],
   employee: []
@@ -481,7 +479,7 @@ export function canAccessWorkspaceRoute(
   }
 
   if (!activeBusinessProfile) {
-    return { allowed: false, reason: 'No active company selected.' };
+    return { allowed: false, reason: 'No active organization selected.' };
   }
 
   if (!role || role === 'employee') {
@@ -489,7 +487,7 @@ export function canAccessWorkspaceRoute(
   }
 
   if (!page.roles.includes(role)) {
-    return { allowed: false, reason: 'This page is not available for the active role.' };
+    return { allowed: false, reason: 'This page is not available for the active access level.' };
   }
 
   if (role === 'manager' && page.requiresDepartmentForManager && !activeDepartment) {

@@ -1,7 +1,7 @@
 <header class="app-header__panel">
   <div class="app-header__context">
-    <p class="app-header__eyebrow">Workspace</p>
-    <span class="app-header__context-note">Compact company and user controls</span>
+    <p class="app-header__eyebrow">Organization Context</p>
+    <span class="app-header__context-note">Organization, department, and session controls</span>
   </div>
 
   <ng-container *ngIf="state$ | async as state">
@@ -13,20 +13,22 @@
           type="button"
           (click)="toggleCompanyMenu($event)"
           class="app-header__button app-header__button--compact">
-          <span class="app-header__avatar">C</span>
+          <span class="app-header__avatar">
+            {{ (state.context.activeBusinessProfileName || 'W').slice(0, 1).toUpperCase() }}
+          </span>
           <span class="app-header__button-copy">
             <strong>
               {{
                 state.ui.showWorkspaceLoading
-                  ? 'Loading workspace...'
-                  : (state.context.activeBusinessProfileName || 'No active workspace')
+                  ? 'Loading organization...'
+                  : (state.context.activeBusinessProfileName || 'No active organization')
               }}
             </strong>
             <small>
               {{
                 state.ui.showWorkspaceLoading
-                  ? 'Loading role...'
-                  : (state.context.activeDepartmentName || 'Company-wide scope')
+                  ? 'Loading access level...'
+                  : (state.context.activeDepartmentName || 'Organization-wide')
               }}
             </small>
           </span>
@@ -34,29 +36,29 @@
 
         <div *ngIf="companyMenuOpen" class="app-header__popover">
           <div class="app-header__popover-top">
-            <p>Company Switcher</p>
+            <p>Organization Switcher</p>
             <button
               type="button"
               (click)="refreshContext()">
-              {{ refreshingContext ? 'Refreshing...' : 'Refresh Context' }}
+              {{ refreshingContext ? 'Refreshing...' : 'Refresh context' }}
             </button>
           </div>
 
           <div class="app-header__popover-stack">
             <ng-container *ngIf="state.ui.showWorkspaceLoading; else workspaceContextReady">
-              <app-company-context-chip label="Active Company" value="Loading workspace..."></app-company-context-chip>
-              <app-company-context-chip label="Active Department" value="Loading role..."></app-company-context-chip>
+              <app-company-context-chip label="Active Organization" value="Loading organization..."></app-company-context-chip>
+              <app-company-context-chip label="Active Department" value="Loading access level..."></app-company-context-chip>
             </ng-container>
             <ng-template #workspaceContextReady>
               <app-company-context-chip
-                label="Active Company"
-                [value]="state.context.activeBusinessProfileName || 'No active workspace'">
+                label="Active Organization"
+                [value]="state.context.activeBusinessProfileName || 'No active organization'">
               </app-company-context-chip>
 
               <app-company-context-chip
                 label="Active Department"
                 [value]="state.context.activeDepartmentName"
-                fallback="Company-wide">
+                fallback="Organization-wide">
               </app-company-context-chip>
 
               <app-role-badge [role]="state.context.activeMemberRole"></app-role-badge>
@@ -65,7 +67,7 @@
                 class="app-header__secondary app-header__secondary--full"
                 type="button"
                 (click)="goToWorkspaceAccess()">
-                Request workspace access
+                Request organization access
               </button>
             </ng-template>
           </div>
@@ -88,13 +90,6 @@
             </button>
           </div>
 
-          <button
-            *ngIf="state.context.activeDepartmentId && state.context.activeMemberRole !== 'manager'"
-            type="button"
-            (click)="clearDepartmentScope()"
-            class="app-header__secondary">
-            Clear Department Scope
-          </button>
         </div>
       </div>
 
@@ -124,7 +119,7 @@
             type="button"
             (click)="refreshContext()"
             class="app-header__secondary app-header__secondary--full">
-            Refresh company context
+            Refresh organization context
           </button>
           <button
             type="button"
@@ -141,8 +136,8 @@
 <ng-template #noCompanies>
   <div class="app-header__empty">
     <app-empty-state
-      title="No additional companies"
-      message="The switcher is connected, but no alternate company memberships were returned for this user.">
+      title="No additional organizations"
+      message="The switcher is connected, but no alternate organization memberships were returned for this user.">
     </app-empty-state>
   </div>
 </ng-template>

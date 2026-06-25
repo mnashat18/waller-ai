@@ -14,6 +14,10 @@ import {
 } from '../../services/workspace-access.service';
 import { catchError, finalize, from, map, of, switchMap, take } from 'rxjs';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
+import {
+  type CreatedWorkspaceContext,
+  WorkspaceCreationService
+} from '../../services/workspace-creation.service';
 
 @Component({
   selector: 'app-workspace-access-page',
@@ -32,6 +36,17 @@ export class WorkspaceAccessPageComponent implements OnInit {
   inviteCode = '';
   inviteCodeLoading = false;
   inviteCodeError = '';
+  createCompanyOpen = false;
+  createCompanyLoading = false;
+  createCompanyError = '';
+  private recoveryReturnUrl: string | null = null;
+  createCompanyForm = {
+    companyName: '',
+    contactName: '',
+    workEmail: '',
+    phone: '',
+    country: ''
+  };
 
   submittingInviteId: string | null = null;
   switchingWorkspaceId: string | null = null;
@@ -44,7 +59,8 @@ export class WorkspaceAccessPageComponent implements OnInit {
     private companyContext: CompanyContextService,
     private ngZone: NgZone,
     private postLoginRouting: PostLoginRoutingService,
-    private invites: InviteService
+    private invites: InviteService,
+    private workspaceCreation: WorkspaceCreationService
   ) {}
 
   ngOnInit(): void {
@@ -55,8 +71,10 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
     const joined = this.route.snapshot.queryParamMap.get('joined')?.trim();
     if (joined === '1') {
-      this.inviteClaimMessage = 'Workspace joined. Reloading access...';
+      this.inviteClaimMessage = 'Organization joined. Reloading access...';
     }
+
+    this.recoveryReturnUrl = this.readRecoveryReturnUrl();
 
     const inviteToken =
       this.route.snapshot.queryParamMap.get('invite')?.trim() ??
@@ -95,7 +113,7 @@ export class WorkspaceAccessPageComponent implements OnInit {
       take(1),
       switchMap((ready) => {
         if (!ready) {
-          this.router.navigateByUrl('/login');
+          this.router.navigateByUrl('/?auth=login');
           return of(null);
         }
 
@@ -123,12 +141,22 @@ export class WorkspaceAccessPageComponent implements OnInit {
           return;
         }
         const state = payload.workspaceState;
+        if (payload.currentUser?.email && !this.createCompanyForm.workEmail) {
+          this.createCompanyForm.workEmail = String(payload.currentUser.email);
+        }
+        const displayName = [payload.currentUser?.first_name, payload.currentUser?.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+        if (displayName && !this.createCompanyForm.contactName) {
+          this.createCompanyForm.contactName = displayName;
+        }
 
         const activeMemberships = state.activeWorkspaces.filter((membership) =>
           membership.status === 'active' && membership.isActive !== false
         );
 
-        if (activeMemberships.length > 0) {
+        if (activeMemberships.length === 1) {
           const activeMembership = activeMemberships[0];
           const role = String(activeMembership.memberRole || '').toLowerCase();
 
@@ -142,8 +170,17 @@ export class WorkspaceAccessPageComponent implements OnInit {
             return;
           }
 
-          this.errorMessage = 'Your workspace role is not supported.';
+          this.errorMessage = 'Your organization access level is not supported.';
           this.state = this.createEmptyState();
+          return;
+        }
+
+        if (activeMemberships.length > 1) {
+          this.state = {
+            ...state,
+            mode: 'multiple-workspaces',
+            workspaces: activeMemberships
+          };
           return;
         }
 
@@ -178,7 +215,7 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
   logout(): void {
     this.auth.logout();
-    this.router.navigateByUrl('/login');
+    this.router.navigateByUrl('/');
   }
 
   toggleInviteDetails(): void {
@@ -187,6 +224,67 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
   openInviteLink(): void {
     this.showInviteForm = true;
+  }
+
+  openCreateCompany(): void {
+    this.createCompanyOpen = true;
+    this.createCompanyError = '';
+  }
+
+  createCompany(): void {
+    if (this.createCompanyLoading) {
+      return;
+    }
+
+    const companyName = this.createCompanyForm.companyName.trim();
+    if (!companyName) {
+      this.createCompanyError = 'Company name is required.';
+      return;
+    }
+
+    this.createCompanyLoading = true;
+    this.createCompanyError = '';
+
+    this.workspaceCreation.createWorkspace({
+      idempotency_key: this.createIdempotencyKey(),
+      company_name: companyName,
+      contact_name: this.emptyToNull(this.createCompanyForm.contactName),
+      work_email: this.emptyToNull(this.createCompanyForm.workEmail),
+      phone: this.emptyToNull(this.createCompanyForm.phone),
+      country: this.emptyToNull(this.createCompanyForm.country)
+    }).pipe(
+      switchMap((result) =>
+        from(this.activateCreatedWorkspaceContext(result.context)).pipe(map(() => result))
+      ),
+      switchMap(() => from(this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true }))),
+      switchMap(() => from(this.postLoginRouting.resolveDestinationStrict())),
+      finalize(() => {
+        this.createCompanyLoading = false;
+      })
+    ).subscribe({
+      next: async (route) => {
+        const nextRoute = route === '/app/workspace-access' ? '/app/dashboard' : route;
+        await this.router.navigateByUrl(nextRoute, { replaceUrl: true });
+      },
+      error: (error) => {
+        this.createCompanyError = this.toCreateCompanyError(error);
+      }
+    });
+  }
+
+  private async activateCreatedWorkspaceContext(context: CreatedWorkspaceContext): Promise<void> {
+    await this.companyContext.activateFromMembership({
+      id: context.membership.id,
+      status: context.membership.status,
+      member_role: context.membership.memberRole,
+      business_profile: {
+        id: context.workspace.id,
+        company_name: context.workspace.companyName,
+        is_active: context.workspace.isActive
+      },
+      department: null,
+      joined_at: null
+    });
   }
 
   startWorkspaceSetup(): void {
@@ -211,7 +309,7 @@ export class WorkspaceAccessPageComponent implements OnInit {
           return;
         }
 
-        void this.completeInviteClaim(result, invite.token ?? null);
+        void this.completeInviteClaim(result, null);
       },
       error: () => {
         this.submittingInviteId = null;
@@ -244,6 +342,11 @@ export class WorkspaceAccessPageComponent implements OnInit {
   }
 
   async openWorkspace(workspace: WorkspaceAccessWorkspace): Promise<void> {
+    if (workspace.memberRole === 'employee') {
+      await this.redirectEmployeeWorkspace(workspace);
+      return;
+    }
+
     await this.redirectActiveWorkspace(workspace);
   }
 
@@ -267,15 +370,18 @@ export class WorkspaceAccessPageComponent implements OnInit {
         joined_at: null
       });
 
+      const nextRoute = this.resolveRecoveryReturnUrl('/app/dashboard');
       const success = await this.ngZone.run(() =>
-        this.router.navigateByUrl('/app/dashboard', { replaceUrl: true })
+        this.router.navigateByUrl(nextRoute, { replaceUrl: true })
       );
 
       if (!success) {
-        this.errorMessage = 'We could not open that workspace.';
+        this.errorMessage = 'We could not open that organization.';
+      } else {
+        this.clearRecoveryReturnUrl();
       }
     } catch (error) {
-      this.errorMessage = 'We could not open that workspace.';
+      this.errorMessage = 'We could not open that organization.';
     } finally {
       this.switchingWorkspaceId = null;
     }
@@ -300,14 +406,17 @@ export class WorkspaceAccessPageComponent implements OnInit {
         department: workspace.departmentId ? { id: workspace.departmentId, name: workspace.departmentName ?? null } : null,
         joined_at: null
       });
+      const nextRoute = this.resolveRecoveryReturnUrl('/employee-web-access');
       const success = await this.ngZone.run(() =>
-        this.router.navigateByUrl('/app/my-readiness', { replaceUrl: true })
+        this.router.navigateByUrl(nextRoute, { replaceUrl: true })
       );
       if (!success) {
-        this.errorMessage = 'We could not open your workspace.';
+        this.errorMessage = 'We could not open your organization.';
+      } else {
+        this.clearRecoveryReturnUrl();
       }
     } catch (error) {
-      this.errorMessage = 'We could not open your workspace.';
+      this.errorMessage = 'We could not open your organization.';
     } finally {
       this.switchingWorkspaceId = null;
     }
@@ -349,20 +458,99 @@ export class WorkspaceAccessPageComponent implements OnInit {
     }
   }
 
-  workspaceScopeLabel(workspace: WorkspaceAccessWorkspace): string {
-    if (workspace.memberRole === 'manager') {
-      return workspace.departmentName || 'Department scope';
+  private resolveRecoveryReturnUrl(defaultRoute: string): string {
+    const candidate = this.normalizeRecoveryReturnUrl(this.recoveryReturnUrl);
+    if (!candidate || candidate === '/app/workspace-access') {
+      return defaultRoute;
     }
 
-    return 'Company-wide';
+    return candidate;
+  }
+
+  private normalizeRecoveryReturnUrl(value: string | null): string | null {
+    const normalized = value?.trim() ?? '';
+    if (!normalized || !normalized.startsWith('/') || normalized.startsWith('//')) {
+      return null;
+    }
+
+    if (
+      normalized.startsWith('/app/workspace-access') ||
+      normalized.startsWith('/app/workspace/request') ||
+      normalized.startsWith('/app/workspace-restricted')
+    ) {
+      return null;
+    }
+
+    return normalized;
+  }
+
+  private readRecoveryReturnUrl(): string | null {
+    const queryReturnUrl = this.route.snapshot.queryParamMap.get('returnUrl');
+    const queryCandidate = this.normalizeRecoveryReturnUrl(queryReturnUrl);
+    if (queryCandidate) {
+      return queryCandidate;
+    }
+
+    if (typeof sessionStorage === 'undefined') {
+      return null;
+    }
+
+    const storedReturnUrl = sessionStorage.getItem('wellar_workspace_recovery_return_url');
+    return this.normalizeRecoveryReturnUrl(storedReturnUrl);
+  }
+
+  private clearRecoveryReturnUrl(): void {
+    this.recoveryReturnUrl = null;
+
+    if (typeof sessionStorage === 'undefined') {
+      return;
+    }
+
+    sessionStorage.removeItem('wellar_workspace_recovery_return_url');
+  }
+
+  workspaceScopeLabel(workspace: WorkspaceAccessWorkspace): string {
+    if (workspace.memberRole === 'manager') {
+      return workspace.departmentName || 'Assigned department';
+    }
+
+    return 'Organization-wide';
   }
 
   inviteScopeLabel(invite: WorkspaceAccessInvite): string {
     if (invite.memberRole === 'manager') {
-      return invite.departmentName || 'Department scope';
+      return invite.departmentName || 'Assigned department';
     }
 
-    return 'Company-wide';
+    return 'Organization-wide';
+  }
+
+  accessLevelLabel(role: WorkspaceAccessWorkspace['memberRole'] | WorkspaceAccessInvite['memberRole']): string {
+    if (role === 'owner') return 'Owner';
+    if (role === 'hr') return 'HR';
+    if (role === 'manager') return 'Manager';
+    if (role === 'employee') return 'Employee';
+    return 'Unknown';
+  }
+
+  organizationStateLabel(workspace: WorkspaceAccessWorkspace): string {
+    if (this.isCurrentOrganization(workspace)) {
+      return 'Current';
+    }
+
+    return workspace.isActive ? 'Active' : this.toDisplayLabel(workspace.status || 'inactive');
+  }
+
+  isCurrentOrganization(workspace: WorkspaceAccessWorkspace): boolean {
+    if (typeof localStorage === 'undefined') {
+      return false;
+    }
+
+    const activeId =
+      localStorage.getItem('active_business_profile_id')?.trim() ||
+      localStorage.getItem('active_business_profile')?.trim() ||
+      '';
+    return Boolean(activeId && activeId === workspace.id);
   }
 
   trackByWorkspace(index: number, item: WorkspaceAccessWorkspace): string {
@@ -396,7 +584,14 @@ export class WorkspaceAccessPageComponent implements OnInit {
       finalize(() => {
         this.inviteCodeLoading = false;
       })
-    ).subscribe();
+    ).subscribe({
+      error: (error) => {
+        // Surface claim-completion failures (network/permission errors rethrown by
+        // the service, or a failed post-claim navigation) instead of absorbing them.
+        // finalize() above still clears the loading state.
+        this.inviteCodeError = this.invites.getReadableInviteError(error);
+      }
+    });
   }
 
   private createEmptyState(): WorkspaceAccessState {
@@ -424,6 +619,33 @@ export class WorkspaceAccessPageComponent implements OnInit {
     }
 
     this.invites.setPendingInviteToken(normalized);
+  }
+
+  private emptyToNull(value: string): string | null {
+    const normalized = value.trim();
+    return normalized || null;
+  }
+
+  private createIdempotencyKey(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  private toCreateCompanyError(error: any): string {
+    const code = String(error?.error?.error?.code ?? error?.error?.code ?? '').toUpperCase();
+    const message =
+      error?.error?.error?.message ||
+      error?.error?.errors?.[0]?.message ||
+      error?.message ||
+      '';
+
+    if (code === 'CONFLICT' || error?.status === 409) {
+      return 'This account already belongs to an organization. Refresh organization access to continue.';
+    }
+
+    return message || 'We could not create your company right now.';
   }
 
   private async completeInviteClaim(
@@ -454,7 +676,7 @@ export class WorkspaceAccessPageComponent implements OnInit {
       );
     } catch (error) {
       if ((error as { message?: unknown })?.message === 'Workspace joined successfully. Please sign in again to activate your access.') {
-        await this.router.navigateByUrl('/login', { replaceUrl: true });
+        await this.router.navigateByUrl('/?auth=login', { replaceUrl: true });
         return;
       }
 
@@ -463,5 +685,13 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
     this.inviteCode = '';
     await this.router.navigateByUrl(nextRoute, { replaceUrl: true });
+  }
+
+  private toDisplayLabel(value: string): string {
+    return value
+      .split(/[_\s-]+/)
+      .filter(Boolean)
+      .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1).toLowerCase()}`)
+      .join(' ');
   }
 }

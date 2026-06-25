@@ -1,191 +1,181 @@
-<section class="landing-shell reveal">
-  <header class="landing-topbar reveal">
-    <a routerLink="/" class="brand-lockup" aria-label="Wellar AI home">
-      <img class="brand-logo" src="assets/logo/app_icon.png" alt="Wellar app icon" />
-      <span>
-        <strong>Wellar AI</strong>
-        <small>Operational command layer</small>
-      </span>
-    </a>
-
-    <nav class="landing-nav" aria-label="Primary">
-      <a routerLink="/product">Product</a>
-      <a routerLink="/pricing">Pricing</a>
-      <a routerLink="/download-app">Mobile Scan</a>
-      <a routerLink="/contact">Contact</a>
-    </nav>
-
-    <div class="landing-actions">
-      <button type="button" class="link-button" (click)="openAuth('login')">Log in</button>
-      <button type="button" class="landing-cta" (click)="openAuth('signup')">Start free</button>
+<section class="landing-shell">
+  <section class="hero-section reveal">
+    <div class="hero-ambient" aria-hidden="true">
+      <span class="ambient-strand ambient-strand--a"></span>
+      <span class="ambient-strand ambient-strand--b"></span>
+      <span class="ambient-strand ambient-strand--c"></span>
+      <span class="ambient-node ambient-node--a"></span>
+      <span class="ambient-node ambient-node--b"></span>
+      <span class="ambient-node ambient-node--c"></span>
+      <span class="ambient-node ambient-node--d"></span>
     </div>
-  </header>
-
-  <div class="hero-grid">
-    <div class="hero-copy reveal">
-      <span class="hero-badge">Enterprise readiness, made to sell</span>
-
-      <h1>
-        Make shift readiness
-        <span>feel enterprise-grade.</span>
-      </h1>
-
-      <p class="hero-lead">
-        Wellar AI gives operations teams a polished command center for pre-shift scans, live risk signals,
-        and company-scoped control. It is built to feel premium, precise, and easy to position.
-      </p>
-
-      <div class="hero-actions">
-        <button type="button" class="landing-cta" (click)="openAuth('signup')">Create account</button>
-        <a routerLink="/contact" class="ghost-cta">Request demo</a>
+    <div class="hero-layout">
+      <div class="hero-copy">
+        <p class="hero-eyebrow">Enterprise workforce operations</p>
+        <h1>
+          Coordinate workforce operations with
+          <span>clear operational visibility.</span>
+        </h1>
+        <p class="hero-lead">
+          Organize workforce scope, coordinate Scan Requests, review returned Alerts, and track
+          Compliance coverage from the authenticated web application.
+        </p>
+        <div class="hero-actions">
+          <a routerLink="/" [queryParams]="{ auth: 'signup' }" class="landing-cta">Start Organization</a>
+          <a routerLink="/" [queryParams]="{ auth: 'login' }" class="ghost-cta">Sign in</a>
+        </div>
+        <div class="hero-support" aria-label="Product scope">
+          <span>Organization scope</span>
+          <span>Operations workflow</span>
+          <span>Employee mobile handoff</span>
+        </div>
       </div>
 
-      <div class="trust-row">
-        <div>
-          <strong>2 min</strong>
-          <span>guided scan</span>
-        </div>
-        <div>
-          <strong>24/7</strong>
-          <span>visibility</span>
-        </div>
-        <div>
-          <strong>Enterprise</strong>
-          <span>governance</span>
-        </div>
-      </div>
-    </div>
+      <aside class="workflow-visual" aria-label="Wellar AI product walkthrough">
+        <div class="presentation-stage">
+          <span class="presentation-glow presentation-glow--cool" aria-hidden="true"></span>
+          <span class="presentation-glow presentation-glow--warm" aria-hidden="true"></span>
 
-    <div class="hero-visual reveal">
-      <div class="visual-stage">
-        <div class="visual-orb visual-orb-a"></div>
-        <div class="visual-orb visual-orb-b"></div>
-        <div class="visual-orb visual-orb-c"></div>
-
-        <div class="visual-stack">
-          <article class="control-card control-card--hero">
-            <div class="control-card__header">
-              <span class="live-pill">Live control</span>
-              <span class="control-meta">Signal latency 38ms</span>
+          <div class="presentation-panel">
+            <div class="presentation-panel__top">
+              <span>Product walkthrough</span>
+              <strong>{{ activePresentation.kicker }}</strong>
             </div>
 
-            <div class="control-score">
-              <strong>98.4</strong>
-              <span>Readiness index</span>
+            <div class="presentation-window" [attr.data-state]="activePresentationIndex">
+              <p class="presentation-label">{{ activePresentation.label }}</p>
+              <h2>{{ activePresentation.title }}</h2>
+              <p>{{ activePresentation.body }}</p>
             </div>
 
-            <p id="rotating-text" class="rotating-text"></p>
-          </article>
+            <div class="presentation-rail" aria-label="Presentation states">
+              <button
+                type="button"
+                *ngFor="let state of presentationStates; let i = index"
+                [class.is-active]="i === activePresentationIndex"
+                (click)="selectPresentationState(i)">
+                <span>{{ state.shortLabel }}</span>
+              </button>
+            </div>
 
-          <div class="card-row">
-            <article class="metric-card">
-              <span>Today scans</span>
-              <strong>1,284</strong>
-              <em>+18% vs yesterday</em>
-            </article>
-            <article class="metric-card">
-              <span>Alerts resolved</span>
-              <strong>94%</strong>
-              <em>Fast manager action</em>
-            </article>
-          </div>
-
-          <div class="card-row card-row--tight">
-            <article class="metric-card metric-card--wide">
-              <span>Companies active</span>
-              <strong>312</strong>
-              <em>Scope locked to active business</em>
-            </article>
-            <article class="metric-card metric-card--accent">
-              <span>Pre-shift average</span>
-              <strong>2.0 min</strong>
-              <em>Guided completion</em>
-            </article>
+            <div class="presentation-progress" aria-hidden="true">
+              <span [style.width.%]="presentationProgress"></span>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <section class="proof-strip reveal">
-    <div class="proof-item">
-      <span>2 min scan</span>
-      <strong>Faster onboarding and cleaner demos</strong>
-    </div>
-    <div class="proof-item">
-      <span>24/7 oversight</span>
-      <strong>Operational control that feels premium</strong>
-    </div>
-    <div class="proof-item">
-      <span>Enterprise scope</span>
-      <strong>Company-aware experience with clear governance</strong>
+      </aside>
     </div>
   </section>
 
-  <section class="feature-section reveal">
+  <section id="product" class="product-section product-anchor reveal" tabindex="-1" aria-label="How Wellar AI works">
     <div class="section-heading">
-      <p class="eyebrow">Built to impress</p>
-      <h2>Less clutter, more presence.</h2>
+      <p class="eyebrow">Product workflow</p>
+      <h2>One operating path from workforce setup to coverage review.</h2>
       <p>
-        The product should look like a finished SaaS asset, not a rough starter template. That means clearer
-        hierarchy, stronger spacing, and visual rhythm that feels intentional.
+        Bring workforce setup, Scan Requests, Alerts, Compliance, and employee mobile completion
+        into one clear operating rhythm.
       </p>
     </div>
-
-    <div class="feature-grid">
-      <article class="feature-card reveal">
-        <span class="feature-index">01</span>
-        <h3>Sharper hierarchy</h3>
-        <p>One primary headline, one supporting line, and one clear primary CTA.</p>
+    <div class="workflow-row">
+      <article>
+        <span>01</span>
+        <strong>Organize workforce scope</strong>
+        <p>Start from the Organization, Company, and Department structure your team operates in.</p>
       </article>
-      <article class="feature-card reveal">
-        <span class="feature-index">02</span>
-        <h3>Visual depth</h3>
-        <p>Layered panels, glow, and subtle motion create a premium command-room feel.</p>
+      <article>
+        <span>02</span>
+        <strong>Coordinate Scan Requests</strong>
+        <p>Keep request follow-up connected to operational team workflows.</p>
       </article>
-      <article class="feature-card reveal">
-        <span class="feature-index">03</span>
-        <h3>Sale-ready positioning</h3>
-        <p>The page reads like a product buyers already expect to pay more for.</p>
+      <article>
+        <span>03</span>
+        <strong>Review Alerts</strong>
+        <p>Use the alert inbox to understand returned operational items.</p>
+      </article>
+      <article>
+        <span>04</span>
+        <strong>Track coverage</strong>
+        <p>Turn completion coverage and operational reporting into a clearer review path.</p>
       </article>
     </div>
   </section>
 
-  <section class="enterprise-section reveal">
-    <div class="enterprise-card reveal">
+  <section class="landing-section reveal">
+    <div class="section-heading">
+      <p class="eyebrow">Role-aware value</p>
+      <h2>Designed around the way each operational role uses the product.</h2>
+    </div>
+    <div class="role-grid">
+      <article>
+        <span>Owner / HR</span>
+        <h3>Organization operations</h3>
+        <p>Coordinate workforce operations, requests, alerts, and reporting from the organization view.</p>
+      </article>
+      <article>
+        <span>Manager</span>
+        <h3>Department operations</h3>
+        <p>Work from a focused department view for day-to-day operational follow-up.</p>
+      </article>
+      <article>
+        <span>Employee</span>
+        <h3>Mobile handoff</h3>
+        <p>Complete mobile scan workflows without entering the desktop operations application.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="governance-section reveal">
+    <div>
+      <p class="eyebrow">Trust and governance</p>
+      <h2>Calm operating structure for managed enterprise rollout.</h2>
+    </div>
+    <div class="governance-list">
+      <p>Organization context keeps teams aligned around the company structure they operate.</p>
+      <p>Scoped access keeps each user focused on the operational pages they need.</p>
+      <p>Managed Activation aligns rollout planning and account-team support before launch.</p>
+    </div>
+  </section>
+
+  <section class="final-cta-section reveal">
+    <div class="final-cta-card">
       <div>
-        <p class="eyebrow">Enterprise readiness</p>
-        <h2>Security, governance, and a UI that can close larger deals.</h2>
+        <p class="eyebrow">Managed Activation</p>
+        <h2>Start with a focused Enterprise Pilot.</h2>
         <p>
-          The goal is not only to look modern. It is to make the platform feel valuable enough that
-          people expect a higher price before they even read the feature list.
+          Begin organization setup or contact the account team to align operational scope,
+          rollout planning, and support.
         </p>
       </div>
-      <div class="enterprise-actions">
-        <a routerLink="/contact" class="landing-cta">Talk to Wellar</a>
-        <button type="button" class="ghost-cta" (click)="openAuth('signup')">Create trial</button>
+      <div class="final-cta-actions">
+        <a routerLink="/" [queryParams]="{ auth: 'signup' }" class="landing-cta">Start Organization</a>
+        <a routerLink="/contact" class="ghost-cta">Contact</a>
       </div>
     </div>
   </section>
 </section>
 
 <div class="auth-modal" *ngIf="showAuthModal">
-  <div class="auth-backdrop" (click)="closeAuth()"></div>
-  <div class="auth-card">
+  <div class="auth-backdrop" (click)="!authBusy && closeAuth()"></div>
+  <div class="auth-card" role="dialog" aria-modal="true" aria-label="Sign in or create your account">
     <div class="auth-card__glow auth-card__glow--a"></div>
     <div class="auth-card__glow auth-card__glow--b"></div>
-    <button class="auth-close" (click)="closeAuth()">&times;</button>
+    <button class="auth-close" (click)="closeAuth()" [disabled]="authBusy">&times;</button>
 
     <div class="auth-header">
       <img class="auth-logo-img" src="assets/logo/app_icon.png" alt="Wellar app icon" />
-      <h2 *ngIf="authMode === 'signup' && !inviteMode">Create a premium workspace</h2>
-      <h2 *ngIf="authMode === 'signup' && inviteMode">Create your account to join your workspace</h2>
-      <h2 *ngIf="authMode === 'login' && !inviteMode">Log in to your control room</h2>
-      <h2 *ngIf="authMode === 'login' && inviteMode">Log in to join your workspace</h2>
+      <h2 *ngIf="authMode === 'signup' && !inviteMode">Start your organization</h2>
+      <h2 *ngIf="authMode === 'signup' && inviteMode">Create your account to join your organization</h2>
+      <h2 *ngIf="authMode === 'login' && !inviteMode">Welcome back</h2>
+      <h2 *ngIf="authMode === 'login' && inviteMode">Log in to join your organization</h2>
       <p *ngIf="inviteMode">
-        You were invited to join a Wellar AI workspace. Sign in or create an account to continue.
+        You were invited to join a Wellar AI organization. Sign in or create an account to continue.
       </p>
-      <p *ngIf="!inviteMode">Everything stays scoped to the active company so teams get a clean, enterprise-grade flow.</p>
+      <p *ngIf="!inviteMode && authMode === 'login'">Sign in to continue to your organization&rsquo;s workforce operations.</p>
+      <p *ngIf="!inviteMode && authMode === 'signup'">Create your account to begin managed activation for your organization.</p>
+    </div>
+
+    <div class="auth-access-status" *ngIf="resolvingOrganizationAccess" role="status" aria-live="polite">
+      Preparing your organization access...
     </div>
 
     <div class="auth-mode-tabs" role="tablist" aria-label="Authentication mode">
@@ -220,33 +210,63 @@
       </label>
       <label class="auth-field">
         <span>Email address</span>
-        <input class="auth-input" placeholder="you@company.com" [(ngModel)]="signup.email" name="email" type="email" />
+        <input
+          class="auth-input"
+          [class.auth-input--invalid]="signupEmailInvalid"
+          placeholder="you@company.com"
+          [(ngModel)]="signup.email"
+          name="email"
+          type="email"
+          autocomplete="email"
+          (blur)="signupEmailTouched = true"
+          [attr.aria-invalid]="signupEmailInvalid ? 'true' : null" />
+        <small class="auth-field__error" *ngIf="signupEmailInvalid" role="alert">
+          Enter a valid email address.
+        </small>
       </label>
       <label class="auth-field">
         <span>Password</span>
         <div class="auth-password-wrap">
           <input
             class="auth-input auth-input--password"
-            placeholder="Create strong password"
+            placeholder="Create a password"
             [(ngModel)]="signup.password"
             name="password"
+            autocomplete="new-password"
             [type]="showSignupPassword ? 'text' : 'password'"
           />
           <button type="button" class="password-toggle" (click)="toggleSignupPasswordVisibility()">
             {{ showSignupPassword ? 'Hide' : 'Show' }}
           </button>
         </div>
+        <div class="auth-strength" *ngIf="signup.password" [attr.data-score]="passwordStrength.score">
+          <span class="auth-strength__track"><span class="auth-strength__fill"></span></span>
+          <span class="auth-strength__label">{{ passwordStrength.label }}</span>
+        </div>
+        <small class="auth-field__hint">Use at least 8 characters with a mix of letters and numbers.</small>
       </label>
-      <p class="trial-note">After sign-in, choose the active company workspace and continue to the dashboard.</p>
-      <button class="auth-primary" type="submit" [disabled]="submitting">
-        {{ inviteMode ? 'Create account and join workspace' : 'Create account' }}
+      <p class="trial-note">After sign-in, choose the active organization and continue to the dashboard.</p>
+      <button class="auth-primary" type="submit" [disabled]="authBusy || !signupFormValid">
+        {{ resolvingOrganizationAccess ? 'Preparing your organization access...' : (submitting ? 'Creating account...' : (inviteMode ? 'Create account and join organization' : 'Create account')) }}
       </button>
     </form>
 
     <form *ngIf="authMode === 'login'" (ngSubmit)="submitLogin()" class="auth-form">
       <label class="auth-field">
         <span>Email address</span>
-        <input class="auth-input" placeholder="you@company.com" [(ngModel)]="login.email" name="loginEmail" type="email" />
+        <input
+          class="auth-input"
+          [class.auth-input--invalid]="loginEmailInvalid"
+          placeholder="you@company.com"
+          [(ngModel)]="login.email"
+          name="loginEmail"
+          type="email"
+          autocomplete="email"
+          (blur)="loginEmailTouched = true"
+          [attr.aria-invalid]="loginEmailInvalid ? 'true' : null" />
+        <small class="auth-field__error" *ngIf="loginEmailInvalid" role="alert">
+          Enter a valid email address.
+        </small>
       </label>
       <label class="auth-field">
         <span>Password</span>
@@ -256,6 +276,7 @@
             placeholder="Enter your password"
             [(ngModel)]="login.password"
             name="loginPassword"
+            autocomplete="current-password"
             [type]="showLoginPassword ? 'text' : 'password'"
           />
           <button type="button" class="password-toggle" (click)="toggleLoginPasswordVisibility()">
@@ -263,8 +284,9 @@
           </button>
         </div>
       </label>
-      <button class="auth-primary" type="submit" [disabled]="submitting">
-        {{ inviteMode ? 'Log in to join your workspace' : 'Log in' }}
+      <a routerLink="/contact" class="auth-forgot">Forgot password? Contact support</a>
+      <button class="auth-primary" type="submit" [disabled]="authBusy || !loginFormValid">
+        {{ resolvingOrganizationAccess ? 'Preparing your organization access...' : (submitting ? 'Signing in...' : (inviteMode ? 'Log in to join your organization' : 'Log in')) }}
       </button>
     </form>
 
@@ -272,7 +294,7 @@
       <span>OR</span>
     </div>
 
-    <button class="google-btn" type="button" (click)="continueWithGoogle()">
+    <button class="google-btn" type="button" (click)="continueWithGoogle()" [disabled]="authBusy">
       <svg class="google-icon" viewBox="0 0 48 48" aria-hidden="true">
         <path fill="#EA4335" d="M24 9.5c3.3 0 6.2 1.1 8.5 3.1l6.3-6.3C34.7 2.5 29.7.5 24 .5 14.6.5 6.4 6.1 2.6 14.1l7.3 5.7C11.7 13.5 17.4 9.5 24 9.5z"/>
         <path fill="#34A853" d="M46.5 24.5c0-1.7-.2-3.3-.6-4.8H24v9.2h12.6c-.5 2.8-2.1 5.1-4.4 6.6l7 5.4c4.1-3.8 6.3-9.3 6.3-16.4z"/>
@@ -282,7 +304,7 @@
       Continue with Google
     </button>
 
-    <p class="auth-feedback" *ngIf="feedback">{{ feedback }}</p>
+    <p class="auth-feedback" *ngIf="feedback" [attr.role]="resolvingOrganizationAccess ? 'status' : 'alert'">{{ feedback }}</p>
 
     <p class="auth-switch" *ngIf="authMode === 'signup'">
       Already have an account? <button type="button" (click)="switchAuth('login')">Log in</button>

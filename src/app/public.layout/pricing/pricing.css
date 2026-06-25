@@ -19,7 +19,6 @@
     radial-gradient(700px at 80% 30%, rgba(56, 189, 248, 0.18), transparent 65%),
     radial-gradient(700px at 50% 80%, rgba(245, 196, 81, 0.18), transparent 65%);
   opacity: 0.8;
-  animation: pricingGlow 12s ease-in-out infinite;
   z-index: -1;
 }
 
@@ -51,6 +50,43 @@
   line-height: 1.6;
 }
 
+.pricing-actions,
+.pricing-footer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.btn-primary,
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  border-radius: 999px;
+  padding: 12px 18px;
+  text-decoration: none;
+  font-weight: 800;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.btn-primary {
+  background: #f5c451;
+  color: #08111f;
+}
+
+.btn-secondary {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.btn-primary:hover,
+.btn-secondary:hover {
+  transform: translateY(-1px);
+}
+
 .new-user-offer {
   margin-top: 10px;
   color: #86efac;
@@ -69,16 +105,6 @@
   color: #f5c451;
   border: 1px solid rgba(245, 196, 81, 0.4);
   background: rgba(15, 23, 42, 0.6);
-}
-
-.billing-toggle {
-  display: inline-flex;
-  gap: 12px;
-  margin-top: 24px;
-  background: rgba(15, 23, 42, 0.6);
-  border-radius: 999px;
-  padding: 6px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .trial-banner {
@@ -113,31 +139,6 @@
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
-}
-
-.toggle-btn {
-  padding: 10px 18px;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
-  color: #cbd5f5;
-  font-weight: 600;
-  cursor: pointer;
-  position: relative;
-}
-
-.toggle-btn.active {
-  background: #f5c451;
-  color: #1f2937;
-}
-
-.discount {
-  font-size: 0.65rem;
-  margin-left: 8px;
-  color: #1f2937;
-  background: rgba(255, 255, 255, 0.6);
-  padding: 2px 6px;
-  border-radius: 999px;
 }
 
 .plan-grid {
@@ -208,25 +209,6 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-}
-
-.plan-discount {
-  margin-top: -4px;
-  border: 1px dashed rgba(134, 239, 172, 0.45);
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: rgba(16, 185, 129, 0.08);
-}
-
-.discount-line {
-  color: #86efac;
-  font-size: 0.85rem;
-}
-
-.discount-total {
-  margin-top: 4px;
-  color: #f8fafc;
-  font-size: 0.86rem;
 }
 
 .amount {

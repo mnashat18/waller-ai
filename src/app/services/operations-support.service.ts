@@ -219,7 +219,7 @@ export class OperationsSupportService {
         forkJoin({
           events: this.queryItems<ActivityRecord>(
             'activity_events',
-            ['id', 'action', 'entity_type', 'entity_id', 'actor', 'target_user', 'department.id', 'department.name', 'date_created', 'meta'],
+            ['id', 'action', 'entity_type', 'entity_id', 'actor', 'target_user', 'department.id', 'department.name', 'date_created'],
             context.token,
             {
               filters: this.scopeFilters(context, ['business_profile'], ['department']),
@@ -229,10 +229,15 @@ export class OperationsSupportService {
           ),
           departments: this.queryItems<DepartmentRecord>(
             'departments',
-            ['id', 'name'],
+            context.activeRole === 'manager' ? ['id', 'name', 'is_active'] : ['id', 'name'],
             context.token,
             {
-              filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
+              filters: context.activeRole === 'manager' && context.activeDepartmentId
+                ? [
+                    { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
+                    { path: ['id'], operator: '_eq', value: context.activeDepartmentId }
+                  ]
+                : [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
               sort: 'name',
               limit: 120
             }
@@ -249,7 +254,7 @@ export class OperationsSupportService {
               department_id: this.normalizeId(row.department),
               department_name: this.departmentName(row.department),
               date_created: row.date_created ?? null,
-              meta: row.meta ?? null
+              meta: null
             })).filter((item) => item.id),
             departments: (departments ?? []).map((department) => ({
               id: this.normalizeId(department.id) ?? '',
@@ -304,7 +309,7 @@ export class OperationsSupportService {
             { limit: 500 }
           ),
           requests: this.queryItems<ScanRequestRecord>(
-            'requests',
+            'scan_requests',
             ['id'],
             context.token,
             {
@@ -314,10 +319,15 @@ export class OperationsSupportService {
           ),
           departments: this.queryItems<DepartmentRecord>(
             'departments',
-            ['id', 'name'],
+            context.activeRole === 'manager' ? ['id', 'name', 'is_active'] : ['id', 'name'],
             context.token,
             {
-              filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
+              filters: context.activeRole === 'manager' && context.activeDepartmentId
+                ? [
+                    { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
+                    { path: ['id'], operator: '_eq', value: context.activeDepartmentId }
+                  ]
+                : [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
               sort: 'name',
               limit: 120
             }
@@ -487,52 +497,17 @@ export class OperationsSupportService {
   }
 
   markNotificationRead(notificationId: string): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.patch(
-          `${this.api}/items/notifications/${encodeURIComponent(notificationId)}`,
-          { status: 'read' },
-          { headers: this.headers(context.token), withCredentials: true }
-        ).pipe(map(() => void 0))
-      )
-    );
+    void notificationId;
+    return throwError(() => new Error(this.serverWorkflowPrerequisiteMessage()));
   }
 
   markAllNotificationsRead(): Observable<void> {
-    return this.getNotificationsPanelData(50).pipe(
-      switchMap((data) => {
-        const unread = data.items.filter((item) => this.normalizeText(item.status) !== 'read');
-        if (!unread.length) {
-          return of(void 0);
-        }
-        return forkJoin(unread.map((item) => this.markNotificationRead(item.id).pipe(catchError(() => of(void 0))))).pipe(
-          map(() => void 0)
-        );
-      })
-    );
+    return throwError(() => new Error(this.serverWorkflowPrerequisiteMessage()));
   }
 
   createReportExport(input: CreateReportExportInput): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.post(
-          `${this.api}/items/reports_exports`,
-          {
-            business_profile: context.businessProfileId,
-            user: context.company.userId,
-            format: input.format,
-            status: 'pending',
-            filters: {
-              export_type: input.export_type ?? 'operations',
-              department: input.department ?? null,
-              start_date: input.start_date ?? null,
-              end_date: input.end_date ?? null
-            }
-          },
-          { headers: this.headers(context.token), withCredentials: true }
-        ).pipe(map(() => void 0))
-      )
-    );
+    void input;
+    return throwError(() => new Error('Report export queueing requires an approved server-side workflow.'));
   }
 
   retryReportExport(row: ReportRow): Observable<void> {
@@ -731,5 +706,9 @@ export class OperationsSupportService {
 
   private objectRecord(value: unknown): Record<string, unknown> | null {
     return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  }
+
+  private serverWorkflowPrerequisiteMessage(): string {
+    return 'This action requires an approved server-side workflow.';
   }
 }

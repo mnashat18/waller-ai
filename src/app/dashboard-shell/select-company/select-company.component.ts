@@ -21,10 +21,10 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
         <div class="relative border-b border-slate-200/70 bg-gradient-to-b from-slate-50 to-white px-8 py-7">
           <div class="flex items-start justify-between gap-6">
             <div class="min-w-0">
-              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Workspace Setup</p>
-              <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Choose a company to continue</h1>
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Organization Access</p>
+              <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-900">Choose an organization to continue</h1>
               <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                You are signed in successfully. Select the active company workspace so we can scope the dashboard data.
+                You are signed in successfully. Select the active organization so we can scope dashboard data.
               </p>
             </div>
 
@@ -36,7 +36,7 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
                 </svg>
               </div>
               <div class="min-w-0">
-                <p class="text-sm font-semibold text-slate-900">Active company</p>
+                <p class="text-sm font-semibold text-slate-900">Active organization</p>
                 <p class="truncate text-xs text-slate-500">Required for dashboard access</p>
               </div>
             </div>
@@ -45,11 +45,11 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
 
         <div class="grid gap-8 px-8 py-8 lg:grid-cols-[1.2fr_0.8fr]">
           <div *ngIf="state$ | async as state">
-            <app-loading-state *ngIf="state.loading" title="Loading available companies..." />
+            <app-loading-state *ngIf="state.loading" title="Loading available organizations..." />
 
             <app-error-state
               *ngIf="!state.loading && state.error"
-              [title]="'We could not load your workspace access'"
+              [title]="'We could not load your organization access'"
               [message]="state.error"
               [showRetry]="true"
               (retry)="retry()"
@@ -80,7 +80,7 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
                         <p class="truncate text-sm font-semibold text-slate-900">{{ company.name }}</p>
                         <div class="mt-2 flex flex-wrap items-center gap-2">
                           <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                            {{ company.role }}
+                            Access Level: {{ formatAccessLevel(company.role) }}
                           </span>
                           <span *ngIf="company.membershipStatus" class="text-xs text-slate-500">
                             {{ company.membershipStatus }}
@@ -116,13 +116,13 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
                     class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                     routerLink="/app/workspace/request"
                   >
-                    Request Enterprise Workspace
+                    Request organization access
                   </a>
                   <a
                     class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                     routerLink="/invites/claim"
                   >
-                    Join with Invite
+                    Join with invitation
                   </a>
                 </div>
               </div>
@@ -136,10 +136,10 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
                     </svg>
                   </div>
                   <div class="min-w-0">
-                    <h2 class="text-lg font-semibold text-slate-900">No company access found</h2>
+                    <h2 class="text-lg font-semibold text-slate-900">No organization access found</h2>
                     <p class="mt-2 text-sm leading-6 text-slate-600">
-                      This account does not have access to any workspaces yet.
-                      Ask an owner or HR contact to invite you, or create a new workspace if your company does not have one yet.
+                      This account does not have access to any organizations yet.
+                      Ask an owner or HR contact to send an invitation, or request organization access.
                     </p>
                     <div class="mt-5 flex flex-wrap items-center gap-3">
                       <button
@@ -157,13 +157,13 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
                         class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                         routerLink="/app/workspace/request"
                       >
-                        Request Enterprise Workspace
+                        Request organization access
                       </a>
                       <a
                         class="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                         routerLink="/invites/claim"
                       >
-                        Join with Invite
+                        Join with invitation
                       </a>
                     </div>
                   </div>
@@ -176,22 +176,22 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
             <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">How it works</p>
             <h2 class="mt-2 text-lg font-semibold text-slate-900">Why am I seeing this?</h2>
             <p class="mt-2 text-sm leading-6 text-slate-600">
-              The operational dashboard is scoped to your active company workspace. Without a company selected, dashboard routes cannot load data safely.
+              The operational dashboard is scoped to your active organization. Without an organization selected, dashboard routes cannot load data safely.
             </p>
 
             <div class="mt-6 grid gap-3">
               <div class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <div class="mt-0.5 grid h-6 w-6 place-items-center rounded-lg bg-slate-900 text-xs font-semibold text-white">1</div>
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">Pick a company</p>
-                  <p class="mt-1 text-xs text-slate-600">Select any company you have access to.</p>
+                  <p class="text-sm font-semibold text-slate-900">Pick an organization</p>
+                  <p class="mt-1 text-xs text-slate-600">Select any organization you have access to.</p>
                 </div>
               </div>
               <div class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <div class="mt-0.5 grid h-6 w-6 place-items-center rounded-lg bg-slate-900 text-xs font-semibold text-white">2</div>
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">We scope the workspace</p>
-                  <p class="mt-1 text-xs text-slate-600">The app sets your active company context.</p>
+                  <p class="text-sm font-semibold text-slate-900">We scope the organization</p>
+                  <p class="mt-1 text-xs text-slate-600">The app sets your active organization context.</p>
                 </div>
               </div>
               <div class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -206,8 +206,8 @@ import { LoadingStateComponent } from '../../shared/ui/loading-state/loading-sta
             <div class="mt-6 rounded-2xl border border-slate-200 bg-white px-4 py-4">
               <p class="text-sm font-semibold text-slate-900">Tip</p>
               <p class="mt-1 text-xs leading-5 text-slate-600">
-                If you expected a company here, your user might not be linked to a workspace yet.
-                Ask an owner, HR, or manager to add you or send an invite.
+                If you expected an organization here, your account might not be linked yet.
+                Ask an owner, HR, or manager to add you or send an invitation.
               </p>
             </div>
           </aside>
@@ -226,6 +226,15 @@ export class SelectCompanyPageComponent {
 
   retry(): void {
     this.companyContext.ensureLoaded(true).subscribe();
+  }
+
+  formatAccessLevel(role: string | null | undefined): string {
+    const normalized = (role ?? '').toString().trim().toLowerCase();
+    if (normalized === 'owner') return 'Owner';
+    if (normalized === 'hr') return 'HR';
+    if (normalized === 'manager') return 'Manager';
+    if (normalized === 'employee') return 'Employee';
+    return 'Unknown';
   }
 
   switchCompany(companyId: string): void {

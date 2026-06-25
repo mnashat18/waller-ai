@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { Observable, ReplaySubject, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
-import { BusinessCenterService } from './business-center.service';
+import { CompanyContextService } from '../core/context/company-context.service';
 
 export type Plan = {
   id?: string | number;
@@ -41,14 +41,13 @@ export type BusinessAccessSnapshot = {
 export class SubscriptionService {
   private readonly refreshSubject = new ReplaySubject<void>(1);
 
-  constructor(private businessCenter: BusinessCenterService) {}
+  constructor(private companyContext: CompanyContextService) {}
 
   snapshotRefreshEvents(): Observable<void> {
     return this.refreshSubject.asObservable();
   }
 
   notifyAuthStateChanged(): void {
-    this.businessCenter.notifyAuthStateChanged();
     this.refreshSubject.next();
   }
 
@@ -57,18 +56,19 @@ export class SubscriptionService {
   }
 
   getBusinessAccessSnapshot(_options?: { forceRefresh?: boolean }): Observable<BusinessAccessSnapshot> {
-    return this.businessCenter.getHubAccessState(Boolean(_options?.forceRefresh)).pipe(
+    return this.companyContext.ensureLoaded(Boolean(_options?.forceRefresh)).pipe(
       map((state) => {
-        const daysRemaining = this.daysUntil(state.trialExpiresAt);
-        const planCode = state.hasPaidAccess ? 'business' : 'free';
+        const context = state.context;
+        const hasWorkspace = Boolean(context.activeBusinessProfileId && context.activeMemberRole);
+        const planCode = hasWorkspace ? 'business' : 'free';
 
         return {
           planCode,
-          hasBusinessAccess: Boolean(state.hasPaidAccess),
-          isBusinessTrial: typeof daysRemaining === 'number' && daysRemaining > 0,
-          daysRemaining,
-          trialExpired: Boolean(state.trialExpired),
-          trialExpiresAt: state.trialExpiresAt
+          hasBusinessAccess: hasWorkspace,
+          isBusinessTrial: false,
+          daysRemaining: null,
+          trialExpired: false,
+          trialExpiresAt: null
         };
       }),
       catchError(() =>
@@ -139,14 +139,8 @@ export class SubscriptionService {
   }
 
   isBusinessOnboardingComplete(): Observable<boolean> {
-    return this.businessCenter.getHubAccessState().pipe(
-      map((state) => {
-        const hasProfile = Boolean(state.profile?.id);
-        const hasActiveMembership =
-          Boolean(state.membership?.id) &&
-          String(state.membership?.status ?? '').trim().toLowerCase() === 'active';
-        return hasProfile || hasActiveMembership;
-      }),
+    return this.companyContext.ensureLoaded().pipe(
+      map((state) => Boolean(state.context.activeBusinessProfileId && state.context.activeMemberRole)),
       catchError(() => of(true))
     );
   }
@@ -157,23 +151,5 @@ export class SubscriptionService {
 
   grantLocalBusinessTrialNow(): void {
     this.notifyAuthStateChanged();
-  }
-
-  private daysUntil(value: string | null): number | null {
-    if (!value) {
-      return null;
-    }
-
-    const ts = new Date(value).getTime();
-    if (Number.isNaN(ts)) {
-      return null;
-    }
-
-    const remainingMs = ts - Date.now();
-    if (remainingMs <= 0) {
-      return 0;
-    }
-
-    return Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
   }
 }

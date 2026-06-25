@@ -7,6 +7,10 @@ import { InviteService } from '../../services/invites';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import { environment } from '../../../environments/environment';
 
+type SessionReadinessResult = {
+  status: 'authenticated' | 'unauthenticated' | 'failed' | 'timed-out';
+};
+
 @Component({
   selector: 'app-invite-claim-page',
   standalone: true,
@@ -14,8 +18,8 @@ import { environment } from '../../../environments/environment';
   template: `
     <section class="claim-shell">
       <div class="claim-shell__panel app-dashboard-panel">
-        <p class="claim-shell__eyebrow">Workspace Access</p>
-        <h1>Accept Invite</h1>
+        <p class="claim-shell__eyebrow">Organization Access</p>
+        <h1>{{ loading ? 'Joining your workspace...' : 'Accept Invitation' }}</h1>
 
         <p class="claim-shell__note" *ngIf="loading">{{ statusMessage }}</p>
         <p class="claim-shell__note" *ngIf="loading && statusSubtext">{{ statusSubtext }}</p>
@@ -23,14 +27,25 @@ import { environment } from '../../../environments/environment';
         <p class="claim-shell__error" *ngIf="!loading && errorMessage">{{ errorMessage }}</p>
 
         <div class="claim-shell__actions" *ngIf="!loading">
-          <a [routerLink]="['/signup']" [queryParams]="signupQueryParams" class="claim-shell__button">
-            Create Account
+          <button
+            *ngIf="showRetryAction && currentInviteToken"
+            type="button"
+            class="claim-shell__button"
+            (click)="retryClaim()">
+            Retry
+          </button>
+          <button
+            *ngIf="showCancelAction && currentInviteToken"
+            type="button"
+            class="claim-shell__button"
+            (click)="cancelInvitation()">
+            Cancel invitation
+          </button>
+          <a [routerLink]="['/']" [queryParams]="signupQueryParams" class="claim-shell__button">
+            Continue sign up
           </a>
-          <a [routerLink]="['/login']" [queryParams]="loginQueryParams" class="claim-shell__button">
-            Log In
-          </a>
-          <a routerLink="/app/workspace-access" class="claim-shell__button">
-            Go to Workspace Access
+          <a [routerLink]="['/']" [queryParams]="loginQueryParams" class="claim-shell__button">
+            Sign in instead
           </a>
         </div>
       </div>
@@ -125,6 +140,8 @@ import { environment } from '../../../environments/environment';
   `]
 })
 export class InviteClaimPageComponent implements OnInit {
+  private readonly sessionReadyTimeoutMs = 12000;
+
   loading = true;
   statusMessage = 'Checking your session...';
   statusSubtext = '';
@@ -133,6 +150,9 @@ export class InviteClaimPageComponent implements OnInit {
   authLoading = true;
   authResolved = false;
   currentUser: Record<string, unknown> | null = null;
+  currentInviteToken = '';
+  showRetryAction = false;
+  showCancelAction = false;
   signupQueryParams: Record<string, string> = { invite: '1', auth: 'signup' };
   loginQueryParams: Record<string, string> = { invite: '1', auth: 'login' };
 
@@ -148,50 +168,89 @@ export class InviteClaimPageComponent implements OnInit {
     void this.startClaimFlow();
   }
 
+  retryClaim(): void {
+    const token = this.currentInviteToken || this.resolveInviteTokenFromRoute();
+    if (token) {
+      this.invites.clearClaimAttemptedForToken(token);
+      this.invites.clearClaimInProgressForToken(token);
+      this.invites.clearInviteClaimError();
+    }
+
+    this.loading = true;
+    this.statusMessage = 'Checking your session...';
+    this.statusSubtext = '';
+    this.successMessage = '';
+    this.errorMessage = '';
+    this.showRetryAction = false;
+    this.showCancelAction = false;
+    void this.startClaimFlow();
+  }
+
+  cancelInvitation(): void {
+    this.invites.clearPendingInviteToken();
+    if (this.currentInviteToken) {
+      this.invites.clearClaimAttemptedForToken(this.currentInviteToken);
+      this.invites.clearClaimInProgressForToken(this.currentInviteToken);
+    }
+    this.auth.consumePostAuthRedirect('');
+    void this.router.navigate(['/'], { replaceUrl: true });
+  }
+
   private async startClaimFlow(): Promise<void> {
     this.logInviteClaim('route loaded');
 
     const token = this.resolveInviteTokenFromRoute();
+    this.currentInviteToken = token ?? '';
     if (!token) {
       this.loading = false;
-      this.errorMessage = 'Invite token is missing.';
+      this.errorMessage = 'Invitation token is missing.';
+      this.showRetryAction = false;
+      this.showCancelAction = false;
       return;
     }
 
-    this.logInviteClaim(`token: ${token}`);
     this.invites.setPendingInviteToken(token);
     this.logInviteClaim('saved pending_invite_token');
     this.signupQueryParams = { invite: '1', token, auth: 'signup' };
     this.loginQueryParams = { invite: '1', token, auth: 'login' };
+    this.showRetryAction = false;
+    this.showCancelAction = false;
 
     this.logInviteClaim('checking auth token');
     const accessToken = this.resolveAccessToken();
-    const hasValidAuthToken = this.isValidJwt(accessToken);
-    this.logInviteClaim(`hasValidAuthToken: ${hasValidAuthToken}`);
+    const tokenDiagnostics = this.getTokenDiagnostics(accessToken);
+    this.logInviteClaim('session readiness token diagnostics', tokenDiagnostics);
 
-    if (!hasValidAuthToken) {
+    if (!tokenDiagnostics.exists || !tokenDiagnostics.validJwt || tokenDiagnostics.expired) {
       await this.redirectToInviteSignupOnHomepage(token);
       return;
     }
 
-    const authState = await this.resolveAuthStateWithTimeout();
-    if (authState !== 'authenticated') {
-      await this.redirectToInviteSignupOnHomepage(token);
+    const authState = await this.resolveAuthStateWithTimeout(this.sessionReadyTimeoutMs);
+    this.logInviteClaim('session readiness verification result', {
+      status: authState.status,
+      hasUser: Boolean(this.currentUser?.['id'])
+    });
+    if (authState.status !== 'authenticated') {
+      this.showSessionVerificationError(token);
       return;
     }
 
     try {
       this.logInviteClaim('valid auth token found, accepting invite');
-      this.statusMessage = 'Accepting invite...';
-      this.statusSubtext = 'We are connecting your account to the workspace.';
+      this.statusMessage = 'Joining your workspace...';
+      this.statusSubtext = 'We are connecting your account to the organization.';
       const nextRoute = await this.postLoginRouting.resolveDestination();
       if (nextRoute.startsWith('/invites/claim')) {
         this.loading = false;
         this.statusSubtext = '';
         const storedError = this.invites.consumeInviteClaimError();
+        this.clearTerminalInviteState(token);
+        this.showRetryAction = true;
+        this.showCancelAction = true;
         this.errorMessage = storedError
           ? this.invites.formatInviteClaimError(storedError)
-          : 'Could not accept invite. Please verify the invite link and account.';
+          : 'Could not accept invitation. Please verify the invitation link and account, then retry.';
         return;
       }
       await this.router.navigateByUrl(nextRoute, { replaceUrl: true });
@@ -199,27 +258,36 @@ export class InviteClaimPageComponent implements OnInit {
       this.loading = false;
       this.statusSubtext = '';
       const storedError = this.invites.consumeInviteClaimError();
+      this.clearTerminalInviteState(token);
+      this.showRetryAction = true;
+      this.showCancelAction = true;
       this.errorMessage = storedError
         ? this.invites.formatInviteClaimError(storedError)
         : this.invites.formatInviteClaimError(this.invites.getReadableInviteError(error));
     }
   }
 
-  private async resolveAuthStateWithTimeout(timeoutMs = 1500): Promise<'authenticated' | 'unauthenticated'> {
+  private async resolveAuthStateWithTimeout(
+    timeoutMs = this.sessionReadyTimeoutMs
+  ): Promise<SessionReadinessResult> {
     this.authLoading = true;
     this.authResolved = false;
     this.currentUser = null;
 
     try {
-      const resolved = await Promise.race<'authenticated' | 'unauthenticated'>([
-        this.auth.getCurrentUserAfterRestore().then((user) => {
-          if (user?.id) {
-            this.currentUser = user as Record<string, unknown>;
-            return 'authenticated';
-          }
-          return 'unauthenticated';
-        }).catch(() => 'unauthenticated'),
-        this.sleep(timeoutMs).then(() => 'unauthenticated')
+      const currentUserCheck: Promise<SessionReadinessResult> = this.auth.getCurrentUserAfterRestore().then((user) => {
+        if (user?.id) {
+          this.currentUser = user as Record<string, unknown>;
+          return { status: 'authenticated' } as SessionReadinessResult;
+        }
+        return { status: 'unauthenticated' } as SessionReadinessResult;
+      }).catch(() => ({ status: 'failed' } as SessionReadinessResult));
+      const timeoutCheck: Promise<SessionReadinessResult> = this.sleep(timeoutMs).then(
+        () => ({ status: 'timed-out' } as SessionReadinessResult)
+      );
+      const resolved = await Promise.race<SessionReadinessResult>([
+        currentUserCheck,
+        timeoutCheck
       ]);
 
       this.authLoading = false;
@@ -228,7 +296,7 @@ export class InviteClaimPageComponent implements OnInit {
     } catch {
       this.authLoading = false;
       this.authResolved = true;
-      return 'unauthenticated';
+      return { status: 'failed' };
     }
   }
 
@@ -271,6 +339,40 @@ export class InviteClaimPageComponent implements OnInit {
     return value.split('.').length === 3;
   }
 
+  private showSessionVerificationError(token: string): void {
+    this.loading = false;
+    this.statusSubtext = '';
+    this.currentInviteToken = token;
+    this.auth.setPostAuthRedirect(`/invites/claim?token=${encodeURIComponent(token)}`);
+    this.loginQueryParams = { invite: '1', token, auth: 'login' };
+    this.signupQueryParams = { invite: '1', token, auth: 'signup' };
+    this.showRetryAction = true;
+    this.showCancelAction = true;
+    this.errorMessage = 'We could not verify your signed-in session. Please sign in again and retry your invitation.';
+  }
+
+  private getTokenDiagnostics(token: string | null): { exists: boolean; validJwt: boolean; expired: boolean } {
+    return {
+      exists: Boolean(token),
+      validJwt: this.isValidJwt(token),
+      expired: this.isJwtExpired(token)
+    };
+  }
+
+  private isJwtExpired(token: string | null): boolean {
+    if (!this.isValidJwt(token)) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(atob(token!.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      const exp = payload?.exp;
+      return typeof exp === 'number' && Math.floor(Date.now() / 1000) >= exp;
+    } catch {
+      return false;
+    }
+  }
+
   private async redirectToInviteSignupOnHomepage(token: string): Promise<void> {
     this.statusMessage = 'Redirecting to authentication...';
     this.statusSubtext = '';
@@ -282,12 +384,18 @@ export class InviteClaimPageComponent implements OnInit {
     });
     if (!navigated) {
       this.loading = false;
-      this.errorMessage = 'Please sign in to accept this invite.';
+      this.errorMessage = 'Please sign in to accept this invitation.';
     }
   }
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private clearTerminalInviteState(token: string): void {
+    this.invites.clearPendingInviteToken();
+    this.invites.clearClaimAttemptedForToken(token);
+    this.invites.clearClaimInProgressForToken(token);
   }
 
   private logInviteClaim(message: string, details?: Record<string, unknown>): void {
@@ -296,10 +404,31 @@ export class InviteClaimPageComponent implements OnInit {
     }
 
     if (details) {
-      console.debug(`[InviteClaim] ${message}`, details);
+      console.debug(`[InviteClaim] ${message}`, this.maskInviteClaimDetails(details));
       return;
     }
 
     console.debug(`[InviteClaim] ${message}`);
+  }
+
+  private maskInviteClaimDetails(details: Record<string, unknown>): Record<string, unknown> {
+    const safe: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(details)) {
+      const normalizedKey = key.toLowerCase();
+      if (
+        normalizedKey.includes('token') ||
+        normalizedKey.includes('userid') ||
+        normalizedKey.includes('membershipid') ||
+        normalizedKey.includes('businessprofileid') ||
+        normalizedKey.includes('departmentid')
+      ) {
+        safe[key] = value ? '[redacted]' : value;
+      } else if (typeof value === 'string' && value.includes('token=')) {
+        safe[key] = '[redacted-url]';
+      } else {
+        safe[key] = value;
+      }
+    }
+    return safe;
   }
 }

@@ -25,6 +25,24 @@ function toRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
 }
 
+function isForbiddenIdentityLabel(value: string): boolean {
+  const text = value.trim();
+  if (!text) {
+    return true;
+  }
+  if (isUuid(text)) {
+    return true;
+  }
+  if (/^member\s*#?\s*\d+$/i.test(text)) {
+    return true;
+  }
+  return /^\d+$/.test(text);
+}
+
+function isLikelyEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value.trim());
 }
@@ -77,7 +95,7 @@ export function formatDepartment(department: unknown, fallback = 'Unassigned'): 
   return fallback;
 }
 
-export function formatBusinessProfile(profile: unknown, fallback = 'Unknown workspace'): string {
+export function formatBusinessProfile(profile: unknown, fallback = 'Unknown organization'): string {
   const record = toRecord(profile);
   if (!record) {
     return sanitizeDisplayValue(profile, fallback);
@@ -116,4 +134,31 @@ export function formatMember(member: unknown, fallback = 'Unknown member'): stri
   }
 
   return fallback;
+}
+
+export type WorkforceIdentity = {
+  displayName: string;
+  email: string | null;
+  hasApprovedDisplayName: boolean;
+  dataQualityIssue: string | null;
+};
+
+export function formatWorkforceIdentity(
+  user: unknown,
+  authorizedEmail: unknown = null,
+  fallback = 'Team member'
+): WorkforceIdentity {
+  const record = toRecord(user);
+  const firstName = record ? pickText(record['first_name']) : undefined;
+  const lastName = record ? pickText(record['last_name']) : undefined;
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  const email = pickText(authorizedEmail) ?? (record ? pickText(record['email']) : undefined) ?? null;
+  const hasApprovedDisplayName = Boolean(fullName && !isForbiddenIdentityLabel(fullName));
+
+  return {
+    displayName: hasApprovedDisplayName ? fullName : fallback,
+    email: email && isLikelyEmail(email) && !isUuid(email) ? email : null,
+    hasApprovedDisplayName,
+    dataQualityIssue: hasApprovedDisplayName ? null : 'Approved user display name unavailable'
+  };
 }

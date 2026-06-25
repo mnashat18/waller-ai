@@ -1,18 +1,44 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
+import { of } from 'rxjs';
 
-import { Sidebar } from './sidebar';
+import { CompanyContextService } from '../../core/context/company-context.service';
+import { SubscriptionService } from '../../services/subscription.service';
+import { SidebarComponent } from './sidebar';
 
-describe('Sidebar', () => {
-  let component: Sidebar;
-  let fixture: ComponentFixture<Sidebar>;
+describe('SidebarComponent', () => {
+  let component: SidebarComponent;
+  let fixture: ComponentFixture<SidebarComponent>;
 
   beforeEach(async () => {
+    const context = {
+      activeBusinessProfileName: null,
+      activeBusinessProfileId: null,
+      activeDepartmentId: null,
+      activeMemberRole: null,
+      availableCompanies: []
+    };
+
     await TestBed.configureTestingModule({
-      imports: [Sidebar]
+      imports: [SidebarComponent],
+      providers: [
+        provideRouter([]),
+        {
+          provide: CompanyContextService,
+          useValue: {
+            ensureLoaded: () => of(null),
+            state$: of({ loading: false, error: null, context })
+          }
+        },
+        {
+          provide: SubscriptionService,
+          useValue: { snapshotRefreshEvents: () => of(null) }
+        }
+      ]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(Sidebar);
+    fixture = TestBed.createComponent(SidebarComponent);
     component = fixture.componentInstance;
     await fixture.whenStable();
   });

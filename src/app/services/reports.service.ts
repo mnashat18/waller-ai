@@ -206,9 +206,6 @@ type WellnessScanRecord = {
   started_at?: string | null;
   completed_at?: string | null;
   consent_granted?: boolean | null;
-  device_info?: unknown;
-  environment_info?: unknown;
-  task_metrics?: unknown;
   business_profile?: string | number | { id?: string | number } | null;
   member?: string | number | { id?: string | number } | null;
   department?: string | number | { id?: string | number; name?: string | null } | null;
@@ -226,19 +223,6 @@ type ScanResultRecord = {
   scan_id?: string | number | { id?: string | number } | null;
   risk_level?: string | null;
   readiness_score?: number | string | null;
-  confidence?: number | string | null;
-  camera_confidence?: number | string | null;
-  voice_confidence?: number | string | null;
-  task_performance_score?: number | string | null;
-  confidence_drift?: number | string | null;
-  explanation?: string | null;
-  internal_analysis?: string | null;
-  ai_model_version?: string | null;
-  baseline_used?: string | null;
-  suggested_action?: string | null;
-  face_metrics?: unknown;
-  voice_metrics?: unknown;
-  reaction_metrics?: unknown;
 };
 
 type ScanRequestRecord = {
@@ -412,6 +396,9 @@ export class ReportsService {
       const token = this.auth.getStoredAccessToken() ?? '';
       const activeDepartmentId =
         role === 'manager' ? this.normalizeId(activeContext?.activeMembership?.department) : null;
+      if (role === 'manager' && !activeDepartmentId) {
+        throw new Error('Scoped data unavailable: manager account has no active department context.');
+      }
       const loadRange = this.resolveDateRange('last30');
 
       const membersPromise = this.loadMembers(token, workspaceId, activeDepartmentId);
@@ -1113,6 +1100,7 @@ export class ReportsService {
     workspaceId: string,
     activeDepartmentId: string | null
   ): Promise<BusinessMemberRecord[]> {
+    const isManager = Boolean(activeDepartmentId);
     const filters: Array<{ path: string[]; operator: string; value: string }> = [
       { path: ['business_profile'], operator: '_eq', value: workspaceId }
     ];
@@ -1122,19 +1110,21 @@ export class ReportsService {
 
     return this.queryWithFieldFallback<BusinessMemberRecord>(
       'business_profile_members',
-      [
-        [
-          'id', 'status', 'user', 'user.id', 'user.first_name', 'user.last_name', 'user.email',
-          'business_profile', 'member_role', 'department',
-          'shift_template', 'employee_code', 'job_title', 'joined_at', 'deactivated_at', 'last_scan_at',
-          'last_readiness_score', 'last_risk_level', 'date_created', 'date_updated'
-        ],
-        [
-          'id', 'status', 'user', 'business_profile', 'member_role', 'department',
-          'last_scan_at', 'last_risk_level', 'date_created', 'date_updated'
-        ],
-        ['id', 'status', 'member_role', 'department', 'last_scan_at', 'last_risk_level']
-      ],
+      isManager
+        ? [['id', 'status', 'member_role', 'department', 'employee_code', 'job_title', 'last_scan_at', 'last_risk_level', 'last_readiness_score']]
+        : [
+            [
+              'id', 'status', 'user', 'user.id', 'user.first_name', 'user.last_name', 'user.email',
+              'business_profile', 'member_role', 'department',
+              'shift_template', 'employee_code', 'job_title', 'joined_at', 'deactivated_at', 'last_scan_at',
+              'last_readiness_score', 'last_risk_level', 'date_created', 'date_updated'
+            ],
+            [
+              'id', 'status', 'user', 'business_profile', 'member_role', 'department',
+              'last_scan_at', 'last_risk_level', 'date_created', 'date_updated'
+            ],
+            ['id', 'status', 'member_role', 'department', 'last_scan_at', 'last_risk_level']
+          ],
       token,
       { filters, sort: '-date_updated', limit: 2000 }
     );
@@ -1145,6 +1135,7 @@ export class ReportsService {
     workspaceId: string,
     activeDepartmentId: string | null
   ): Promise<DepartmentRecord[]> {
+    const isManager = Boolean(activeDepartmentId);
     const filters: Array<{ path: string[]; operator: string; value: string }> = [
       { path: ['business_profile'], operator: '_eq', value: workspaceId },
       { path: ['is_active'], operator: '_eq', value: 'true' }
@@ -1156,11 +1147,13 @@ export class ReportsService {
     try {
       return await this.queryWithFieldFallback<DepartmentRecord>(
         'departments',
-        [
-          ['id', 'date_created', 'date_updated', 'business_profile', 'name', 'manager_member', 'is_active'],
-          ['id', 'business_profile', 'name', 'manager_member', 'is_active'],
-          ['id', 'name', 'is_active']
-        ],
+        isManager
+          ? [['id', 'name', 'is_active']]
+          : [
+              ['id', 'date_created', 'date_updated', 'business_profile', 'name', 'manager_member', 'is_active'],
+              ['id', 'business_profile', 'name', 'manager_member', 'is_active'],
+              ['id', 'name', 'is_active']
+            ],
         token,
         { filters, sort: 'name', limit: 400 }
       );
@@ -1170,11 +1163,13 @@ export class ReportsService {
       }
       return this.queryWithFieldFallback<DepartmentRecord>(
         'departments',
-        [
-          ['id', 'date_created', 'date_updated', 'business_profile', 'name', 'manager_member', 'is_active'],
-          ['id', 'business_profile', 'name', 'manager_member', 'is_active'],
-          ['id', 'name', 'is_active']
-        ],
+        isManager
+          ? [['id', 'name', 'is_active']]
+          : [
+              ['id', 'date_created', 'date_updated', 'business_profile', 'name', 'manager_member', 'is_active'],
+              ['id', 'business_profile', 'name', 'manager_member', 'is_active'],
+              ['id', 'name', 'is_active']
+            ],
         token,
         {
           filters: activeDepartmentId
@@ -1209,7 +1204,7 @@ export class ReportsService {
       [
         [
           'id', 'status', 'date_created', 'date_updated', 'user', 'started_at', 'completed_at', 'consent_granted',
-          'device_info', 'environment_info', 'task_metrics', 'business_profile', 'member', 'department',
+          'business_profile', 'member', 'department',
           'request_source', 'device_platform', 'failure_reason', 'department_name_snapshot',
           'member_role_snapshot', 'shift_template_name_snapshot'
         ],
@@ -1237,12 +1232,9 @@ export class ReportsService {
         'scan_results',
         [
           [
-            'id', 'date_created', 'scan_id', 'risk_level', 'readiness_score', 'confidence',
-            'camera_confidence', 'voice_confidence', 'task_performance_score', 'confidence_drift',
-            'explanation', 'internal_analysis', 'ai_model_version', 'baseline_used', 'suggested_action',
-            'face_metrics', 'voice_metrics', 'reaction_metrics'
+            'id', 'date_created', 'scan_id', 'risk_level', 'readiness_score'
           ],
-          ['id', 'date_created', 'scan_id', 'risk_level', 'readiness_score', 'confidence'],
+          ['id', 'date_created', 'scan_id', 'risk_level', 'readiness_score'],
           ['id', 'date_created', 'scan_id', 'risk_level']
         ],
         token,
@@ -1263,23 +1255,29 @@ export class ReportsService {
     activeDepartmentId: string | null,
     startIso: string
   ): Promise<ScanRequestRecord[]> {
+    const isManager = Boolean(activeDepartmentId);
     const filters: Array<{ path: string[]; operator: string; value: string }> = [
       { path: ['business_profile'], operator: '_eq', value: workspaceId },
-      { path: ['timestamp'], operator: '_gte', value: startIso }
+      { path: ['requested_at'], operator: '_gte', value: startIso }
     ];
+    if (activeDepartmentId) {
+      filters.push({ path: ['department'], operator: '_eq', value: activeDepartmentId });
+    }
 
     return this.queryWithFieldFallback<ScanRequestRecord>(
-      'requests',
-      [
-        [
-          'id', 'business_profile', 'scan_id', 'required_state', 'response_status', 'response_payload',
-          'timestamp', 'requested_for_user', 'requested_for_email', 'requested_for_phone', 'Target'
-        ],
-        ['id', 'business_profile', 'scan_id', 'required_state', 'response_status', 'timestamp', 'requested_for_user', 'Target'],
-        ['id', 'response_status', 'timestamp', 'requested_for_user']
-      ],
+      'scan_requests',
+      isManager
+        ? [['id', 'department', 'status', 'request_type', 'requested_at', 'due_at']]
+        : [
+            [
+              'id', 'business_profile', 'department', 'requested_by_user', 'target_member', 'completed_scan',
+              'status', 'cancelled', 'request_type', 'requested_at', 'due_at', 'completed_at'
+            ],
+            ['id', 'business_profile', 'target_member', 'requested_by_user', 'status', 'request_type', 'requested_at'],
+            ['id', 'status', 'requested_at', 'target_member']
+          ],
       token,
-      { filters, sort: '-timestamp', limit: 2500 }
+      { filters, sort: '-requested_at', limit: 2500 }
     );
   }
 
@@ -1289,6 +1287,7 @@ export class ReportsService {
     activeDepartmentId: string | null,
     startIso: string
   ): Promise<AlertRecord[]> {
+    const isManager = Boolean(activeDepartmentId);
     const filters: Array<{ path: string[]; operator: string; value: string }> = [
       { path: ['business_profile'], operator: '_eq', value: workspaceId },
       { path: ['date_created'], operator: '_gte', value: startIso }
@@ -1300,22 +1299,24 @@ export class ReportsService {
     try {
       return await this.queryWithFieldFallback<AlertRecord>(
         'alerts',
-        [
-          [
-            'id', 'date_created', 'business_profile', 'department', 'target_member', 'target_user',
-            'scan', 'severity', 'title', 'message', 'status', 'reviewed_by', 'reviewed_at', 'action_note', 'action_type'
-          ],
-          [
-            'id', 'date_created', 'department', 'target_member', 'severity', 'title', 'message',
-            'status', 'reviewed_at', 'action_type'
-          ],
-          ['id', 'date_created', 'severity', 'title', 'status']
-        ],
+        isManager
+          ? [['id', 'date_created', 'department', 'severity', 'title', 'message', 'status']]
+          : [
+              [
+                'id', 'date_created', 'business_profile', 'department', 'target_member', 'target_user',
+                'scan', 'severity', 'title', 'message', 'status', 'reviewed_by', 'reviewed_at', 'action_note', 'action_type'
+              ],
+              [
+                'id', 'date_created', 'department', 'target_member', 'severity', 'title', 'message',
+                'status', 'reviewed_at', 'action_type'
+              ],
+              ['id', 'date_created', 'severity', 'title', 'status']
+            ],
         token,
         { filters, sort: '-date_created', limit: 2500 }
       );
     } catch (error) {
-      if ((error as { status?: number } | null)?.status === 403) {
+      if (!isManager && (error as { status?: number } | null)?.status === 403) {
         return [];
       }
       throw error;
