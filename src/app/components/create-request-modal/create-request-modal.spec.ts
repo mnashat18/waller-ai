@@ -1,18 +1,18 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { CreateRequestModal } from './create-request-modal';
+import { CreateRequestModalComponent } from './create-request-modal';
 
 describe('CreateRequestModal', () => {
-  let component: CreateRequestModal;
-  let fixture: ComponentFixture<CreateRequestModal>;
+  let component: CreateRequestModalComponent;
+  let fixture: ComponentFixture<CreateRequestModalComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [CreateRequestModal]
+      imports: [CreateRequestModalComponent]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(CreateRequestModal);
+    fixture = TestBed.createComponent(CreateRequestModalComponent);
     component = fixture.componentInstance;
     await fixture.whenStable();
   });
