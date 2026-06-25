@@ -33,7 +33,7 @@ export class RoleBadgeComponent {
     if (normalized === 'hr') return 'HR';
     if (normalized === 'manager') return 'Manager';
     if (normalized === 'employee') return 'Employee';
-    return 'No Role';
+    return 'No Access Level';
   }
 
   badgeClass(): string {

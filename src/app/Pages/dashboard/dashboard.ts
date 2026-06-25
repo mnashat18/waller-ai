@@ -21,6 +21,7 @@ import { DashboardSectionComponent } from '../../shared/ui/dashboard-section/das
 import { ErrorStateComponent } from '../../shared/ui/error-state/error-state.component';
 import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 import { RiskBadgeComponent } from '../../shared/ui/risk-badge/risk-badge.component';
 import { StatusBadgeComponent } from '../../shared/ui/status-badge/status-badge.component';
 
@@ -35,6 +36,7 @@ import { StatusBadgeComponent } from '../../shared/ui/status-badge/status-badge.
     RiskBadgeComponent,
     StatusBadgeComponent,
     CardSkeletonLoaderComponent,
+    PageHeaderComponent,
     ErrorStateComponent
   ],
   templateUrl: './dashboard.html',
@@ -48,6 +50,9 @@ export class Dashboard implements OnInit {
   activeMembership: any = null;
   activeBusinessProfile: any = null;
   activeMemberRole: string | null = null;
+  onboardingDismissed = false;
+
+  private readonly onboardingDismissKey = 'wellar_onboarding_checklist_dismissed_v1';
 
   constructor(
     private dashboardService: OperationalDashboardService,
@@ -59,11 +64,213 @@ export class Dashboard implements OnInit {
   ) {}
 
   ngOnInit(): void {
+    this.onboardingDismissed = this.readOnboardingDismissed();
     void this.bootstrap();
   }
 
   refresh(): void {
     void this.bootstrap();
+  }
+
+  get freshnessLabel(): string {
+    const generatedAt = this.view?.generatedAt;
+    if (!generatedAt) {
+      return '';
+    }
+
+    const then = new Date(generatedAt).getTime();
+    if (Number.isNaN(then)) {
+      return '';
+    }
+
+    const minutes = Math.floor((Date.now() - then) / 60000);
+    if (minutes <= 0) {
+      return 'Updated just now';
+    }
+    if (minutes === 1) {
+      return 'Updated 1 min ago';
+    }
+    if (minutes < 60) {
+      return `Updated ${minutes} min ago`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    if (hours === 1) {
+      return 'Updated 1 hour ago';
+    }
+    if (hours < 24) {
+      return `Updated ${hours} hours ago`;
+    }
+    return 'Updated over a day ago';
+  }
+
+  get activeRole(): string {
+    return String(this.view?.company.activeRole ?? this.activeMemberRole ?? '').toLowerCase();
+  }
+
+  get isManager(): boolean {
+    return this.activeRole === 'manager';
+  }
+
+  get isOwnerOrHr(): boolean {
+    return this.activeRole === 'owner' || this.activeRole === 'hr';
+  }
+
+  get dashboardDescription(): string {
+    if (this.isManager) {
+      const department = this.managerDepartmentName;
+      return department
+        ? `Department-scoped view of readiness, scan requests, alerts, and compliance for ${department}.`
+        : 'Department-scoped view of readiness, scan requests, alerts, and compliance for the active department.';
+    }
+
+    if (this.isOwnerOrHr) {
+      const company = this.view?.company.companyName || 'the active organization';
+      return `Organization-level view of readiness, scan requests, alerts, and compliance for ${company}.`;
+    }
+
+    return 'Operational readiness view for the active workspace.';
+  }
+
+  get managerDepartmentName(): string {
+    return this.view?.currentMember.departmentName || this.view?.scope.departmentName || '';
+  }
+
+  get scopeDisplayLabel(): string {
+    if (this.isManager) {
+      return this.managerDepartmentName ? `Department scope: ${this.managerDepartmentName}` : 'Department scope';
+    }
+
+    return 'Organization scope';
+  }
+
+  get roleDisplayLabel(): string {
+    const role = this.view?.company.activeRole ?? this.activeMemberRole ?? '';
+    if (!role) {
+      return 'Active role';
+    }
+    return role === 'hr' ? 'HR' : role.charAt(0).toUpperCase() + role.slice(1);
+  }
+
+  get showSetupCallout(): boolean {
+    return this.showOnboarding && this.isOwnerOrHr;
+  }
+
+  get hasActiveDepartmentContext(): boolean {
+    return !this.isManager || Boolean(this.managerDepartmentName || this.view?.scope.departmentId);
+  }
+
+  get noOperationalDataTitle(): string {
+    return this.isManager ? 'No department activity yet' : 'No operational activity yet';
+  }
+
+  get noOperationalDataMessage(): string {
+    return this.isManager
+      ? 'This department view will populate after members, scan requests, alerts, or completed scans are available in your scope.'
+      : 'This organization view will populate after members, scan requests, alerts, or completed scans are available.';
+  }
+
+  get setupProgressLabel(): string {
+    return `${this.onboardingDoneCount} of ${this.onboardingSteps.length} setup items complete`;
+  }
+
+  get showOnboarding(): boolean {
+    if (this.onboardingDismissed || !this.view) {
+      return false;
+    }
+
+    if (!this.isOwnerOrHr) {
+      return false;
+    }
+
+    return !this.onboardingComplete;
+  }
+
+  get onboardingSteps(): Array<{
+    label: string;
+    description: string;
+    route: string;
+    queryParams: Record<string, string> | null;
+    cta: string;
+    done: boolean;
+  }> {
+    const vm = this.view;
+    const departments = vm?.complianceByDepartment.items ?? [];
+    const hasDepartments = departments.length > 0;
+    const hasScans = (vm?.recentScans.items.length ?? 0) > 0;
+    const hasRequests = (vm?.pendingRequests.items.length ?? 0) > 0 || hasScans;
+    const hasMembers =
+      departments.some((department) => department.activeEligibleMembers > 0) ||
+      hasScans ||
+      hasRequests;
+
+    return [
+      {
+        label: 'Complete company profile',
+        description: 'Confirm organization details before relying on readiness reporting.',
+        route: '',
+        queryParams: null,
+        cta: '',
+        done: Boolean(vm?.company.companyName)
+      },
+      {
+        label: 'Add departments',
+        description: 'Create workforce groups for team-level scans and compliance coverage.',
+        route: '',
+        queryParams: null,
+        cta: '',
+        done: hasDepartments
+      },
+      {
+        label: 'Invite employees',
+        description: 'Bring your team into the workspace.',
+        route: '/app/workforce',
+        queryParams: null,
+        cta: 'Invite team',
+        done: hasMembers
+      },
+      {
+        label: 'Connect employees to the mobile app',
+        description: 'Employees complete readiness scans on mobile.',
+        route: '/download-app',
+        queryParams: null,
+        cta: 'Get the app',
+        done: hasScans
+      },
+      {
+        label: 'Create your first scan request',
+        description: 'Send a readiness scan to a person or a team.',
+        route: '/app/scan-requests',
+        queryParams: null,
+        cta: 'Send request',
+        done: hasRequests
+      }
+    ];
+  }
+
+  get onboardingDoneCount(): number {
+    return this.onboardingSteps.filter((step) => step.done).length;
+  }
+
+  get onboardingComplete(): boolean {
+    return this.onboardingSteps.every((step) => step.done);
+  }
+
+  dismissOnboarding(): void {
+    this.onboardingDismissed = true;
+    try {
+      localStorage.setItem(this.onboardingDismissKey, '1');
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  private readOnboardingDismissed(): boolean {
+    try {
+      return localStorage.getItem(this.onboardingDismissKey) === '1';
+    } catch {
+      return false;
+    }
   }
 
   trackByKpi(index: number, item: DashboardKpiCardData): string {
@@ -103,8 +310,6 @@ export class Dashboard implements OnInit {
 
       const context = await this.resolveDashboardContext();
 
-      console.log('[Dashboard] context result', context);
-
       if (!context?.activeMembership?.id || !context?.activeBusinessProfile?.id) {
         const inviteFlowDetected = this.hasInviteClaimSignal();
         if (inviteFlowDetected) {
@@ -113,7 +318,6 @@ export class Dashboard implements OnInit {
           return;
         }
 
-        console.warn('[Dashboard] missing context, redirecting to workspace access');
         await this.router.navigateByUrl('/app/workspace-access', { replaceUrl: true });
         return;
       }
@@ -127,8 +331,7 @@ export class Dashboard implements OnInit {
       await this.loadDashboardData(context.activeBusinessProfile.id);
 
       this.state = 'ready';
-    } catch (error) {
-      console.error('[Dashboard] failed to load', error);
+    } catch {
       this.state = 'error';
       this.errorMessage = 'Dashboard failed to load.';
     } finally {

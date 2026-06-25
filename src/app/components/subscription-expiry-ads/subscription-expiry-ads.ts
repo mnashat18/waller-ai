@@ -29,17 +29,7 @@ export class SubscriptionExpiryAdsComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    this.refreshSchedule();
-    window.addEventListener('focus', this.handleWindowFocus);
-    this.navSub = this.router.events.subscribe((event) => {
-      if (event instanceof NavigationEnd) {
-        this.refreshSchedule();
-      }
-    });
+    this.visible = false;
   }
 
   ngOnDestroy() {
@@ -61,22 +51,22 @@ export class SubscriptionExpiryAdsComponent implements OnInit, OnDestroy {
     this.markCurrentSlotAsShown();
     this.visible = false;
     this.currentSlot = null;
-    this.router.navigateByUrl('/payment');
+    this.router.navigateByUrl('/contact');
   }
 
   adTitle(): string {
     if (this.currentSlot === 10) {
-      return 'Morning Business Reminder';
+      return 'Morning Account Support Reminder';
     }
     if (this.currentSlot === 15) {
-      return 'Afternoon Business Reminder';
+      return 'Afternoon Account Support Reminder';
     }
-    return 'Evening Business Reminder';
+    return 'Evening Account Support Reminder';
   }
 
   adMessage(): string {
-    const ended = this.trialEndsAt ? this.formatDate(this.trialEndsAt) : 'your trial end date';
-    return `Your Business access ended on ${ended}. Continue with paid Business to keep all premium tools unlocked.`;
+    const ended = this.trialEndsAt ? this.formatDate(this.trialEndsAt) : 'your pilot end date';
+    return `Organization pilot access ended on ${ended}. Contact your account team to coordinate continued access.`;
   }
 
   private handleWindowFocus = () => {
@@ -96,7 +86,7 @@ export class SubscriptionExpiryAdsComponent implements OnInit, OnDestroy {
     this.trialEndsAt = snapshot.trialExpiresAt;
     const path = (this.router.url || '').split('?')[0];
 
-    if (path === '/payment' || path === '/upgrade-plan' || path === '/login' || path === '/signup') {
+    if (path === '/payment' || path === '/upgrade-plan') {
       this.visible = false;
       this.currentSlot = null;
       this.immediateQueue.length = 0;
@@ -292,4 +282,3 @@ export class SubscriptionExpiryAdsComponent implements OnInit, OnDestroy {
     this.timers = [];
   }
 }
-

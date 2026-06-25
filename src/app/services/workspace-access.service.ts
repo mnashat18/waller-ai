@@ -39,11 +39,7 @@ export type WorkspaceAccessInvite = {
   departmentId: string | null;
   departmentName: string | null;
   status: string;
-  token: string | null;
-  sentAt: string | null;
   expiresAt: string | null;
-  claimedAt: string | null;
-  acceptedUserId: string | null;
   rawStatus: string;
 };
 
@@ -53,6 +49,8 @@ export type WorkspaceAccessMode =
   | 'pending-application'
   | 'needs-more-info'
   | 'application-rejected'
+  | 'application-approved'
+  | 'application-closed'
   | 'pending-invite'
   | 'multiple-workspaces'
   | 'employee-access'
@@ -92,15 +90,6 @@ type DirectusUserResponse = {
   last_name?: string | null;
 };
 
-type WorkspaceProfileRow = {
-  id?: string | number | null;
-  company_name?: string | null;
-  owner_user?: string | number | { id?: string | number | null } | null;
-  is_active?: boolean | null;
-  plan_code?: string | null;
-  billing_status?: string | null;
-};
-
 type WorkspaceLookupResult<T> = {
   items: T;
   error: string | null;
@@ -118,7 +107,6 @@ type WorkspaceMembershipRow = {
     | {
         id?: string | number | null;
         company_name?: string | null;
-        owner_user?: string | number | { id?: string | number | null } | null;
         is_active?: boolean | null;
       }
     | null;
@@ -153,17 +141,7 @@ type WorkspaceInviteRow = {
       }
     | null;
   status?: string | null;
-  token?: string | null;
-  sent_at?: string | null;
   expires_at?: string | null;
-  claimed_at?: string | null;
-  accepted_user?:
-    | string
-    | number
-    | {
-        id?: string | number | null;
-      }
-    | null;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -217,63 +195,11 @@ export class WorkspaceAccessService {
 
             this.companyContext.clearActiveWorkspaceContext();
 
-            return this.queryOwnedProfiles(userId, token).pipe(
-              switchMap((ownedResult) => {
-
-                if (ownedResult.error) {
-                  return of(this.buildErrorState(ownedResult.error));
-                }
-
-                const ownedProfiles = ownedResult.items;
-                const activeOwnedProfiles = ownedProfiles.filter((profile) => profile.is_active === true);
-                const createOwnedMemberships = activeOwnedProfiles.filter((profile) =>
-                  !memberships.some((membership) => {
-                    const workspace = this.normalizeWorkspaceFromMembership(membership);
-                    return workspace?.id === this.normalizeId(profile.id);
-                  })
-                );
-
-                const normalizeOwnedMemberships$ = createOwnedMemberships.length
-                  ? forkJoin(
-                      createOwnedMemberships.map((profile) =>
-                        this.upsertMembership(
-                          this.normalizeId(profile.id) ?? '',
-                          userId,
-                          'owner',
-                          null,
-                          token
-                        )
-                      )
-                    )
-                  : of([]);
-
-                return normalizeOwnedMemberships$.pipe(
-                  switchMap(() => this.queryMemberships(userId, token, true)),
-                  switchMap((updatedMembershipResult) => {
-
-                    if (updatedMembershipResult.error) {
-                      return of(this.buildErrorState(updatedMembershipResult.error));
-                    }
-
-                    const updatedMemberships = updatedMembershipResult.items;
-                    const membershipState = this.buildState(baseUser, updatedMemberships, [], []);
-
-                    if (membershipState.activeWorkspaces.length > 0) {
-                      return of(membershipState);
-                    }
-
-                    return forkJoin({
-                      invites: this.queryInvites(userId, email, token, forceRefresh),
-                      applications: from(this.workspaceApplications.getMyApplications(userId, token))
-                    }).pipe(
-                      map(({ invites, applications }) => {
-                        const state = this.buildState(baseUser, updatedMemberships, invites, applications);
-                        return state;
-                      })
-                    );
-                  })
-                );
-              })
+            return forkJoin({
+              invites: this.queryInvites(userId, email, token, forceRefresh),
+              applications: from(this.workspaceApplications.getMyApplications(userId, token))
+            }).pipe(
+              map(({ invites, applications }) => this.buildState(baseUser, memberships, invites, applications))
             );
           }),
           catchError((error) =>
@@ -302,44 +228,19 @@ export class WorkspaceAccessService {
   }
 
   acceptInvite(invite: WorkspaceAccessInvite): Observable<WorkspaceActionResult> {
-    if (!invite.token?.trim()) {
-      return of({ ok: false, message: 'Invite token is missing.' });
-    }
-
-    if (!this.auth.getStoredAccessToken()) {
-      return of({ ok: false, message: 'Please sign in first.' });
-    }
-
-    return this.claimInviteByToken(invite.token);
+    void invite;
+    return of({
+      ok: false,
+      message: 'Enter the invitation code from your invitation link to join this organization.'
+    });
   }
 
   declineInvite(inviteId: string): Observable<WorkspaceActionResult> {
-    const token = this.auth.getStoredAccessToken();
-    if (!token) {
-      return of({ ok: false, message: 'Please sign in first.' });
-    }
-
-    return this.http.patch(
-      `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`,
-      {
-        status: 'declined'
-      },
-      {
-        headers: this.auth.getAuthHeaders(token),
-        withCredentials: true
-      }
-    ).pipe(
-      map(() => ({
-        ok: true,
-        message: 'Invite declined.'
-      })),
-      catchError((error) =>
-        of({
-          ok: false,
-          message: this.toFriendlyError(error, 'We could not update the invite right now.')
-        })
-      )
-    );
+    void inviteId;
+    return of({
+      ok: false,
+      message: 'Invitation decline requires a server-side invitation action flow.'
+    });
   }
 
   claimInviteByToken(inviteToken: string): Observable<WorkspaceActionResult> {
@@ -415,143 +316,17 @@ export class WorkspaceAccessService {
     );
   }
 
-  private queryOwnedProfiles(userId: string, token: string): Observable<WorkspaceLookupResult<WorkspaceProfileRow[]>> {
-    const params = new URLSearchParams({
-      limit: '50',
-      sort: '-id',
-      fields: [
-        'id',
-        'company_name',
-        'is_active',
-        'plan_code',
-        'billing_status',
-        'owner_user'
-      ].join(',')
-    });
-    params.set('filter[owner_user][_eq]', userId);
-
-    return this.http.get<{ data?: WorkspaceProfileRow[] }>(
-      `${this.api}/items/business_profiles?${params.toString()}&_ts=${Date.now()}`,
-      {
-        headers: this.auth.getAuthHeaders(token),
-        withCredentials: true
-      }
-    ).pipe(
-      map((response) => ({
-        items: response.data ?? [],
-        error: null,
-        status: null
-      })),
-      catchError((error) =>
-        of({
-          items: [] as WorkspaceProfileRow[],
-          error: this.toFriendlyError(error, 'We could not verify your owned workspace profiles.'),
-          status: typeof error?.status === 'number' ? error.status : null
-        })
-      )
-    );
-  }
-
   private queryInvites(
     userId: string,
     email: string | null,
     token: string,
     forceRefresh: boolean
   ): Observable<WorkspaceInviteRow[]> {
-    const emailParams = new URLSearchParams({
-      limit: '50',
-      sort: '-sent_at',
-      fields: [
-        'id',
-        'email',
-        'business_profile.id',
-        'business_profile.company_name',
-        'member_role',
-        'department',
-        'status',
-        'token',
-        'sent_at',
-        'expires_at',
-        'claimed_at',
-        'accepted_user',
-        'invite_type'
-      ].join(',')
-    });
-
-    if (email) {
-      emailParams.set('filter[email][_eq]', email);
-      emailParams.set('filter[status][_in]', 'pending,sent');
-    } else {
-      emailParams.set('filter[id][_eq]', '__none__');
-    }
-
-    const byEmail$ = this.http.get<{ data?: WorkspaceInviteRow[] }>(
-      `${this.api}/items/request_invites?${emailParams.toString()}&_ts=${Date.now()}`,
-      {
-        headers: this.auth.getAuthHeaders(token),
-        withCredentials: true
-      }
-    ).pipe(
-      map((response) => response.data ?? []),
-      catchError(() => of([]))
-    );
-    return byEmail$;
-  }
-
-  private upsertMembership(
-    profileId: string,
-    userId: string,
-    role: ActiveMemberRole,
-    departmentId: string | null,
-    token: string
-  ): Observable<unknown> {
-    const lookup = new URLSearchParams({
-      limit: '1',
-      sort: '-id',
-      fields: 'id,member_role,status,business_profile,user,department'
-    });
-    lookup.set('filter[business_profile][_eq]', profileId);
-    lookup.set('filter[user][_eq]', userId);
-
-    return this.http.get<{ data?: Array<{ id?: string | number | null }> }>(
-      `${this.api}/items/business_profile_members?${lookup.toString()}&_ts=${Date.now()}`,
-      {
-        headers: this.auth.getAuthHeaders(token),
-        withCredentials: true
-      }
-    ).pipe(
-      switchMap((response) => {
-        const existingId = this.normalizeId(response?.data?.[0]?.id);
-        const payload: Record<string, unknown> = {
-          business_profile: profileId,
-          user: userId,
-          member_role: this.toBackendRole(role),
-          status: 'active',
-          joined_at: new Date().toISOString(),
-          department: departmentId ?? null
-        };
-
-        if (existingId) {
-          return this.http.patch(
-            `${this.api}/items/business_profile_members/${encodeURIComponent(existingId)}`,
-            payload,
-            {
-              headers: this.auth.getAuthHeaders(token),
-              withCredentials: true
-            }
-          );
-        }
-
-        return this.http.post(
-          `${this.api}/items/business_profile_members`,
-          payload,
-          {
-            headers: this.auth.getAuthHeaders(token),
-            withCredentials: true
-          }
-        );
-      })
-    );
+    void userId;
+    void email;
+    void token;
+    void forceRefresh;
+    return of([]);
   }
 
   private buildState(
@@ -596,14 +371,21 @@ export class WorkspaceAccessService {
       mode = 'ready';
     } else if (employeeWorkspaces.length === 1 && dashboardWorkspaces.length === 0) {
       mode = 'employee-access';
+    } else if (pendingInvites.length) {
+      // A pending invite is always actionable and must not be hidden behind an
+      // existing application. Declining the invite lets any application below
+      // resurface on the next load.
+      mode = 'pending-invite';
     } else if (applicationStatus === 'pending_review') {
       mode = 'pending-application';
     } else if (applicationStatus === 'needs_more_info') {
       mode = 'needs-more-info';
     } else if (applicationStatus === 'rejected') {
       mode = 'application-rejected';
-    } else if (pendingInvites.length) {
-      mode = 'pending-invite';
+    } else if (applicationStatus === 'approved') {
+      mode = 'application-approved';
+    } else if (applicationStatus === 'closed') {
+      mode = 'application-closed';
     }
 
     return {
@@ -659,11 +441,7 @@ export class WorkspaceAccessService {
       departmentId: this.normalizeId(department?.['id'] ?? row.department),
       departmentName: this.pickString(department?.['name']) ?? null,
       status: this.pickString(row.status) ?? 'pending',
-      token: this.pickString(row.token),
-      sentAt: this.pickString(row.sent_at),
       expiresAt: this.pickString(row.expires_at),
-      claimedAt: this.pickString(row.claimed_at),
-      acceptedUserId: this.normalizeId(row.accepted_user),
       rawStatus: this.pickString(row.status) ?? 'pending'
     };
   }
@@ -700,10 +478,6 @@ export class WorkspaceAccessService {
     if (raw === 'manager' || raw === 'manger') return 'manager';
     if (raw === 'employee' || raw === 'member' || raw === 'viewer') return 'employee';
     return null;
-  }
-
-  private toBackendRole(value: ActiveMemberRole): string {
-    return value;
   }
 
   private isMembershipActive(status: string): boolean {

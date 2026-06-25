@@ -7,7 +7,6 @@ import { getWorkspaceRouteByPath } from '../../ia/wellar-ia';
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { NotificationsComponent } from '../../components/notifications/notifications';
 import { AuthService } from '../../services/auth';
-import { BusinessCenterService } from '../../services/business-center.service';
 
 @Component({
   selector: 'app-header',
@@ -18,9 +17,9 @@ import { BusinessCenterService } from '../../services/business-center.service';
 export class HeaderComponent {
   title = 'Wellar';
   subtitle = 'Operational control center';
-  activeCompanyLabel = 'No active company';
-  activeDepartmentLabel = 'Company-wide';
-  activeRoleLabel = 'No role';
+  activeCompanyLabel = 'No active organization';
+  activeDepartmentLabel = 'Organization-wide';
+  activeRoleLabel = 'No access level';
   switcherOpen = false;
   profileMenuOpen = false;
 
@@ -29,7 +28,6 @@ export class HeaderComponent {
   constructor(
     private router: Router,
     private auth: AuthService,
-    private businessCenter: BusinessCenterService,
     private companyContext: CompanyContextService
   ) {
     this.updateHeader();
@@ -38,12 +36,11 @@ export class HeaderComponent {
     this.contextSub = this.companyContext.state$.subscribe((state) => {
       this.activeCompanyLabel =
         state.context.activeBusinessProfileName ||
-        this.businessCenter.getCachedHubAccessState()?.profile?.company_name ||
         state.context.availableCompanies.find((item) => item.id === state.context.activeBusinessProfileId)?.name ||
         state.context.activeBusinessProfileId ||
-        'No active company';
-      this.activeDepartmentLabel = state.context.activeDepartmentId || 'Company-wide';
-      this.activeRoleLabel = state.context.activeMemberRole ? this.toTitleCase(state.context.activeMemberRole) : 'No role';
+        'No active organization';
+      this.activeDepartmentLabel = state.context.activeDepartmentId || 'Organization-wide';
+      this.activeRoleLabel = state.context.activeMemberRole ? this.toTitleCase(state.context.activeMemberRole) : 'No access level';
     });
 
     this.router.events.subscribe((event) => {
@@ -73,7 +70,7 @@ export class HeaderComponent {
   logout(): void {
     this.auth.logout();
     this.profileMenuOpen = false;
-    this.router.navigateByUrl('/login');
+    this.router.navigateByUrl('/');
   }
 
   ngOnDestroy(): void {
@@ -101,12 +98,11 @@ export class HeaderComponent {
     const state = this.companyContext.snapshot().context;
     this.activeCompanyLabel =
       state.activeBusinessProfileName ||
-      this.businessCenter.getCachedHubAccessState()?.profile?.company_name ||
       state.availableCompanies.find((item) => item.id === state.activeBusinessProfileId)?.name ||
       state.activeBusinessProfileId ||
-      'No active company';
-    this.activeDepartmentLabel = state.activeDepartmentId || 'Company-wide';
-    this.activeRoleLabel = state.activeMemberRole ? this.toTitleCase(state.activeMemberRole) : 'No role';
+      'No active organization';
+    this.activeDepartmentLabel = state.activeDepartmentId || 'Organization-wide';
+    this.activeRoleLabel = state.activeMemberRole ? this.toTitleCase(state.activeMemberRole) : 'No access level';
   }
 
   private toTitleCase(value: string): string {

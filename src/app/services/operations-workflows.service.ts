@@ -16,6 +16,7 @@ import {
 import { CompanyContextService, type CompanyContext } from '../core/context/company-context.service';
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { AuthService } from './auth';
+import { SecurityMessages } from '../shared/utils/security-error';
 
 export type WorkflowDepartmentOption = {
   id: string;
@@ -105,11 +106,9 @@ export type CreateScanRequestInput = {
   target_member?: string | null;
   department?: string | null;
   request_type?: string | null;
-  status?: string | null;
   completed_scan?: string | null;
   cancelled?: string | null;
   due_at?: string | null;
-  requested_by_user?: string | null;
 };
 
 export type RequestActionResult = {
@@ -411,20 +410,11 @@ export class OperationsWorkflowsService {
 
   getCompliancePageData(): Observable<CompliancePageData> {
     return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        forkJoin({
-          departments: this.queryItems<DepartmentRecord>(
-            'departments',
-            ['id', 'name'],
-            context.token,
-            { filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }], sort: 'name', limit: 120 }
-          ),
-          members: this.queryItems<MemberRecord>(
-            'business_profile_members',
-            ['id', 'status', 'department', 'user.id', 'user.email', 'user.first_name', 'user.last_name'],
-            context.token,
-            { filters: this.scopeFilters(context, ['business_profile'], ['department']), sort: '-id', limit: 400 }
-          ),
+      switchMap((context) => {
+        this.assertManagerDepartmentScope(context);
+        return forkJoin({
+          departments: this.loadDepartmentsForRequests(context),
+          members: this.loadMembersForRequests(context),
           shiftTemplates: this.queryItems<ShiftTemplateRecord>(
             'shift_templates',
             ['id', 'name', 'title', 'start_time', 'scan_window_start_minutes', 'scan_window_end_minutes', 'is_active'],
@@ -432,22 +422,10 @@ export class OperationsWorkflowsService {
             { filters: this.scopeFilters(context, ['business_profile']), sort: 'name', limit: 200 }
           ),
           requests: this.queryItems<ScanRequestRecord>(
-            'requests',
-            [
-              'id',
-              'business_profile',
-              'scan_id',
-              'required_state',
-              'response_status',
-              'response_payload',
-              'timestamp',
-              'requested_for_user',
-              'requested_for_email',
-              'requested_for_phone',
-              'Target'
-            ],
+            'scan_requests',
+            this.managerRequestFields(context),
             context.token,
-            { filters: this.scopeFilters(context, ['business_profile']), sort: '-timestamp', limit: 800 }
+            { filters: this.managerDepartmentFilters(context, ['business_profile'], ['department']), sort: '-requested_at', limit: 800 }
           ),
           scans: this.queryItems<WellnessScanRecord>(
             'wellness_scans',
@@ -482,8 +460,8 @@ export class OperationsWorkflowsService {
           map(({ departments, members, shiftTemplates, requests, scans, results, consents, exports }) =>
             this.buildCompliancePageData(departments, members, shiftTemplates, requests, scans, results, consents, exports)
           )
-        )
-      )
+        );
+      })
     );
   }
 
@@ -502,6 +480,9 @@ export class OperationsWorkflowsService {
               departments: this.loadDepartmentsForRequests(context).pipe(
                 timeout(12000),
                 catchError((error) => {
+                  if (context.activeRole === 'manager') {
+                    return throwError(() => error);
+                  }
                   console.warn('[ScanRequests] optional departments failed, using []', error);
                   return of([] as DepartmentRecord[]);
                 })
@@ -509,6 +490,9 @@ export class OperationsWorkflowsService {
               members: this.loadMembersForRequests(context).pipe(
                 timeout(12000),
                 catchError((error) => {
+                  if (context.activeRole === 'manager') {
+                    return throwError(() => error);
+                  }
                   console.warn('[ScanRequests] optional members failed, using []', error);
                   return of([] as MemberRecord[]);
                 })
@@ -813,236 +797,42 @@ export class OperationsWorkflowsService {
   }
 
   createScanRequest(input: CreateScanRequestInput): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const role = context.activeRole;
-        if (role !== 'owner' && role !== 'hr') {
-          return throwError(() => new Error('Your workspace role cannot create scan requests.'));
-        }
-
-        const now = new Date().toISOString();
-        const payload: Record<string, unknown> = {
-          business_profile: context.businessProfileId,
-          requested_for_user: input.target_member ?? null,
-          requested_for_email: null,
-          requested_for_phone: null,
-          Target: null,
-          required_state: input.request_type ?? 'manual',
-          response_status: input.status ?? 'pending',
-          timestamp: now,
-          response_payload: input.completed_scan ? { completed_scan: input.completed_scan } : null
-        };
-
-        if (!this.normalizeId(payload['requested_for_user'])) {
-          return throwError(() => new Error('Target member is required.'));
-        }
-
-        return this.postWithFallback('requests', context.token, [payload]).pipe(
-          map(() => void 0),
-          switchMap(() =>
-            this.logActivityEvent(
-              context,
-              'scan_request_created',
-              null,
-              {
-                target_member: input.target_member ?? null,
-                department: input.department ?? null
-              }
-            )
-          )
-        );
-      })
-    );
+    void input;
+    return throwError(() => new Error(this.scanRequestFlowPrerequisiteMessage()));
   }
 
   createDepartmentScanRequests(input: CreateScanRequestInput): Observable<number> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const role = context.activeRole;
-        if (role !== 'owner' && role !== 'hr') {
-          return throwError(() => new Error('Your workspace role cannot create scan requests.'));
-        }
-
-        const departmentId = this.normalizeId(input.department);
-        if (!departmentId) {
-          return throwError(() => new Error('Department is required.'));
-        }
-
-        return this.loadMembersForRequests(context).pipe(
-          switchMap((members) => {
-            const eligibleMembers = (members ?? []).filter((member) => {
-              const memberDepartmentId = this.normalizeId(member.department);
-              return this.isScanEligibleMember(member) && memberDepartmentId === departmentId;
-            });
-
-            if (!eligibleMembers.length) {
-              return of(0);
-            }
-
-            return this.filterBulkEligibleMembers(context, eligibleMembers, input.due_at).pipe(
-              switchMap((targetMembers) => {
-                if (!targetMembers.length) {
-                  return of(0);
-                }
-
-                return forkJoin(
-                  targetMembers.map((member) =>
-                    this.createScanRequest({
-                      ...input,
-                      request_type: input.request_type ?? 'bulk',
-                      department: departmentId,
-                      target_member: this.normalizeId(member.id)
-                    }).pipe(catchError((error) => throwError(() => error)))
-                  )
-                ).pipe(map((rows) => rows.length));
-              })
-            );
-          })
-        );
-      })
-    );
+    void input;
+    return throwError(() => new Error(this.scanRequestFlowPrerequisiteMessage()));
   }
 
   createUnassignedScanRequests(input: CreateScanRequestInput): Observable<number> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const role = context.activeRole;
-        if (role !== 'owner' && role !== 'hr') {
-          return throwError(() => new Error('Your workspace role cannot create scan requests.'));
-        }
-
-        return this.loadMembersForRequests(context).pipe(
-          switchMap((members) => {
-            const eligibleMembers = (members ?? []).filter((member) =>
-              this.isScanEligibleMember(member) && !this.normalizeId(member.department)
-            );
-
-            if (!eligibleMembers.length) {
-              return of(0);
-            }
-
-            return this.filterBulkEligibleMembers(context, eligibleMembers, input.due_at).pipe(
-              switchMap((targetMembers) => {
-                if (!targetMembers.length) {
-                  return of(0);
-                }
-
-                return forkJoin(
-                  targetMembers.map((member) =>
-                    this.createScanRequest({
-                      ...input,
-                      request_type: input.request_type ?? 'bulk',
-                      department: null,
-                      target_member: this.normalizeId(member.id)
-                    }).pipe(catchError((error) => throwError(() => error)))
-                  )
-                ).pipe(map((rows) => rows.length));
-              })
-            );
-          })
-        );
-      })
-    );
+    void input;
+    return throwError(() => new Error(this.scanRequestFlowPrerequisiteMessage()));
   }
 
   createWorkspaceScanRequests(input: CreateScanRequestInput): Observable<number> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const role = context.activeRole;
-        if (role !== 'owner' && role !== 'hr') {
-          return throwError(() => new Error('Your workspace role cannot create scan requests.'));
-        }
-
-        return this.loadMembersForRequests(context).pipe(
-          switchMap((members) => {
-            const activeMembers = (members ?? []).filter((member) => this.isScanEligibleMember(member));
-
-            if (!activeMembers.length) {
-              return of(0);
-            }
-
-            return this.filterBulkEligibleMembers(context, activeMembers, input.due_at).pipe(
-              switchMap((targetMembers) => {
-                if (!targetMembers.length) {
-                  return of(0);
-                }
-
-                return forkJoin(
-                  targetMembers.map((member) =>
-                    this.createScanRequest({
-                      ...input,
-                      request_type: input.request_type ?? 'bulk',
-                      target_member: this.normalizeId(member.id),
-                      department: this.normalizeId(member.department) ?? input.department ?? null
-                    }).pipe(catchError((error) => throwError(() => error)))
-                  )
-                ).pipe(map((rows) => rows.length));
-              })
-            );
-          })
-        );
-      })
-    );
+    void input;
+    return throwError(() => new Error(this.scanRequestFlowPrerequisiteMessage()));
   }
 
   cancelScanRequest(requestId: string): Observable<RequestActionResult> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        const payloads: Array<Record<string, unknown>> = [
-          { response_status: 'cancelled', response_payload: { cancelled: 'Cancelled by workspace operator' } },
-          { response_status: 'cancelled' }
-        ];
-
-        return this.patchWithFallback('requests', requestId, context.token, payloads).pipe(
-          switchMap(() =>
-            this.logActivityEvent(context, 'scan_request_cancelled', requestId, null).pipe(
-              map(() => ({
-                ok: true,
-                message: 'Scan request cancelled.'
-              } satisfies RequestActionResult))
-            )
-          ),
-          catchError((error) => {
-            console.error('[OperationsWorkflows] cancel request failed', error);
-            return throwError(() => error);
-          })
-        );
-      })
-    );
+    void requestId;
+    return of({
+      ok: false,
+      configured: false,
+      message: this.scanRequestFlowPrerequisiteMessage()
+    } satisfies RequestActionResult);
   }
 
   remindScanRequest(requestId: string, currentCount: number): Observable<RequestActionResult> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) => {
-        void currentCount;
-        const notificationPayload = {
-          business_profile: context.businessProfileId,
-          user: null,
-          link_type: 'request',
-          link_id: requestId,
-          title: 'Readiness scan reminder sent',
-          body: 'A reminder was sent for a pending readiness scan request.',
-          type: 'request_reminder',
-          status: 'unread'
-        };
-
-        return this.safeCreateNotification(context.token, notificationPayload).pipe(
-          switchMap(() =>
-            this.logActivityEvent(context, 'scan_request_reminded', requestId, null).pipe(
-              map(() => ({
-                ok: false,
-                configured: false,
-                message: 'Reminder workflow is not configured yet.'
-              } satisfies RequestActionResult))
-            )
-          ),
-          catchError((error) => {
-            console.error('[OperationsWorkflows] remind request failed', error);
-            return throwError(() => error);
-          })
-        );
-      })
-    );
+    void requestId;
+    void currentCount;
+    return of({
+      ok: false,
+      configured: false,
+      message: this.scanRequestFlowPrerequisiteMessage()
+    } satisfies RequestActionResult);
   }
 
   duplicateRequest(row: RequestRow): Observable<void> {
@@ -1050,27 +840,15 @@ export class OperationsWorkflowsService {
       target_member: row.target_member_id,
       department: row.department_id,
       request_type: row.request_type,
-      status: row.status,
       due_at: row.due_at
     });
   }
 
   requestAllMissing(rows: ComplianceWorkerRow[], departmentId: string | null, shiftTemplateId: string | null): Observable<void> {
-    const targets = rows.filter((row) => row.missing_today || row.overdue_requests > 0);
-    if (!targets.length) {
-      return of(void 0);
-    }
-
-    return forkJoin(
-      targets.map((row) =>
-        this.createScanRequest({
-          target_member: row.member_id,
-          department: departmentId ?? row.department_id,
-          request_type: 'reminder',
-          status: 'pending'
-        }).pipe(catchError(() => of(void 0)))
-      )
-    ).pipe(map(() => void 0));
+    void rows;
+    void departmentId;
+    void shiftTemplateId;
+    return throwError(() => new Error(this.scanRequestFlowPrerequisiteMessage()));
   }
 
   queueComplianceExport(filters: {
@@ -1080,58 +858,40 @@ export class OperationsWorkflowsService {
     start_date?: string | null;
     end_date?: string | null;
   }): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.post(
-          `${this.api}/items/reports_exports`,
-          {
-            business_profile: context.businessProfileId,
-            user: context.company.userId,
-            format: 'csv',
-            status: 'pending',
-            filters: {
-              export_type: 'compliance',
-              department: filters.department ?? null,
-              shift_template: filters.shift_template ?? null,
-              status: filters.status ?? null,
-              start_date: filters.start_date ?? null,
-              end_date: filters.end_date ?? null
-            }
-          },
-          { headers: this.headers(context.token), withCredentials: true }
-        ).pipe(map(() => void 0))
-      )
-    );
+    void filters;
+    return throwError(() => new Error(this.scanRequestFlowPrerequisiteMessage()));
+  }
+
+  private scanRequestFlowPrerequisiteMessage(): string {
+    return 'This action requires an approved server-side workflow.';
+  }
+
+  alertReviewFlowPrerequisiteMessage(): string {
+    return 'This action requires an approved server-side workflow.';
   }
 
   updateAlert(alertId: string, input: AlertActionInput): Observable<Record<string, unknown> | null> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.http.patch<{ data?: Record<string, unknown> }>(
-          `${this.api}/items/alerts/${encodeURIComponent(alertId)}?fields=id,status,reviewed_by,reviewed_at,action_note,action_type`,
-          input,
-          { headers: this.headers(context.token), withCredentials: true }
-        ).pipe(map((response) => response.data ?? null))
-      )
-    );
+    void alertId;
+    void input;
+    return throwError(() => new Error(this.alertReviewFlowPrerequisiteMessage()));
   }
 
   markAlertReviewed(alertId: string): Observable<void> {
-    return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        this.updateAlert(alertId, {
-          reviewed_at: new Date().toISOString(),
-          reviewed_by: context.company.userId
-        }).pipe(map(() => void 0))
-      )
-    );
+    void alertId;
+    return throwError(() => new Error(this.alertReviewFlowPrerequisiteMessage()));
   }
 
   private loadDepartmentsForRequests(context: ScopedContext): Observable<DepartmentRecord[]> {
-    const richFields = ['id', 'name'];
-    const fallbackFields = ['id', 'name'];
+    this.assertManagerDepartmentScope(context);
+    const richFields = context.activeRole === 'manager' ? ['id', 'name', 'is_active'] : ['id', 'name'];
+    const fallbackFields = richFields;
     const options = {
-      filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
+      filters: context.activeRole === 'manager'
+        ? [
+            { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
+            { path: ['id'], operator: '_eq', value: context.activeDepartmentId as string }
+          ]
+        : [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
       sort: 'name',
       limit: 120
     };
@@ -1148,17 +908,22 @@ export class OperationsWorkflowsService {
   }
 
   private loadMembersForRequests(context: ScopedContext): Observable<MemberRecord[]> {
-    const richFields = [
-      'id',
-      'status',
-      'member_role',
-      'department',
-      'user.id',
-      'user.email',
-      'user.first_name',
-      'user.last_name'
-    ];
-    const fallbackFields = ['id', 'status', 'member_role', 'department', 'user'];
+    this.assertManagerDepartmentScope(context);
+    const richFields = context.activeRole === 'manager'
+      ? ['id', 'status', 'member_role', 'department', 'employee_code', 'job_title', 'last_scan_at', 'last_risk_level', 'last_readiness_score']
+      : [
+          'id',
+          'status',
+          'member_role',
+          'department',
+          'user.id',
+          'user.email',
+          'user.first_name',
+          'user.last_name'
+        ];
+    const fallbackFields = context.activeRole === 'manager'
+      ? richFields
+      : ['id', 'status', 'member_role', 'department', 'user'];
 
     return this.queryItemsStrict<MemberRecord>(
       'business_profile_members',
@@ -1191,37 +956,46 @@ export class OperationsWorkflowsService {
   }
 
   private loadScanRequestsForPage(context: ScopedContext): Observable<ScanRequestRecord[]> {
+    this.assertManagerDepartmentScope(context);
     const filterVariants: Array<Array<{ path: string[]; operator: string; value: string }>> = [
-      [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
-      [{ path: ['business_profile', 'id'], operator: '_eq', value: context.businessProfileId }]
+      context.activeRole === 'manager'
+        ? [
+            { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
+            { path: ['department'], operator: '_eq', value: context.activeDepartmentId as string }
+          ]
+        : [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
+      ...(context.activeRole === 'manager'
+        ? []
+        : [[{ path: ['business_profile', 'id'], operator: '_eq', value: context.businessProfileId }]])
     ];
-    const sortVariants = ['-timestamp', '-id'];
+    const sortVariants = ['-requested_at', '-id'];
     const expandedFields = [
       'id',
       'business_profile',
-      'scan_id',
-      'required_state',
-      'response_status',
-      'response_payload',
-      'timestamp',
-      'requested_for_user',
-      'requested_for_email',
-      'requested_for_phone',
-      'Target'
+      'department',
+      'requested_by_user',
+      'target_member',
+      'completed_scan',
+      'status',
+      'cancelled',
+      'request_type',
+      'requested_at',
+      'due_at',
+      'completed_at'
     ];
     const baseFields = [
       'id',
       'business_profile',
-      'scan_id',
-      'required_state',
-      'response_status',
-      'timestamp',
-      'requested_for_user',
-      'requested_for_email',
-      'requested_for_phone',
-      'Target'
+      'target_member',
+      'requested_by_user',
+      'status',
+      'request_type',
+      'requested_at'
     ];
-    const fieldVariants: string[][] = [expandedFields, baseFields];
+    const managerFields = ['id', 'department', 'status', 'request_type', 'requested_at', 'due_at'];
+    const fieldVariants: string[][] = context.activeRole === 'manager'
+      ? [managerFields]
+      : [baseFields, expandedFields];
     let failureLogged = false;
 
     const buildQueryUrl = (
@@ -1237,7 +1011,7 @@ export class OperationsWorkflowsService {
       for (const filter of filters) {
         this.setFilter(params, filter.path, filter.operator, filter.value);
       }
-      return `${this.api}/items/requests?${params.toString()}`;
+      return `${this.api}/items/scan_requests?${params.toString()}`;
     };
 
     const run = (
@@ -1326,10 +1100,15 @@ export class OperationsWorkflowsService {
 
     if (context.activeRole === 'employee' && context.userId) {
       const userId = context.userId;
-      const withRequestedForUserFilterVariants = filterVariants.map((base) => [
+      // scan_requests targets a business_profile_members row, so an employee's own
+      // requests are matched through the member -> user relation path.
+      const withTargetMemberUserFilterVariants = filterVariants.map((base) => [
         ...base,
-        { path: ['requested_for_user'], operator: '_eq', value: userId }
+        { path: ['target_member', 'user'], operator: '_eq', value: userId }
       ]);
+      // Fallback to tenant scope only; the caller re-filters rows client-side by
+      // membership id / user id, so this stays correct if the relation filter is rejected.
+      const employeeFilterVariants = [...withTargetMemberUserFilterVariants, ...filterVariants];
 
       const tryFilterSet = (sets: Array<Array<{ path: string[]; operator: string; value: string }>>, index = 0): Observable<ScanRequestRecord[]> => {
         if (index >= sets.length) {
@@ -1345,7 +1124,7 @@ export class OperationsWorkflowsService {
         );
       };
 
-      return tryFilterSet(withRequestedForUserFilterVariants).pipe(timeout(25000));
+      return tryFilterSet(employeeFilterVariants).pipe(timeout(25000));
     }
 
     return tryFilters().pipe(timeout(25000));
@@ -1383,13 +1162,13 @@ export class OperationsWorkflowsService {
   }
 
   private loadAlertsForPage(context: ScopedContext, forceRefresh = false): Observable<AlertRecord[]> {
+    this.assertManagerDepartmentScope(context);
     const baseFilterVariants: Array<Array<{ path: string[]; operator: string; value: string }>> = [
       [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }]
     ];
     const filterVariants = context.activeRole === 'manager' && context.activeDepartmentId
       ? baseFilterVariants.flatMap((base) => ([
-          [...base, { path: ['department'], operator: '_eq', value: context.activeDepartmentId as string }],
-          base
+          [...base, { path: ['department'], operator: '_eq', value: context.activeDepartmentId as string }]
         ]))
       : baseFilterVariants;
 
@@ -1397,25 +1176,11 @@ export class OperationsWorkflowsService {
     const baseFields = [
       'id',
       'date_created',
-      'business_profile',
       'department',
-      'target_member',
-      'target_user',
-      'scan',
       'severity',
       'title',
       'message',
-      'body',
-      'summary',
-      'status',
-      'reviewed_by',
-      'reviewed_at',
-      'action_note',
-      'action_type',
-      'recommended_action',
-      'explanation',
-      'readiness_label',
-      'risk_label'
+      'status'
     ];
     const expandedFields = [
       ...baseFields,
@@ -1445,7 +1210,25 @@ export class OperationsWorkflowsService {
       'reviewed_by.last_name',
       'reviewed_by.email'
     ];
-    const fieldVariants: string[][] = [expandedFields, baseFields];
+    const fieldVariants: string[][] = context.activeRole === 'manager'
+      ? [baseFields]
+      : [[
+          'id',
+          'date_created',
+          'business_profile',
+          'department',
+          'target_member',
+          'target_user',
+          'scan',
+          'severity',
+          'title',
+          'message',
+          'status',
+          'reviewed_by',
+          'reviewed_at',
+          'action_note',
+          'action_type'
+        ]];
     let failureLogged = false;
 
     const buildQueryUrl = (
@@ -1481,9 +1264,6 @@ export class OperationsWorkflowsService {
         map((response) => response.data ?? []),
         catchError((error) => {
           const status = (error as { status?: number } | null)?.status ?? 0;
-          if (status === 403) {
-            return of([] as AlertRecord[]);
-          }
           if (status === 400 && !failureLogged) {
             failureLogged = true;
             console.error('[OperationsWorkflows] alerts failing request', {
@@ -2085,19 +1865,13 @@ export class OperationsWorkflowsService {
         'date_created',
         'reviewed_by',
         'reviewed_by.id',
-        'reviewed_by.email',
-        'reviewed_by.first_name',
-        'reviewed_by.last_name',
-        'reviewed_at',
-        'recommended_action',
-        'explanation',
-        'readiness_label',
-        'risk_label',
-        'message',
-        'body',
-        'summary',
-        'action_note',
-        'action_type',
+      'reviewed_by.email',
+      'reviewed_by.first_name',
+      'reviewed_by.last_name',
+      'reviewed_at',
+      'message',
+      'action_note',
+      'action_type',
         'scan_id',
         'scan_request',
         'alert_type'
@@ -2111,16 +1885,12 @@ export class OperationsWorkflowsService {
         'department',
         'target_member',
         'target_user',
-        'scan',
-        'date_created',
-        'reviewed_by',
-        'reviewed_at',
-        'recommended_action',
-        'explanation',
-        'message',
-        'body',
-        'summary',
-        'action_note',
+      'scan',
+      'date_created',
+      'reviewed_by',
+      'reviewed_at',
+      'message',
+      'action_note',
         'action_type',
         'scan_id',
         'scan_request',
@@ -2333,92 +2103,53 @@ export class OperationsWorkflowsService {
     );
   }
 
-  private postWithFallback(
-    collection: string,
-    token: string,
-    payloads: Array<Record<string, unknown>>
-  ): Observable<Record<string, unknown> | null> {
-    const validPayloads = payloads.filter((payload) => Boolean(payload && Object.keys(payload).length));
-    if (!validPayloads.length) {
-      return of(null);
-    }
-
-    const [first, ...rest] = validPayloads;
-    return this.http.post<{ data?: Record<string, unknown> }>(
-      `${this.api}/items/${collection}`,
-      first,
-      { headers: this.headers(token), withCredentials: true }
-    ).pipe(
-      map((response) => response.data ?? null),
-      catchError((error) => {
-        if (!rest.length || !this.isFieldCompatibilityError(error)) {
-          return throwError(() => error);
-        }
-        return this.postWithFallback(collection, token, rest);
-      })
-    );
-  }
-
-  private patchWithFallback(
+  /**
+   * Fetch a single row by id and confirm it belongs to the active workspace
+   * (business_profile) before a by-id mutation. Returns the row on success,
+   * otherwise errors with a clear, professional message.
+   *
+   * This is a front-end defense-in-depth check only — it does NOT replace
+   * Directus row-level security, which remains the authoritative guard.
+   */
+  private verifyTenantOwnership(
     collection: string,
     itemId: string,
-    token: string,
-    payloads: Array<Record<string, unknown>>
-  ): Observable<Record<string, unknown> | null> {
-    const validPayloads = payloads.filter((payload) => Boolean(payload && Object.keys(payload).length));
-    if (!validPayloads.length) {
-      return of(null);
+    context: ScopedContext,
+    extraFields: string[] = []
+  ): Observable<Record<string, unknown>> {
+    const id = this.normalizeId(itemId);
+    if (!id) {
+      return throwError(() => new Error(SecurityMessages.notInWorkspace));
     }
 
-    const [first, ...rest] = validPayloads;
-    return this.http.patch<{ data?: Record<string, unknown> }>(
-      `${this.api}/items/${collection}/${encodeURIComponent(itemId)}`,
-      first,
-      { headers: this.headers(token), withCredentials: true }
+    const fields = ['id', 'business_profile', ...extraFields].join(',');
+    return this.http.get<{ data?: Record<string, unknown> | null }>(
+      `${this.api}/items/${collection}/${encodeURIComponent(id)}?fields=${encodeURIComponent(fields)}`,
+      { headers: this.headers(context.token), withCredentials: true }
     ).pipe(
-      map((response) => response.data ?? null),
-      catchError((error) => {
-        if (!rest.length || !this.isFieldCompatibilityError(error)) {
-          return throwError(() => error);
+      timeout(15000),
+      map((response) => {
+        const row = response?.data ?? null;
+        if (!row) {
+          // Missing row or filtered out by backend policy => treat as not in workspace.
+          throw new Error(SecurityMessages.notInWorkspace);
         }
-        return this.patchWithFallback(collection, itemId, token, rest);
-      })
-    );
-  }
-
-  private safeCreateNotification(token: string, payload: Record<string, unknown>): Observable<void> {
-    // TODO(push): when Firebase/FCM is configured, extend this flow to enqueue mobile push delivery
-    // from backend notification records. Do not send push directly from web clients.
-    return this.postWithFallback('notifications', token, [payload]).pipe(
-      map(() => void 0),
+        const rowBusinessId = this.normalizeId(row['business_profile']);
+        if (!rowBusinessId || rowBusinessId !== context.businessProfileId) {
+          throw new Error(SecurityMessages.notInWorkspace);
+        }
+        return row;
+      }),
       catchError((error) => {
-        console.warn('[OperationsWorkflows] notification create skipped', error);
-        return of(void 0);
-      })
-    );
-  }
-
-  private logActivityEvent(
-    context: ScopedContext,
-    action: string,
-    entityId: string | null,
-    meta: Record<string, unknown> | null
-  ): Observable<void> {
-    const payload = {
-      action,
-      entity_type: 'scan_request',
-      entity_id: entityId,
-      actor: context.userId ?? null,
-      business_profile: context.businessProfileId,
-      department: context.activeDepartmentId ?? null,
-      meta: meta ?? null
-    };
-
-    return this.postWithFallback('activity_events', context.token, [payload]).pipe(
-      map(() => void 0),
-      catchError((error) => {
-        console.warn('[OperationsWorkflows] activity log skipped', error);
-        return of(void 0);
+        const status = (error as { status?: number } | null)?.status ?? 0;
+        if (status === 403) {
+          return throwError(() => new Error(SecurityMessages.cannotUpdateItem));
+        }
+        if (status === 404) {
+          return throwError(() => new Error(SecurityMessages.notInWorkspace));
+        }
+        // Re-throw our own thrown Errors (status 0) and any unexpected transport errors.
+        return throwError(() => error);
       })
     );
   }
@@ -2446,6 +2177,42 @@ export class OperationsWorkflowsService {
       filters.push({ path: departmentPath, operator: '_eq', value: context.activeDepartmentId });
     }
     return filters;
+  }
+
+  private assertManagerDepartmentScope(context: ScopedContext): void {
+    if (context.activeRole === 'manager' && !context.activeDepartmentId) {
+      throw new Error('Scoped data unavailable: manager account has no active department context.');
+    }
+  }
+
+  private managerDepartmentFilters(
+    context: ScopedContext,
+    businessPath: string[],
+    departmentPath?: string[]
+  ): Array<{ path: string[]; operator: string; value: string }> {
+    this.assertManagerDepartmentScope(context);
+    return this.scopeFilters(context, businessPath, departmentPath);
+  }
+
+  private managerRequestFields(context: ScopedContext): string[] {
+    if (context.activeRole === 'manager') {
+      return ['id', 'department', 'status', 'request_type', 'requested_at', 'due_at'];
+    }
+
+    return [
+      'id',
+      'business_profile',
+      'department',
+      'requested_by_user',
+      'target_member',
+      'completed_scan',
+      'status',
+      'cancelled',
+      'request_type',
+      'requested_at',
+      'due_at',
+      'completed_at'
+    ];
   }
 
   private notificationCounts(rows: NotificationRecord[]): Map<string, number> {

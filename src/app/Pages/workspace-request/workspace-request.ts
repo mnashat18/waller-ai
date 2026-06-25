@@ -33,6 +33,8 @@ type WorkspaceRequestState =
   | 'pendingExisting'
   | 'needsMoreInfo'
   | 'rejected'
+  | 'approved'
+  | 'closed'
   | 'submitting'
   | 'success'
   | 'error';
@@ -74,31 +76,36 @@ type DirectusUser = {
           <ng-container *ngSwitchCase="'checkingSession'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
+                <p class="request-shell__eyebrow">Organization Setup</p>
                 <h1>Checking your session...</h1>
               </div>
               <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
+                Back to Organization Access
               </a>
+            </div>
+
+            <div class="request-shell__loading" role="status" aria-live="polite">
+              <span class="request-spinner" aria-hidden="true"></span>
+              <span>Loading your organization setup request...</span>
             </div>
           </ng-container>
 
           <ng-container *ngSwitchCase="'form'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
-                <h1>Request Enterprise Workspace</h1>
+                <p class="request-shell__eyebrow">Organization Setup</p>
+                <h1>Request Organization Setup</h1>
                 <p class="request-shell__copy">
-                  Tell us about your company and we will review the request before activation.
+                  Tell us about your organization and we will review the setup request before activation.
                 </p>
               </div>
               <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
+                Back to Organization Access
               </a>
             </div>
 
             <p class="request-shell__note" *ngIf="existingApplication">
-              You already have a workspace request under review.
+              You already have an organization setup request under review.
             </p>
 
             <p class="request-shell__note request-shell__note--warning" *ngIf="validationWarning">
@@ -189,7 +196,7 @@ type DirectusUser = {
                   [disabled]="state === 'submitting' || formRef.invalid">
                   {{ state === 'submitting' ? 'Submitting...' : 'Submit Request' }}
                 </button>
-                <a routerLink="/app/workspace-access" class="request-shell__button">Back to Workspace Access</a>
+                <a routerLink="/app/workspace-access" class="request-shell__button">Back to Organization Access</a>
                 <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
               </div>
             </form>
@@ -198,25 +205,25 @@ type DirectusUser = {
           <ng-container *ngSwitchCase="'pendingExisting'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
-                <h1>Workspace request under review</h1>
+                <p class="request-shell__eyebrow">Organization Setup</p>
+                <h1>Organization setup request under review</h1>
                 <p class="request-shell__copy">
-                  Your company workspace request is being reviewed by the Wellar team.
+                  Your organization setup request is being reviewed by the Wellar team.
                 </p>
               </div>
               <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
+                Back to Organization Access
               </a>
             </div>
 
             <p class="request-shell__note" *ngIf="existingApplication">
-              Company: {{ existingApplication.companyName || 'Unknown company' }} | Work Email: {{ existingApplication.workEmail || 'Unknown email' }}<br />
+              Organization: {{ existingApplication.companyName || 'Unknown organization' }} | Work Email: {{ existingApplication.workEmail || 'Unknown email' }}<br />
               Submitted: {{ existingApplication.submittedAt ? (existingApplication.submittedAt | date : 'mediumDate') : 'Unknown date' }} | Status: Pending Review
             </p>
 
             <div class="request-shell__actions">
               <a routerLink="/contact" class="request-shell__button request-shell__button--primary">Contact Support</a>
-              <a routerLink="/app/workspace-access" class="request-shell__button">Back to Workspace Access</a>
+              <a routerLink="/app/workspace-access" class="request-shell__button">Back to Organization Access</a>
               <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
             </div>
           </ng-container>
@@ -224,14 +231,14 @@ type DirectusUser = {
           <ng-container *ngSwitchCase="'needsMoreInfo'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
+                <p class="request-shell__eyebrow">Organization Setup</p>
                 <h1>More information needed</h1>
                 <p class="request-shell__copy">
-                  The Wellar team needs more information before approving your workspace request.
+                  The Wellar team needs more information before approving your organization setup request.
                 </p>
               </div>
               <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
+                Back to Organization Access
               </a>
             </div>
 
@@ -323,7 +330,7 @@ type DirectusUser = {
                   [disabled]="state === 'submitting' || formRef.invalid">
                   {{ state === 'submitting' ? 'Submitting...' : 'Update Request' }}
                 </button>
-                <a routerLink="/app/workspace-access" class="request-shell__button">Back to Workspace Access</a>
+                <a routerLink="/app/workspace-access" class="request-shell__button">Back to Organization Access</a>
                 <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
               </div>
             </form>
@@ -332,25 +339,86 @@ type DirectusUser = {
           <ng-container *ngSwitchCase="'rejected'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
-                <h1>Workspace request not approved</h1>
+                <p class="request-shell__eyebrow">Organization Setup</p>
+                <h1>Organization setup request not approved</h1>
                 <p class="request-shell__copy">
-                  Your workspace request was not approved. Contact the Wellar team for more information.
+                  Your organization setup request was not approved. Contact the Wellar team for more information.
                 </p>
               </div>
               <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
+                Back to Organization Access
               </a>
             </div>
 
             <p class="request-shell__note" *ngIf="existingApplication">
-              Company: {{ existingApplication.companyName || 'Unknown company' }} | Work Email: {{ existingApplication.workEmail || 'Unknown email' }}<br />
+              Organization: {{ existingApplication.companyName || 'Unknown organization' }} | Work Email: {{ existingApplication.workEmail || 'Unknown email' }}<br />
               Submitted: {{ existingApplication.submittedAt ? (existingApplication.submittedAt | date : 'mediumDate') : 'Unknown date' }} | Status: Rejected
             </p>
 
+            <p class="request-shell__note" *ngIf="existingApplication?.reviewNote">
+              {{ existingApplication?.reviewNote }}
+            </p>
+
             <div class="request-shell__actions">
-              <a routerLink="/contact" class="request-shell__button request-shell__button--primary">Contact Support</a>
-              <a routerLink="/app/workspace-access" class="request-shell__button">Back to Workspace Access</a>
+              <button type="button" class="request-shell__button request-shell__button--primary" (click)="startNewRequest()">
+                Submit a new request
+              </button>
+              <a routerLink="/contact" class="request-shell__button">Contact Support</a>
+              <a routerLink="/app/workspace-access" class="request-shell__button">Back to Organization Access</a>
+              <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
+            </div>
+          </ng-container>
+
+          <ng-container *ngSwitchCase="'approved'">
+            <div class="request-shell__header">
+              <div>
+                <p class="request-shell__eyebrow">Organization Setup</p>
+                <h1>Your organization setup request was approved</h1>
+                <p class="request-shell__copy">
+                  Your organization setup request was approved by the Wellar team. Continue to Organization Access to open it when membership is active.
+                </p>
+              </div>
+              <a routerLink="/app/workspace-access" class="request-shell__button">
+                Back to Organization Access
+              </a>
+            </div>
+
+            <p class="request-shell__note" *ngIf="existingApplication">
+              Organization: {{ existingApplication.companyName || 'Unknown organization' }} | Work Email: {{ existingApplication.workEmail || 'Unknown email' }}<br />
+              Submitted: {{ existingApplication.submittedAt ? (existingApplication.submittedAt | date : 'mediumDate') : 'Unknown date' }} | Status: Approved
+            </p>
+
+            <div class="request-shell__actions">
+              <a routerLink="/app/workspace-access" class="request-shell__button request-shell__button--primary">Continue to Organization Access</a>
+              <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
+            </div>
+          </ng-container>
+
+          <ng-container *ngSwitchCase="'closed'">
+            <div class="request-shell__header">
+              <div>
+                <p class="request-shell__eyebrow">Organization Setup</p>
+                <h1>Organization setup request closed</h1>
+                <p class="request-shell__copy">
+                  This organization setup request is closed. Contact the Wellar team if you need to reopen it, or submit a new request.
+                </p>
+              </div>
+              <a routerLink="/app/workspace-access" class="request-shell__button">
+                Back to Organization Access
+              </a>
+            </div>
+
+            <p class="request-shell__note" *ngIf="existingApplication">
+              Organization: {{ existingApplication.companyName || 'Unknown organization' }} | Work Email: {{ existingApplication.workEmail || 'Unknown email' }}<br />
+              Submitted: {{ existingApplication.submittedAt ? (existingApplication.submittedAt | date : 'mediumDate') : 'Unknown date' }} | Status: Closed
+            </p>
+
+            <div class="request-shell__actions">
+              <button type="button" class="request-shell__button request-shell__button--primary" (click)="startNewRequest()">
+                Submit a new request
+              </button>
+              <a routerLink="/contact" class="request-shell__button">Contact Support</a>
+              <a routerLink="/app/workspace-access" class="request-shell__button">Back to Organization Access</a>
               <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
             </div>
           </ng-container>
@@ -358,38 +426,49 @@ type DirectusUser = {
           <ng-container *ngSwitchCase="'submitting'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
+                <p class="request-shell__eyebrow">Organization Setup</p>
                 <h1>Submitting your request...</h1>
               </div>
-              <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
-              </a>
+            </div>
+
+            <div class="request-shell__loading" role="status" aria-live="polite">
+              <span class="request-spinner" aria-hidden="true"></span>
+              <span>Sending your organization setup request for review...</span>
             </div>
           </ng-container>
 
           <ng-container *ngSwitchCase="'success'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
-                <h1>Workspace request submitted</h1>
+                <p class="request-shell__eyebrow">Organization Setup</p>
+                <h1>Organization setup request submitted</h1>
                 <p class="request-shell__copy">
-                  Your request is under review. The Wellar team will contact you before activating your operational workspace.
+                  Your request is under review. The Wellar team will contact you before activating organization access.
                 </p>
               </div>
               <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
+                Back to Organization Access
               </a>
             </div>
 
             <div class="request-state">
               <article class="request-card request-card--success">
                 <p class="request-card__eyebrow">Submitted</p>
-                <h3>Workspace request submitted</h3>
-                <p class="request-card__copy">
-                  Your request is under review. The Wellar team will contact you before activating your operational workspace.
+                <h3>What happens next</h3>
+                <ol class="request-next-steps">
+                  <li>Your request is now <strong>under review</strong> by the Wellar team.</li>
+                  <li>We'll contact you by email at
+                    <strong>{{ existingApplication?.workEmail || 'your work email' }}</strong>
+                    with the outcome or any follow-up questions.</li>
+                  <li>Once approved and activated, you can open the organization from Organization Access.</li>
+                </ol>
+                <p class="request-card__copy" *ngIf="existingApplication">
+                  Organization: {{ existingApplication.companyName || 'Unknown organization' }}<br />
+                  Submitted: {{ existingApplication.submittedAt ? (existingApplication.submittedAt | date : 'mediumDate') : 'just now' }} | Status: Pending Review
                 </p>
                 <div class="request-shell__actions">
-                  <a routerLink="/app/workspace-access" class="request-shell__button request-shell__button--primary">Back to Workspace Access</a>
+                  <a routerLink="/app/workspace-access" class="request-shell__button request-shell__button--primary">Check status in Organization Access</a>
+                  <a routerLink="/contact" class="request-shell__button">Contact Support</a>
                   <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
                 </div>
               </article>
@@ -399,14 +478,14 @@ type DirectusUser = {
           <ng-container *ngSwitchCase="'error'">
             <div class="request-shell__header">
               <div>
-                <p class="request-shell__eyebrow">Workspace Request</p>
-                <h1>Request Enterprise Workspace</h1>
+                <p class="request-shell__eyebrow">Organization Setup</p>
+                <h1>Request Organization Setup</h1>
                 <p class="request-shell__copy">
-                  Tell us about your company and we will review the request before activation.
+                  Tell us about your organization and we will review the setup request before activation.
                 </p>
               </div>
               <a routerLink="/app/workspace-access" class="request-shell__button">
-                Back to Workspace Access
+                Back to Organization Access
               </a>
             </div>
 
@@ -475,7 +554,7 @@ type DirectusUser = {
                   [disabled]="state === 'submitting' || formRef.invalid">
                   {{ state === 'submitting' ? 'Submitting...' : 'Submit Request' }}
                 </button>
-                <a routerLink="/app/workspace-access" class="request-shell__button">Back to Workspace Access</a>
+                <a routerLink="/app/workspace-access" class="request-shell__button">Back to Organization Access</a>
                 <button type="button" class="request-shell__button" (click)="logout()">Logout</button>
               </div>
             </form>
@@ -641,12 +720,67 @@ type DirectusUser = {
       font-size: 0.9rem;
       font-weight: 700;
       background: rgba(255, 255, 255, 0.04);
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+
+    .request-shell__button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(56, 189, 248, 0.28);
+      background: rgba(255, 255, 255, 0.08);
     }
 
     .request-shell__button--primary {
       border-color: rgba(56, 189, 248, 0.2);
       background: linear-gradient(135deg, rgba(14, 165, 233, 0.28), rgba(20, 184, 166, 0.22));
       color: #f8fafc;
+    }
+
+    .request-shell__loading {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      margin-top: 1.1rem;
+      padding: 1.1rem 1.2rem;
+      border-radius: 1.4rem;
+      border: 1px solid rgba(56, 189, 248, 0.16);
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.1), transparent 46%),
+        rgba(255, 255, 255, 0.03);
+      color: rgba(226, 232, 240, 0.78);
+      font-size: 0.92rem;
+    }
+
+    .request-spinner {
+      width: 1.15rem;
+      height: 1.15rem;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      border: 2px solid rgba(148, 163, 184, 0.25);
+      border-top-color: #7dd3fc;
+      animation: requestSpin 0.8s linear infinite;
+    }
+
+    .request-next-steps {
+      margin: 0;
+      padding-left: 1.15rem;
+      display: grid;
+      gap: 0.5rem;
+      color: rgba(226, 232, 240, 0.78);
+      line-height: 1.6;
+    }
+
+    .request-next-steps strong {
+      color: #f8fafc;
+    }
+
+    @keyframes requestSpin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .request-spinner {
+        animation: none;
+      }
     }
 
     .request-state {
@@ -659,11 +793,16 @@ type DirectusUser = {
       padding: 1rem 1.05rem;
       border-radius: 1.4rem;
       border: 1px solid rgba(148, 163, 184, 0.12);
-      background: rgba(255, 255, 255, 0.03);
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 42%),
+        rgba(255, 255, 255, 0.03);
     }
 
     .request-card--success {
-      border-color: rgba(56, 189, 248, 0.18);
+      border-color: rgba(56, 189, 248, 0.3);
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 48%),
+        rgba(255, 255, 255, 0.04);
     }
 
     .request-card--error {
@@ -721,6 +860,7 @@ export class WorkspaceRequestPageComponent implements OnInit {
   validationErrors: WorkspaceRequestValidationErrors = {};
   validationWarning = '';
   submitAttempted = false;
+  allowResubmit = false;
 
   form: WorkspaceRequestForm = {
     company_name: '',
@@ -753,7 +893,7 @@ export class WorkspaceRequestPageComponent implements OnInit {
       const user = await this.auth.getCurrentUserAfterRestore();
 
       if (!user) {
-        this.router.navigate(['/login']);
+        this.router.navigate(['/'], { queryParams: { auth: 'login' } });
         return;
       }
 
@@ -778,6 +918,7 @@ export class WorkspaceRequestPageComponent implements OnInit {
 
       if (latest && latest.status === 'needs_more_info') {
         this.existingApplication = latest;
+        this.prefillFromApplication(latest);
         this.state = 'needsMoreInfo';
         this.cdr.detectChanges();
         return;
@@ -790,17 +931,47 @@ export class WorkspaceRequestPageComponent implements OnInit {
         return;
       }
 
+      if (latest && latest.status === 'approved') {
+        this.existingApplication = latest;
+        this.state = 'approved';
+        this.cdr.detectChanges();
+        return;
+      }
+
+      if (latest && latest.status === 'closed') {
+        this.existingApplication = latest;
+        this.state = 'closed';
+        this.cdr.detectChanges();
+        return;
+      }
+
       this.state = 'form';
       this.cdr.detectChanges();
     } catch (error) {
       console.error('[WorkspaceRequest] session check failed', error);
-      this.router.navigate(['/login']);
+      this.router.navigate(['/'], { queryParams: { auth: 'login' } });
     }
   }
 
   logout(): void {
     this.auth.logout();
-    this.router.navigateByUrl('/login');
+    this.router.navigateByUrl('/');
+  }
+
+  startNewRequest(): void {
+    // Allow a rejected applicant to submit a fresh, corrected organization request
+    // instead of being trapped on the rejected state. A new submission creates a
+    // new application that re-enters the review-based flow.
+    this.allowResubmit = true;
+    this.submitAttempted = false;
+    this.validationErrors = {};
+    this.validationWarning = '';
+    this.statusMessage = '';
+    if (this.existingApplication) {
+      this.prefillFromApplication(this.existingApplication);
+    }
+    this.state = 'form';
+    this.cdr.detectChanges();
   }
 
   async submit(): Promise<void> {
@@ -834,7 +1005,7 @@ export class WorkspaceRequestPageComponent implements OnInit {
       return;
     }
 
-    if (latestStatus === 'rejected') {
+    if (latestStatus === 'rejected' && !this.allowResubmit) {
       this.existingApplication = latestApplication;
       this.state = 'rejected';
       this.cdr.detectChanges();
@@ -865,7 +1036,7 @@ export class WorkspaceRequestPageComponent implements OnInit {
 
       if (!record) {
         this.state = 'error';
-        this.statusMessage = 'We could not submit your workspace request.';
+        this.statusMessage = 'We could not submit your organization setup request.';
         this.cdr.detectChanges();
         return;
       }
@@ -877,7 +1048,7 @@ export class WorkspaceRequestPageComponent implements OnInit {
     } catch (error) {
       console.error('[WorkspaceRequest] submit failed', error);
       this.state = 'error';
-      this.statusMessage = 'We could not submit your workspace request.';
+      this.statusMessage = 'We could not submit your organization setup request.';
       this.cdr.detectChanges();
     }
   }
@@ -888,6 +1059,37 @@ export class WorkspaceRequestPageComponent implements OnInit {
 
   get hasValidationErrors(): boolean {
     return Object.values(this.validationErrors).some((value) => Boolean(value));
+  }
+
+  private prefillFromApplication(application: WorkspaceApplicationRecord): void {
+    // Prefill the editable form from an existing application so the user can
+    // correct details instead of retyping everything. Only safe, user-editable
+    // fields are copied; status/review fields are intentionally excluded.
+    this.form = {
+      company_name: application.companyName ?? '',
+      contact_name: application.contactName ?? '',
+      job_title: application.jobTitle ?? '',
+      work_email: application.workEmail ?? '',
+      industry: application.industry ?? '',
+      team_size: application.teamSize ?? '',
+      country: application.country ?? '',
+      use_case: application.useCase ?? '',
+      phone: application.phone ?? '',
+      city: application.city ?? '',
+      website: application.website ?? '',
+      company_registration_number: application.companyRegistrationNumber ?? '',
+      expected_launch_date: this.toDateInputValue(application.expectedLaunchDate),
+      message: application.message ?? ''
+    };
+  }
+
+  private toDateInputValue(value: string | null): string {
+    if (!value) {
+      return '';
+    }
+    // A native date input expects YYYY-MM-DD; trim any time component.
+    const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+    return match ? match[1] : '';
   }
 
   private normalizeUserId(value: unknown): string | null {
@@ -982,7 +1184,7 @@ export class WorkspaceRequestPageComponent implements OnInit {
     }
 
     const warning = this.isPersonalEmail(clean.work_email)
-      ? 'A company email is recommended for enterprise workspace review.'
+      ? 'An organization email is recommended for setup review.'
       : '';
 
     return {

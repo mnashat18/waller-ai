@@ -1,149 +1,172 @@
-﻿import { HttpErrorResponse } from '@angular/common/http';
-import { CommonModule } from '@angular/common';
+﻿import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { finalize, timeout } from 'rxjs/operators';
 
-import { CompanyContextService } from '../../core/context/company-context.service';
 import {
-  OperationsAdminService,
-  type CompanyDepartmentRecord,
-  type CompanyMemberRecord,
-  type CompanyPageData
-} from '../../services/operations-admin.service';
+  OrganizationApiError,
+  OrganizationApiService,
+  type OrganizationData,
+  type OrganizationDepartment,
+  type OrganizationMember,
+  type OrganizationPermissions,
+  type OrganizationProfile,
+  type OrganizationProfileUpdateInput
+} from '../../services/organization-api.service';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
 import { ErrorStateComponent } from '../../shared/ui/error-state/error-state.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 
-type CompanyViewState = 'loading' | 'ready' | 'permission_denied' | 'error';
-type CompanyTab = 'overview' | 'departments' | 'access' | 'settings';
+type CompanyViewState = 'loading' | 'ready' | 'no_context' | 'permission_denied' | 'error';
+type CompanyTab = 'overview' | 'departments';
+type FeedbackMessage = { type: 'success' | 'error' | 'info'; text: string };
+type DepartmentFormMode = 'create' | 'edit' | null;
 
-type FeedbackMessage = {
-  type: 'success' | 'error' | 'info';
-  text: string;
+type ProfileDraft = {
+  company_name: string;
+  contact_name: string;
+  phone: string;
+  industry: string;
+  team_size: string;
+  country: string;
+  city: string;
+  website: string;
+  timezone: string;
+  default_language: string;
 };
 
-type DepartmentForm = {
+type DepartmentDraft = {
   name: string;
-  managerMemberId: string;
-  isActive: boolean;
 };
 
-type RoleSummary = {
-  totalActiveMembers: number;
-  owners: number;
-  hr: number;
-  managers: number;
-  employees: number;
-  inactiveMembers: number;
-  unassignedMembers: number;
-  membersWithDepartments: number;
-  membersWithShiftTemplate: number;
-};
-
-type SetupHealthItem = {
-  key: string;
-  label: string;
-  completed: boolean;
-};
-
-type ShiftTemplateRow = {
-  id: string;
-  name: string;
-  assignedMembers: number;
-  isActive: boolean | null;
-  dateCreated: string | null;
-  dateUpdated: string | null;
+const EMPTY_PERMISSIONS: OrganizationPermissions = {
+  canEditProfile: false,
+  canManageDepartments: false,
+  canViewMembers: false,
+  canViewInvites: false,
+  canUseComingSoonControls: false
 };
 
 @Component({
   selector: 'app-company-page',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    RouterModule,
-    CardSkeletonLoaderComponent,
-    ErrorStateComponent
-  ],
+  imports: [CommonModule, FormsModule, RouterModule, CardSkeletonLoaderComponent, ErrorStateComponent, PageHeaderComponent],
   templateUrl: './company.html',
   styleUrls: ['./company.css']
 })
 export class CompanyPageComponent implements OnInit {
+  readonly unsupportedWorkflowMessage = 'Coming next: controlled access workflow.';
+
   viewState: CompanyViewState = 'loading';
   activeTab: CompanyTab = 'overview';
   loading = true;
-  savingCompany = false;
+  savingProfile = false;
   savingDepartment = false;
+  departmentActionBusy = false;
   errorMessage = '';
   feedback: FeedbackMessage | null = null;
-  pageData: CompanyPageData | null = null;
+  pageData: OrganizationData | null = null;
 
-  companyNameDraft = '';
-  private companyNameInitial = '';
+  profileDraft: ProfileDraft = this.createEmptyProfileDraft();
+  private profileBaseline = this.profileSignature(this.profileDraft);
 
   departmentSearch = '';
-  dangerZoneExpanded = false;
-
-  showCreateDepartmentModal = false;
-  showEditDepartmentModal = false;
-  showDeactivateConfirmModal = false;
-  selectedDepartment: CompanyDepartmentRecord | null = null;
-  pendingDeactivateDepartment: CompanyDepartmentRecord | null = null;
-  pendingEditNeedsDeactivateConfirm = false;
-
-  departmentForm: DepartmentForm = this.defaultDepartmentForm();
+  departmentFormMode: DepartmentFormMode = null;
+  departmentFormDepartmentId: string | null = null;
+  private departmentFormBaseline = '';
+  departmentForm: DepartmentDraft = { name: '' };
+  pendingDeactivateDepartment: OrganizationDepartment | null = null;
 
   private loadRunId = 0;
 
   constructor(
-    private operationsAdmin: OperationsAdminService,
-    private companyContext: CompanyContextService,
-    private router: Router,
-    private cdr: ChangeDetectorRef
+    private readonly organizationApi: OrganizationApiService,
+    private readonly router: Router,
+    private readonly route: ActivatedRoute,
+    private readonly cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
+    this.applyTabFromQueryParam();
     void this.loadPage();
+  }
+
+  private applyTabFromQueryParam(): void {
+    const requestedTab = this.route.snapshot.queryParamMap.get('tab');
+    const allowedTabs: CompanyTab[] = ['overview', 'departments'];
+    if (requestedTab && (allowedTabs as string[]).includes(requestedTab)) {
+      this.activeTab = requestedTab as CompanyTab;
+    }
   }
 
   setTab(tab: CompanyTab): void {
     this.activeTab = tab;
   }
 
-  get profile(): CompanyPageData['profile'] {
+  onTabKeydown(event: KeyboardEvent, currentTab: CompanyTab): void {
+    const tabs: CompanyTab[] = ['overview', 'departments'];
+    const currentIndex = tabs.indexOf(currentTab);
+    let nextIndex = currentIndex;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = tabs.length - 1;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    this.setTab(tabs[nextIndex]);
+    window.setTimeout(() => document.getElementById(`company-tab-${tabs[nextIndex]}`)?.focus());
+  }
+
+  get profile(): OrganizationProfile | null {
     return this.pageData?.profile ?? null;
   }
 
-  get currentRole(): string {
-    return this.normalizeText(this.pageData?.activeRole ?? this.companyContext.snapshot().context.activeMemberRole);
+  get permissions(): OrganizationPermissions {
+    return this.pageData?.permissions ?? EMPTY_PERMISSIONS;
   }
 
   get canEditCompanyProfile(): boolean {
-    return this.currentRole === 'owner' || this.currentRole === 'hr';
+    return this.permissions.canEditProfile;
   }
 
   get canManageDepartments(): boolean {
-    return this.currentRole === 'owner' || this.currentRole === 'hr';
+    return this.permissions.canManageDepartments;
   }
 
-  get hasPendingCompanyChanges(): boolean {
-    if (!this.canEditCompanyProfile || !this.profile) {
-      return false;
-    }
-    return this.companyNameDraft.trim() !== this.companyNameInitial.trim();
+  get pageDescription(): string {
+    return 'Manage the active organization profile and department structure through protected server contracts.';
   }
 
-  get departments(): CompanyDepartmentRecord[] {
+  get organizationName(): string {
+    return this.profile?.company_name || 'Active organization';
+  }
+
+  get organizationStatusLabel(): string {
+    if (this.profile?.is_active === true) return 'Active';
+    if (this.profile?.is_active === false) return 'Inactive';
+    return 'Status unavailable';
+  }
+
+  get hasProfileChanges(): boolean {
+    return this.profileSignature(this.profileDraft) !== this.profileBaseline;
+  }
+
+  get departments(): OrganizationDepartment[] {
     return this.pageData?.departments ?? [];
   }
 
-  get filteredDepartments(): CompanyDepartmentRecord[] {
+  get filteredDepartments(): OrganizationDepartment[] {
     const keyword = this.normalizeText(this.departmentSearch);
-    if (!keyword) {
-      return this.departments;
-    }
+    if (!keyword) return this.departments;
 
     return this.departments.filter((department) => {
       const manager = this.normalizeText(this.managerLabel(department));
@@ -151,367 +174,206 @@ export class CompanyPageComponent implements OnInit {
     });
   }
 
-  get members(): CompanyMemberRecord[] {
+  get members(): OrganizationMember[] {
     return this.pageData?.members ?? [];
   }
 
-  get memberById(): Map<string, CompanyMemberRecord> {
-    const map = new Map<string, CompanyMemberRecord>();
-    for (const member of this.members) {
-      if (member.id) {
-        map.set(member.id, member);
-      }
-    }
-    return map;
-  }
-
-  get managerOptions(): Array<{ id: string; label: string }> {
-    const seen = new Set<string>();
-    const rows: Array<{ id: string; label: string }> = [];
-
-    for (const member of this.members) {
-      const role = this.normalizeText(member.member_role);
-      const status = this.normalizeText(member.status);
-      if (!member.id || seen.has(member.id)) {
-        continue;
-      }
-      if (!['owner', 'hr', 'manager', 'manger'].includes(role) || status !== 'active') {
-        continue;
-      }
-
-      seen.add(member.id);
-      const personLabel = member.user_name || member.user_email || 'Member';
-      rows.push({
-        id: member.id,
-        label: `${personLabel} - ${this.roleDisplayLabel(role)}`
-      });
-    }
-
-    return rows.sort((left, right) => left.label.localeCompare(right.label));
-  }
-
-  get canCreateDepartmentSubmit(): boolean {
-    return !this.savingDepartment && Boolean(this.departmentForm.name.trim());
-  }
-
-  get roleSummary(): RoleSummary {
-    const members = this.members;
-    const activeMembers = members.filter((member) => this.normalizeText(member.status) === 'active');
-
-    return {
-      totalActiveMembers: activeMembers.length,
-      owners: activeMembers.filter((member) => this.normalizeText(member.member_role) === 'owner').length,
-      hr: activeMembers.filter((member) => this.normalizeText(member.member_role) === 'hr').length,
-      managers: activeMembers.filter((member) => {
-        const role = this.normalizeText(member.member_role);
-        return role === 'manager' || role === 'manger';
-      }).length,
-      employees: activeMembers.filter((member) => this.normalizeText(member.member_role) === 'employee').length,
-      inactiveMembers: members.filter(
-        (member) => this.normalizeText(member.status) !== 'active' || Boolean(member.deactivated_at)
-      ).length,
-      unassignedMembers: activeMembers.filter((member) => !member.department_id).length,
-      membersWithDepartments: activeMembers.filter((member) => Boolean(member.department_id)).length,
-      membersWithShiftTemplate: activeMembers.filter((member) => Boolean(member.shift_template_id)).length
-    };
+  get activeMembers(): OrganizationMember[] {
+    return this.members.filter((member) => this.normalizeText(member.status) === 'active');
   }
 
   get activeDepartmentsCount(): number {
     return this.departments.filter((department) => department.is_active).length;
   }
 
-  get pendingInvitesCount(): number {
-    return (this.pageData?.invites ?? []).filter((invite) => {
-      const status = this.normalizeText(invite.status);
-      return (status === 'pending' || status === 'sent') && !invite.claimed_at;
-    }).length;
+  get departmentFormTitle(): string {
+    if (this.departmentFormMode === 'edit') return 'Edit department';
+    return 'Create department';
   }
 
-  get setupNeedsAssignmentAttention(): boolean {
-    return this.roleSummary.unassignedMembers > 0;
+  get departmentFormActionLabel(): string {
+    if (this.departmentFormMode === 'edit') return 'Save department';
+    return 'Create department';
   }
 
-  get latestInvites(): CompanyPageData['invites'] {
-    return (this.pageData?.invites ?? []).slice(0, 8);
+  get canSubmitDepartmentForm(): boolean {
+    return this.canManageDepartments && !this.savingDepartment && Boolean(this.departmentForm.name.trim());
   }
 
-  get setupHealth(): SetupHealthItem[] {
-    const ownerCount = this.members.filter(
-      (member) => this.normalizeText(member.status) === 'active' && this.normalizeText(member.member_role) === 'owner'
-    ).length;
-
-    return [
-      { key: 'profile', label: 'Active workspace profile', completed: Boolean(this.profile?.id) },
-      {
-        key: 'membership',
-        label: 'Active membership',
-        completed: Boolean(this.companyContext.getActiveMembership()?.id)
-      },
-      { key: 'owner', label: 'Owner exists', completed: ownerCount > 0 },
-      { key: 'department', label: 'Department exists', completed: this.departments.length > 0 },
-      {
-        key: 'assignment',
-        label: 'Members assigned to departments',
-        completed: this.roleSummary.unassignedMembers === 0
-      }
-    ];
-  }
-
-  get partialWarnings(): string[] {
-    const warnings: string[] = [];
-    if (this.pageData?.departmentsIssue?.message) warnings.push(this.pageData.departmentsIssue.message);
-    if (this.pageData?.membersIssue?.message) warnings.push(this.pageData.membersIssue.message);
-    if (this.pageData?.invitesIssue?.message) warnings.push(this.pageData.invitesIssue.message);
-    if (this.pageData?.shiftTemplatesIssue?.message) warnings.push(this.pageData.shiftTemplatesIssue.message);
-    return warnings;
-  }
-
-  get hasInviteData(): boolean {
-    return !this.pageData?.invitesIssue;
-  }
-
-  get shiftTemplateRows(): ShiftTemplateRow[] {
-    const assignedCounts = new Map<string, number>();
-    for (const member of this.members) {
-      if (!member.shift_template_id) {
-        continue;
-      }
-      assignedCounts.set(
-        member.shift_template_id,
-        (assignedCounts.get(member.shift_template_id) ?? 0) + 1
-      );
-    }
-
-    return (this.pageData?.shiftTemplates ?? []).map((template, index) => ({
-      id: template.id,
-      name: this.pickString(template.name) ?? `Template ${index + 1}`,
-      assignedMembers: assignedCounts.get(template.id) ?? 0,
-      isActive: template.is_active,
-      dateCreated: template.date_created,
-      dateUpdated: template.date_updated
-    }));
-  }
-
-  get employeesWebPolicySummary(): string {
-    return 'Employees are mobile-first. The web dashboard is intended for owners, HR, and managers.';
-  }
-
-  get workspaceStatusLabel(): string {
-    return this.profile?.is_active ? 'Active' : 'Inactive';
-  }
-
-  get roleChipLabel(): string {
-    if (this.currentRole === 'owner') return 'Owner';
-    if (this.currentRole === 'hr') return 'HR';
-    if (this.currentRole === 'manager') return 'Manager';
-    if (this.currentRole === 'employee') return 'Employee';
-    return 'Role unavailable';
+  get canDeactivateSelectedDepartment(): boolean {
+    return this.canManageDepartments && !this.departmentActionBusy && Boolean(this.pendingDeactivateDepartment);
   }
 
   refresh(): void {
     void this.loadPage();
   }
 
-  saveCompanyProfile(): void {
-    const profile = this.profile;
-    if (!profile?.id || !this.canEditCompanyProfile || !this.hasPendingCompanyChanges || this.savingCompany) {
+  viewWorkforce(): void {
+    void this.router.navigate(['/app/workforce']);
+  }
+
+  saveProfile(): void {
+    if (!this.canEditCompanyProfile || this.savingProfile || !this.profile) {
       return;
     }
 
-    this.savingCompany = true;
-    this.feedback = null;
+    const payload = this.buildProfilePayload();
+    if (!payload) {
+      this.feedback = { type: 'info', text: 'No editable organization fields were changed.' };
+      this.cdr.markForCheck();
+      return;
+    }
 
-    this.operationsAdmin
-      .updateCompanyProfile(profile.id, { company_name: this.companyNameDraft.trim() })
-      .pipe(finalize(() => {
-        this.savingCompany = false;
+    this.savingProfile = true;
+    this.feedback = null;
+    this.cdr.markForCheck();
+
+    void firstValueFrom(this.organizationApi.updateProfile(payload))
+      .then((profile) => {
+        if (!this.pageData) return;
+        this.pageData = { ...this.pageData, profile };
+        this.profileDraft = this.createProfileDraft(profile);
+        this.profileBaseline = this.profileSignature(this.profileDraft);
+        this.feedback = { type: 'success', text: 'Organization profile saved.' };
+      })
+      .catch((error: unknown) => {
+        this.feedback = { type: 'error', text: this.toUserMessage(error, 'Organization profile could not be saved.') };
+      })
+      .finally(() => {
+        this.savingProfile = false;
         this.cdr.markForCheck();
-      }))
-      .subscribe({
-        next: () => {
-          this.feedback = { type: 'success', text: 'Company profile updated successfully.' };
-          void this.loadPage(false);
-        },
-        error: (error: unknown) => {
-          this.feedback = {
-            type: 'error',
-            text: this.isPermissionError(error)
-              ? 'You do not have permission to update the company profile.'
-              : this.toErrorMessage(error, 'Failed to update company profile.')
-          };
-        }
       });
   }
 
-  openCreateDepartmentModal(): void {
+  openCreateDepartmentForm(): void {
     if (!this.canManageDepartments) {
+      this.showUnsupportedWorkflow();
       return;
     }
-    this.departmentForm = this.defaultDepartmentForm();
-    this.showCreateDepartmentModal = true;
+
+    this.departmentFormMode = 'create';
+    this.departmentFormDepartmentId = null;
+    this.departmentForm = { name: '' };
+    this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
+    this.pendingDeactivateDepartment = null;
+    this.feedback = null;
   }
 
-  openEditDepartmentModal(department: CompanyDepartmentRecord): void {
+  openEditDepartmentForm(department: OrganizationDepartment): void {
     if (!this.canManageDepartments) {
+      this.showUnsupportedWorkflow();
       return;
     }
-    this.selectedDepartment = department;
-    this.departmentForm = {
-      name: department.name,
-      managerMemberId: department.manager_member_id ?? '',
-      isActive: department.is_active
-    };
-    this.showEditDepartmentModal = true;
+
+    this.departmentFormMode = 'edit';
+    this.departmentFormDepartmentId = department.id;
+    this.departmentForm = { name: department.name ?? '' };
+    this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
+    this.pendingDeactivateDepartment = null;
+    this.feedback = null;
   }
 
-  closeDepartmentModals(): void {
-    if (this.savingDepartment) {
-      return;
-    }
-    this.showCreateDepartmentModal = false;
-    this.showEditDepartmentModal = false;
-    this.selectedDepartment = null;
-    this.pendingEditNeedsDeactivateConfirm = false;
+  cancelDepartmentForm(): void {
+    if (this.savingDepartment) return;
+    this.departmentFormMode = null;
+    this.departmentFormDepartmentId = null;
+    this.departmentForm = { name: '' };
+    this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
   }
 
-  createDepartment(): void {
-    if (!this.canManageDepartments || this.savingDepartment) {
+  saveDepartmentForm(): void {
+    if (!this.canSubmitDepartmentForm || !this.departmentFormMode) {
       return;
     }
 
-    const name = this.departmentForm.name.trim();
+    const name = this.normalizeText(this.departmentForm.name);
     if (!name) {
       this.feedback = { type: 'error', text: 'Department name is required.' };
+      this.cdr.markForCheck();
       return;
     }
 
-    if (this.hasDuplicateDepartmentName(name)) {
-      this.feedback = { type: 'error', text: 'Department name already exists in this workspace.' };
+    if (this.departmentSignature(this.departmentForm) === this.departmentFormBaseline) {
+      this.feedback = { type: 'info', text: 'No department changes were made.' };
+      this.cdr.markForCheck();
       return;
     }
 
     this.savingDepartment = true;
     this.feedback = null;
+    this.cdr.markForCheck();
 
-    this.operationsAdmin
-      .createDepartment({
-        name,
-        is_active: this.departmentForm.isActive,
-        manager_member: this.toDepartmentManagerValue(this.departmentForm.managerMemberId)
+    const mode = this.departmentFormMode;
+    const request = mode === 'edit' && this.departmentFormDepartmentId
+      ? this.organizationApi.updateDepartment(this.departmentFormDepartmentId, { name })
+      : this.organizationApi.createDepartment({ name });
+
+    void firstValueFrom(request)
+      .then((department) => {
+        this.upsertDepartment(department);
+        this.departmentFormMode = null;
+        this.departmentFormDepartmentId = null;
+        this.departmentForm = { name: '' };
+        this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
+        this.feedback = {
+          type: 'success',
+          text: mode === 'edit' ? 'Department saved.' : 'Department created.'
+        };
       })
-      .pipe(finalize(() => {
+      .catch((error: unknown) => {
+        this.feedback = { type: 'error', text: this.toUserMessage(error, 'Department could not be saved.') };
+      })
+      .finally(() => {
         this.savingDepartment = false;
         this.cdr.markForCheck();
-      }))
-      .subscribe({
-        next: () => {
-          this.showCreateDepartmentModal = false;
-          this.feedback = { type: 'success', text: 'Department created successfully' };
-          void this.loadPage(false);
-        },
-        error: (error: unknown) => {
-          console.error('[Company] create department failed', error);
-          this.feedback = {
-            type: 'error',
-            text: this.isPermissionError(error)
-              ? 'You do not have permission to manage departments.'
-              : this.toDepartmentErrorMessage(error, 'Failed to create department.')
-          };
-        }
       });
   }
 
-  saveDepartment(): void {
-    if (!this.canManageDepartments || !this.selectedDepartment || this.savingDepartment) {
+  promptDeactivateDepartment(department: OrganizationDepartment): void {
+    if (!this.canManageDepartments) {
+      this.showUnsupportedWorkflow();
       return;
     }
 
-    const name = this.departmentForm.name.trim();
-    if (!name) {
-      this.feedback = { type: 'error', text: 'Department name is required.' };
-      return;
-    }
-
-    if (this.hasDuplicateDepartmentName(name, this.selectedDepartment.id)) {
-      this.feedback = { type: 'error', text: 'Department name already exists in this workspace.' };
-      return;
-    }
-
-    if (this.selectedDepartment.is_active && !this.departmentForm.isActive) {
-      this.pendingEditNeedsDeactivateConfirm = true;
-      this.pendingDeactivateDepartment = this.selectedDepartment;
-      this.showDeactivateConfirmModal = true;
-      return;
-    }
-
-    this.submitDepartmentEdit();
+    this.pendingDeactivateDepartment = department;
+    this.departmentFormMode = null;
+    this.departmentFormDepartmentId = null;
+    this.feedback = null;
   }
 
-  toggleDepartmentActive(department: CompanyDepartmentRecord): void {
-    if (!this.canManageDepartments || this.savingDepartment) {
-      return;
-    }
-
-    if (department.is_active) {
-      this.pendingEditNeedsDeactivateConfirm = false;
-      this.pendingDeactivateDepartment = department;
-      this.showDeactivateConfirmModal = true;
-      return;
-    }
-
-    this.updateDepartmentState(department.id, {
-      is_active: true
-    });
-  }
-
-  closeDeactivateModal(): void {
-    if (this.savingDepartment) {
-      return;
-    }
-    this.showDeactivateConfirmModal = false;
+  cancelDeactivateDepartment(): void {
+    if (this.departmentActionBusy) return;
     this.pendingDeactivateDepartment = null;
-    this.pendingEditNeedsDeactivateConfirm = false;
   }
 
   confirmDeactivateDepartment(): void {
+    if (!this.pendingDeactivateDepartment || !this.canDeactivateSelectedDepartment) {
+      return;
+    }
+
     const department = this.pendingDeactivateDepartment;
-    if (!department || this.savingDepartment) {
-      return;
-    }
+    this.departmentActionBusy = true;
+    this.feedback = null;
+    this.cdr.markForCheck();
 
-    this.showDeactivateConfirmModal = false;
-
-    if (this.pendingEditNeedsDeactivateConfirm && this.selectedDepartment?.id === department.id) {
-      this.submitDepartmentEdit();
-      return;
-    }
-
-    this.updateDepartmentState(department.id, {
-      is_active: false
-    });
+    void firstValueFrom(this.organizationApi.deactivateDepartment(department.id))
+      .then((updatedDepartment) => {
+        this.upsertDepartment(updatedDepartment);
+        this.pendingDeactivateDepartment = null;
+        this.feedback = { type: 'success', text: 'Department deactivated.' };
+      })
+      .catch((error: unknown) => {
+        this.feedback = { type: 'error', text: this.toUserMessage(error, 'Department could not be deactivated.') };
+      })
+      .finally(() => {
+        this.departmentActionBusy = false;
+        this.cdr.markForCheck();
+      });
   }
 
-  toggleDangerZone(): void {
-    this.dangerZoneExpanded = !this.dangerZoneExpanded;
-  }
-
-  viewWorkforce(departmentId: string | null = null): void {
-    void this.router.navigate(['/app/workforce'], {
-      queryParams: departmentId ? { department: departmentId } : undefined
-    });
-  }
-
-  openDepartmentsTab(): void {
-    this.activeTab = 'departments';
-  }
-
-  assignOrChangeManager(department: CompanyDepartmentRecord): void {
-    if (!this.canManageDepartments) {
-      this.feedback = { type: 'info', text: 'Only owner and HR can assign or change department manager.' };
-      return;
-    }
-    this.openEditDepartmentModal(department);
-    this.feedback = { type: 'info', text: 'Use Edit Department to assign or change manager.' };
+  showUnsupportedWorkflow(): void {
+    this.feedback = { type: 'info', text: this.unsupportedWorkflowMessage };
+    this.cdr.markForCheck();
   }
 
   departmentActionDisabledReason(): string {
@@ -519,38 +381,24 @@ export class CompanyPageComponent implements OnInit {
   }
 
   departmentActiveMemberCount(departmentId: string | null): number {
-    if (!departmentId) {
-      return 0;
-    }
-
-    return this.members.filter(
-      (member) => member.department_id === departmentId && this.normalizeText(member.status) === 'active'
-    ).length;
+    if (!departmentId) return 0;
+    return this.activeMembers.filter((member) => member.department_id === departmentId).length;
   }
 
-  managerLabel(department: CompanyDepartmentRecord): string {
+  managerLabel(department: OrganizationDepartment): string {
     const managerId = department.manager_member_id;
-    if (!managerId) {
-      return 'No manager assigned';
-    }
+    if (!managerId) return 'No manager assigned';
 
-    const manager = this.memberById.get(managerId);
-    if (!manager) {
-      return 'Assigned';
-    }
+    const manager = this.members.find((member) => member.id === managerId);
+    if (!manager) return 'Assigned';
 
     return manager.user_name || manager.user_email || 'Assigned';
   }
 
   formatDate(value: string | null | undefined): string {
-    if (!value) {
-      return 'Not available';
-    }
-
-    const timestamp = this.toTimestamp(value);
-    if (!timestamp) {
-      return 'Not available';
-    }
+    if (!value) return 'Not available';
+    const timestamp = new Date(value).getTime();
+    if (!Number.isFinite(timestamp)) return 'Not available';
 
     return new Intl.DateTimeFormat('en-US', {
       month: 'short',
@@ -562,33 +410,7 @@ export class CompanyPageComponent implements OnInit {
     }).format(new Date(timestamp));
   }
 
-  inviteStatusLabel(value: string | null | undefined): string {
-    const normalized = this.normalizeText(value);
-    if (!normalized) return 'Pending';
-    if (normalized === 'sent') return 'Sent';
-    if (normalized === 'pending') return 'Pending';
-    if (normalized === 'accepted' || normalized === 'claimed') return 'Accepted';
-    if (normalized === 'expired') return 'Expired';
-    return value ?? 'Pending';
-  }
-
-  inviteInviterLabel(invite: CompanyPageData['invites'][number]): string {
-    const name = this.pickString((invite as Record<string, unknown>)['invited_by_name']);
-    const email = this.pickString((invite as Record<string, unknown>)['invited_by_email']);
-    if (name) return name;
-    if (email) return email;
-    return 'System / unavailable';
-  }
-
-  trackByDepartment(index: number, row: CompanyDepartmentRecord): string {
-    return row.id || String(index);
-  }
-
-  trackByInvite(index: number, row: CompanyPageData['invites'][number]): string {
-    return row.id || String(index);
-  }
-
-  trackByShiftTemplate(index: number, row: ShiftTemplateRow): string {
+  trackByDepartment(index: number, row: OrganizationDepartment): string {
     return row.id || String(index);
   }
 
@@ -601,241 +423,178 @@ export class CompanyPageComponent implements OnInit {
     }
 
     this.errorMessage = '';
-
-    const safetyTimeout = setTimeout(() => {
-      if (runId !== this.loadRunId || this.viewState !== 'loading') {
-        return;
-      }
-
-      this.viewState = 'error';
-      this.errorMessage = 'Company data is taking too long to load. Please refresh.';
-      this.loading = false;
-      this.cdr.markForCheck();
-    }, 20000);
+    this.feedback = null;
 
     try {
-      const context = await this.companyContext.ensureActiveContext();
-      if (runId !== this.loadRunId) {
-        return;
-      }
+      const data = await firstValueFrom(this.organizationApi.getOrganization());
+      if (runId !== this.loadRunId) return;
 
-      if (!context?.activeMembership?.id || !context?.activeBusinessProfile?.id) {
-        void this.router.navigate(['/app/workspace-access']);
-        this.viewState = 'permission_denied';
-        this.loading = false;
-        this.cdr.markForCheck();
-        return;
-      }
+      this.pageData = data;
+      this.departmentFormMode = null;
+      this.departmentFormDepartmentId = null;
+      this.departmentForm = { name: '' };
+      this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
+      this.pendingDeactivateDepartment = null;
 
-      const role = this.normalizeText(context.activeMemberRole);
-      if (role === 'employee') {
-        this.viewState = 'permission_denied';
-        this.loading = false;
-        this.cdr.markForCheck();
-        return;
-      }
-
-      const pageData = await firstValueFrom(
-        this.operationsAdmin.getCompanyPageData().pipe(timeout(20000))
-      );
-
-      if (runId !== this.loadRunId) {
-        return;
-      }
-
-      this.pageData = pageData ?? null;
-
-      if (!this.pageData?.profile) {
+      if (!data.profile) {
         this.viewState = 'error';
-        this.errorMessage = 'Company profile data is unavailable for the active workspace.';
+        this.errorMessage = 'Organization profile data is unavailable for the active organization.';
       } else {
-        this.companyNameDraft = this.pageData.profile.company_name ?? '';
-        this.companyNameInitial = this.pageData.profile.company_name ?? '';
-
+        this.profileDraft = this.createProfileDraft(data.profile);
+        this.profileBaseline = this.profileSignature(this.profileDraft);
         this.viewState = 'ready';
       }
     } catch (error: unknown) {
-      if (runId !== this.loadRunId) {
-        return;
-      }
+      if (runId !== this.loadRunId) return;
 
-      console.warn('[Company] load failed', error);
-      this.viewState = this.isPermissionError(error) ? 'permission_denied' : 'error';
-      this.errorMessage = this.toErrorMessage(error, 'Company page failed to load.');
+      if (error instanceof OrganizationApiError && error.code === 'not_found') {
+        this.viewState = 'no_context';
+      } else if (error instanceof OrganizationApiError && error.code === 'forbidden') {
+        this.viewState = 'permission_denied';
+      } else {
+        this.viewState = 'error';
+        this.errorMessage = this.toUserMessage(error, 'Organization data could not be loaded.');
+      }
     } finally {
-      clearTimeout(safetyTimeout);
-      if (runId !== this.loadRunId) {
-        return;
-      }
-
+      if (runId !== this.loadRunId) return;
       this.loading = false;
       this.cdr.markForCheck();
     }
   }
 
-  private submitDepartmentEdit(): void {
-    const selected = this.selectedDepartment;
-    if (!selected) {
-      return;
+  private buildProfilePayload(): OrganizationProfileUpdateInput | null {
+    if (!this.profile) return null;
+
+    const payload: OrganizationProfileUpdateInput = {};
+    const companyName = this.normalizeText(this.profileDraft.company_name);
+    if (!companyName) {
+      this.feedback = { type: 'error', text: 'Organization name is required.' };
+      return null;
     }
 
-    this.pendingEditNeedsDeactivateConfirm = false;
-    this.pendingDeactivateDepartment = null;
+    payload.company_name = companyName;
 
-    this.updateDepartmentState(
-      selected.id,
-      {
-        name: this.departmentForm.name.trim(),
-        is_active: this.departmentForm.isActive,
-        manager_member: this.toDepartmentManagerValue(this.departmentForm.managerMemberId)
-      },
-      true
-    );
+    const contactName = this.normalizeText(this.profileDraft.contact_name);
+    if (contactName) payload.contact_name = contactName;
+
+    const phone = this.normalizeText(this.profileDraft.phone);
+    if (phone) payload.phone = phone;
+
+    const industry = this.normalizeText(this.profileDraft.industry);
+    if (industry) payload.industry = industry;
+
+    const teamSize = this.normalizePositiveInteger(this.profileDraft.team_size);
+    if (teamSize !== null) payload.team_size = teamSize;
+
+    const country = this.normalizeText(this.profileDraft.country);
+    if (country) payload.country = country;
+
+    const city = this.normalizeText(this.profileDraft.city);
+    if (city) payload.city = city;
+
+    const website = this.normalizeText(this.profileDraft.website);
+    if (website) payload.website = website;
+
+    const timezone = this.normalizeText(this.profileDraft.timezone);
+    if (timezone) payload.timezone = timezone;
+
+    const defaultLanguage = this.normalizeText(this.profileDraft.default_language);
+    if (defaultLanguage) payload.default_language = defaultLanguage;
+
+    return payload;
   }
 
-  private updateDepartmentState(
-    departmentId: string,
-    payload: { name?: string; is_active?: boolean; manager_member?: string | null },
-    closeModal = false
-  ): void {
-    this.savingDepartment = true;
-    this.feedback = null;
-
-    this.operationsAdmin
-      .updateDepartment(departmentId, payload)
-      .pipe(finalize(() => {
-        this.savingDepartment = false;
-        this.cdr.markForCheck();
-      }))
-      .subscribe({
-        next: () => {
-          if (closeModal) {
-            this.showEditDepartmentModal = false;
-            this.selectedDepartment = null;
-          }
-
-          this.feedback = { type: 'success', text: 'Department updated successfully.' };
-          void this.loadPage(false);
-        },
-        error: (error: unknown) => {
-          this.feedback = {
-            type: 'error',
-            text: this.isPermissionError(error)
-              ? 'You do not have permission to manage departments.'
-              : this.toDepartmentErrorMessage(error, 'Failed to update department.')
-          };
-        }
-      });
-  }
-
-  private hasDuplicateDepartmentName(name: string, excludeDepartmentId: string | null = null): boolean {
-    const normalized = this.normalizeText(name);
-    return this.departments.some((department) => {
-      if (excludeDepartmentId && department.id === excludeDepartmentId) {
-        return false;
-      }
-      return this.normalizeText(department.name) === normalized;
-    });
-  }
-
-  private defaultDepartmentForm(): DepartmentForm {
+  private createProfileDraft(profile: OrganizationProfile): ProfileDraft {
     return {
-      name: '',
-      managerMemberId: '',
-      isActive: true
+      company_name: profile.company_name ?? '',
+      contact_name: profile.contact_name ?? '',
+      phone: profile.phone ?? '',
+      industry: profile.industry ?? '',
+      team_size: profile.team_size === null || profile.team_size === undefined ? '' : String(profile.team_size),
+      country: profile.country ?? '',
+      city: profile.city ?? '',
+      website: profile.website ?? '',
+      timezone: profile.timezone ?? '',
+      default_language: profile.default_language ?? ''
     };
   }
 
-  private toDepartmentManagerValue(value: string | null | undefined): string | null {
-    const trimmed = this.pickString(value);
-    return trimmed || null;
+  private profileSignature(form: ProfileDraft): string {
+    return [
+      form.company_name,
+      form.contact_name,
+      form.phone,
+      form.industry,
+      form.team_size,
+      form.country,
+      form.city,
+      form.website,
+      form.timezone,
+      form.default_language
+    ]
+      .map((value) => this.normalizeText(value))
+      .join('||');
   }
 
-  private toDepartmentErrorMessage(error: unknown, fallback: string): string {
-    const message = this.toErrorMessage(error, fallback);
-    const normalized = this.normalizeText(message);
-    if (normalized.includes('departments') && normalized.includes('business_profile') && normalized.includes('unique')) {
-      return 'Remove unique constraint from departments.business_profile because a company must have many departments.';
-    }
-    return message;
+  private departmentSignature(form: DepartmentDraft): string {
+    return this.normalizeText(form.name);
   }
 
-  private roleDisplayLabel(role: string): string {
-    if (role === 'owner') return 'Owner';
-    if (role === 'hr') return 'HR';
-    if (role === 'manager' || role === 'manger') return 'Manager';
-    return 'Member';
+  private createEmptyProfileDraft(): ProfileDraft {
+    return {
+      company_name: '',
+      contact_name: '',
+      phone: '',
+      industry: '',
+      team_size: '',
+      country: '',
+      city: '',
+      website: '',
+      timezone: '',
+      default_language: ''
+    };
   }
 
-  private isPermissionError(error: unknown): boolean {
-    if (error instanceof HttpErrorResponse) {
-      if (error.status === 401 || error.status === 403) {
-        return true;
-      }
-
-      const message = [
-        error.error?.errors?.[0]?.extensions?.reason,
-        error.error?.errors?.[0]?.message,
-        error.error?.message,
-        error.message
-      ]
-        .map((part) => this.normalizeText(part))
-        .join(' ');
-
-      return (
-        message.includes('permission') ||
-        message.includes('forbidden') ||
-        message.includes('access denied') ||
-        message.includes('not allowed')
-      );
+  private upsertDepartment(department: OrganizationDepartment): void {
+    if (!this.pageData) return;
+    const departments = [...this.pageData.departments];
+    const index = departments.findIndex((row) => row.id === department.id);
+    if (index >= 0) {
+      departments[index] = department;
+    } else {
+      departments.unshift(department);
     }
-
-    const message = this.normalizeText((error as Error | null)?.message);
-    return message.includes('permission') || message.includes('forbidden');
+    this.pageData = { ...this.pageData, departments };
   }
 
-  private toErrorMessage(error: unknown, fallback: string): string {
-    if (error instanceof HttpErrorResponse) {
-      const message =
-        error.error?.errors?.[0]?.extensions?.reason ||
-        error.error?.errors?.[0]?.message ||
-        error.error?.message ||
-        error.message;
-
-      const normalized = this.pickString(message);
-      if (normalized) {
-        return normalized;
-      }
-    }
-
-    const direct = this.pickString((error as Error | null)?.message);
-    if (direct) {
-      return direct;
-    }
-
-    return fallback;
-  }
-
-  private toTimestamp(value: string | null | undefined): number {
-    if (!value) {
-      return 0;
-    }
-
-    const parsed = new Date(value).getTime();
-    return Number.isFinite(parsed) ? parsed : 0;
+  private normalizePositiveInteger(value: string): number | null {
+    const normalized = this.normalizeText(value);
+    if (!normalized) return null;
+    const parsed = Number(normalized);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   }
 
   private normalizeText(value: unknown): string {
-    return this.pickString(value)?.toLowerCase() ?? '';
+    if (typeof value === 'string') return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value).trim();
+    return '';
   }
 
-  private pickString(value: unknown): string | null {
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
+  private toUserMessage(error: unknown, fallback: string): string {
+    if (error instanceof OrganizationApiError) {
+      if (error.code === 'forbidden') {
+        return 'This organization action is not available for your access level.';
+      }
+      if (error.code === 'unauthorized') {
+        return 'Session expired. Please sign in again.';
+      }
+      return error.userMessage || fallback;
     }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return String(value);
+
+    if (error instanceof Error && error.message) {
+      return error.message;
     }
-    return null;
+
+    return fallback;
   }
 }

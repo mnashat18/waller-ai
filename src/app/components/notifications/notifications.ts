@@ -1,15 +1,12 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 
-import { environment } from '../../../environments/environment';
 import {
   NotificationsService,
   type WorkspaceNotification
 } from '../../services/notifications.service';
-import { AuthService } from '../../services/auth';
 
 @Component({
   selector: 'app-notifications',
@@ -30,8 +27,6 @@ export class NotificationsComponent implements OnInit, OnDestroy {
 
   constructor(
     private notificationsService: NotificationsService,
-    private auth: AuthService,
-    private http: HttpClient,
     private router: Router
   ) {}
 
@@ -71,7 +66,6 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   }
 
   openDetails(notification: NotificationItem): void {
-    this.markAsRead(notification);
     if (this.isAlertNotification(notification)) {
       this.open = false;
       void this.router.navigate(['/app/alerts'], {
@@ -133,38 +127,6 @@ export class NotificationsComponent implements OnInit, OnDestroy {
   private isAlertNotification(notification: NotificationItem): boolean {
     const linkType = this.normalize(notification.linkType);
     return Boolean(notification.linkId) && linkType.includes('alert');
-  }
-
-  private markAsRead(notification: NotificationItem): void {
-    if (!this.isUnread(notification)) {
-      return;
-    }
-
-    notification.status = 'read';
-
-    const token = this.auth.getStoredAccessToken();
-    if (!token) {
-      return;
-    }
-
-    this.http.patch(
-      `${environment.API_URL}/items/notifications/${encodeURIComponent(notification.id)}`,
-      {
-        status: 'read',
-        read_at: new Date().toISOString()
-      },
-      {
-        headers: this.auth.getAuthHeaders(token),
-        withCredentials: true
-      }
-    ).subscribe({
-      next: () => {
-        this.notificationsService.refresh('mark-read');
-      },
-      error: () => {
-        // ignore write failures to keep popup functional
-      }
-    });
   }
 
   private normalize(value: string | null | undefined): string {

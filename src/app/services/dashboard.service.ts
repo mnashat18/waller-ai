@@ -15,7 +15,6 @@ import {
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthService } from './auth';
-import { BusinessCenterService, type BusinessProfile } from './business-center.service';
 
 export type ScanResult = {
   id?: string;
@@ -377,7 +376,6 @@ export class DashboardService {
   constructor(
     private http: HttpClient,
     private auth: AuthService,
-    private businessCenter: BusinessCenterService,
     private companyContext: CompanyContextService
   ) {}
 
@@ -425,11 +423,8 @@ export class DashboardService {
   }
 
   getOperationalDashboardSummary(): Observable<OperationalDashboardSummary> {
-    return forkJoin({
-      contextState: this.companyContext.ensureLoaded(),
-      hubState: this.businessCenter.getHubAccessState()
-    }).pipe(
-      switchMap(({ contextState, hubState }) => {
+    return this.companyContext.ensureLoaded().pipe(
+      switchMap((contextState) => {
         const token = this.auth.getStoredAccessToken() ?? '';
         const context = contextState.context;
         const businessProfileId = context.activeBusinessProfileId;
@@ -439,6 +434,9 @@ export class DashboardService {
 
         if (!businessProfileId || !activeRole) {
           return throwError(() => new Error('Active company context is missing.'));
+        }
+        if (activeRole === 'manager' && !activeDepartmentId) {
+          return throwError(() => new Error('Scoped data unavailable: manager account has no active department context.'));
         }
 
         console.info('[dashboard] active business profile filter', {
@@ -457,15 +455,15 @@ export class DashboardService {
           notificationsRecent: userId
             ? this.fetchNotifications(userId, businessProfileId, activeRole, activeDepartmentId, token, 6)
             : of([] as NotificationRecord[]),
-          teamMembers: this.fetchBusinessProfileMembers(businessProfileId, token, 250),
-          departments: this.fetchDepartments(businessProfileId, token, 120)
+          teamMembers: this.fetchBusinessProfileMembers(businessProfileId, activeRole, activeDepartmentId, token, 250),
+          departments: this.fetchDepartments(businessProfileId, activeRole, activeDepartmentId, token, 120)
         });
 
         return summaryRequests$.pipe(
           switchMap((payload) =>
             this.fetchScanResultsForScans(payload.wellnessRecent, token).pipe(
               map((scanResultsRecent) =>
-                this.buildOperationalSummary(hubState, activeRole, context, {
+                this.buildOperationalSummary(activeRole, context, {
                   ...payload,
                   scanResultsRecent
                 })
@@ -486,28 +484,36 @@ export class DashboardService {
     limit: number,
     extraFilters: Array<{ path: string[]; operator: string; value: string }> = []
   ): Observable<ScopedRequestRecord[]> {
-    void activeRole;
-    void activeDepartmentId;
-    return this.queryItems<ScopedRequestRecord>({
-      collection: 'requests',
-      fields: [
-        'id',
-        'business_profile',
-        'scan_id',
-        'required_state',
-        'response_status',
-        'response_payload',
-        'timestamp',
-        'requested_for_user',
-        'requested_for_email',
-        'requested_for_phone',
-        'Target'
-      ],
+    const isManager = activeRole === 'manager';
+    const fields = isManager
+      ? ['id', 'department', 'status', 'request_type', 'requested_at', 'due_at']
+      : [
+          'id',
+          'business_profile',
+          'department',
+          'requested_by_user',
+          'target_member',
+          'completed_scan',
+          'status',
+          'cancelled',
+          'request_type',
+          'requested_at',
+          'due_at',
+          'completed_at'
+        ];
+    return this.queryItemsStrict<ScopedRequestRecord>({
+      collection: 'scan_requests',
+      fields,
       limit,
-      sort: '-timestamp',
+      sort: '-requested_at',
       businessProfileId,
       businessFilterPath: ['business_profile'],
-      extraFilters
+      extraFilters: [
+        ...extraFilters,
+        ...(isManager && activeDepartmentId
+          ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
+          : [])
+      ]
     }, token).pipe(
       map((rows) => rows.map((row) => this.normalizeRequestRecord(row)))
     );
@@ -551,8 +557,9 @@ export class DashboardService {
     token: string,
     limit: number
   ): Observable<WellnessScanRecord[]> {
-    void activeRole;
-    void activeDepartmentId;
+    const extraFilters = activeRole === 'manager' && activeDepartmentId
+      ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
+      : [];
     return this.queryItems<WellnessScanRecord>({
       collection: 'wellness_scans',
       fields: [
@@ -580,7 +587,8 @@ export class DashboardService {
       limit,
       sort: '-date_created',
       businessProfileId,
-      businessFilterPath: ['business_profile']
+      businessFilterPath: ['business_profile'],
+      extraFilters
     }, token);
   }
 
@@ -701,31 +709,36 @@ export class DashboardService {
     token: string,
     limit: number
   ): Observable<AlertRecord[]> {
-    void activeRole;
-    void activeDepartmentId;
-    return this.queryItems<AlertRecord>({
+    const isManager = activeRole === 'manager';
+    const fields = isManager
+      ? ['id', 'date_created', 'department', 'severity', 'title', 'message', 'status']
+      : [
+          'id',
+          'date_created',
+          'business_profile',
+          'department',
+          'target_member',
+          'target_user',
+          'scan',
+          'severity',
+          'title',
+          'message',
+          'status',
+          'reviewed_by',
+          'reviewed_at',
+          'action_note',
+          'action_type'
+        ];
+    return this.queryItemsStrict<AlertRecord>({
       collection: 'alerts',
-      fields: [
-        'id',
-        'date_created',
-        'business_profile',
-        'department',
-        'target_member',
-        'target_user',
-        'scan',
-        'severity',
-        'title',
-        'message',
-        'status',
-        'reviewed_by',
-        'reviewed_at',
-        'action_note',
-        'action_type'
-      ],
+      fields,
       limit,
       sort: '-date_created',
       businessProfileId,
-      businessFilterPath: ['business_profile']
+      businessFilterPath: ['business_profile'],
+      extraFilters: isManager && activeDepartmentId
+        ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
+        : []
     }, token);
   }
 
@@ -736,8 +749,9 @@ export class DashboardService {
     token: string,
     limit: number
   ): Observable<ActivityRecord[]> {
-    void activeRole;
-    void activeDepartmentId;
+    const extraFilters = activeRole === 'manager' && activeDepartmentId
+      ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
+      : [];
     return this.queryItems<ActivityRecord>({
       collection: 'activity_events',
       fields: [
@@ -755,7 +769,8 @@ export class DashboardService {
       limit,
       sort: '-date_created',
       businessProfileId,
-      businessFilterPath: ['business_profile']
+      businessFilterPath: ['business_profile'],
+      extraFilters
     }, token);
   }
 
@@ -767,8 +782,9 @@ export class DashboardService {
     token: string,
     limit: number
   ): Observable<NotificationRecord[]> {
-    void activeRole;
-    void activeDepartmentId;
+    const extraFilters = activeRole === 'manager' && activeDepartmentId
+      ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
+      : [];
     return this.queryItems<NotificationRecord>({
       collection: 'notifications',
       fields: [
@@ -789,7 +805,7 @@ export class DashboardService {
       sort: '-date_created',
       businessProfileId,
       businessFilterPath: ['business_profile'],
-      extraFilters: [{ path: ['user'], operator: '_eq', value: userId }]
+      extraFilters: [{ path: ['user'], operator: '_eq', value: userId }, ...extraFilters]
     }, token);
   }
 
@@ -800,8 +816,9 @@ export class DashboardService {
     token: string,
     limit: number
   ): Observable<ShiftTemplateRecord[]> {
-    void activeRole;
-    void activeDepartmentId;
+    if (activeRole === 'manager') {
+      return of([] as ShiftTemplateRecord[]);
+    }
     return this.queryItems<ShiftTemplateRecord>({
       collection: 'shift_templates',
       fields: [
@@ -824,56 +841,65 @@ export class DashboardService {
 
   private fetchBusinessProfileMembers(
     businessProfileId: string,
+    activeRole: ActiveMemberRole,
+    activeDepartmentId: string | null,
     token: string,
     limit: number
   ): Observable<BusinessProfileMemberRecord[]> {
-    return this.queryItems<BusinessProfileMemberRecord>({
+    const isManager = activeRole === 'manager';
+    const fields = isManager
+      ? ['id', 'status', 'member_role', 'department', 'employee_code', 'job_title', 'last_scan_at', 'last_risk_level', 'last_readiness_score']
+      : [
+          'id',
+          'status',
+          'user',
+          'business_profile',
+          'member_role',
+          'department',
+          'shift_template',
+          'employee_code',
+          'job_title',
+          'joined_at',
+          'deactivated_at',
+          'last_scan_at',
+          'last_readiness_score',
+          'last_risk_level',
+          'date_created',
+          'date_updated'
+        ];
+    return this.queryItemsStrict<BusinessProfileMemberRecord>({
       collection: 'business_profile_members',
-      fields: [
-        'id',
-        'status',
-        'user',
-        'business_profile',
-        'member_role',
-        'department',
-        'shift_template',
-        'employee_code',
-        'job_title',
-        'joined_at',
-        'deactivated_at',
-        'last_scan_at',
-        'last_readiness_score',
-        'last_risk_level',
-        'date_created',
-        'date_updated'
-      ],
+      fields,
       limit,
-      sort: '-date_created',
+      sort: isManager ? '-last_scan_at' : '-date_created',
       businessProfileId,
-      businessFilterPath: ['business_profile']
+      businessFilterPath: ['business_profile'],
+      extraFilters: isManager && activeDepartmentId
+        ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
+        : []
     }, token);
   }
 
   private fetchDepartments(
     businessProfileId: string,
+    activeRole: ActiveMemberRole,
+    activeDepartmentId: string | null,
     token: string,
     limit: number
   ): Observable<DepartmentRecord[]> {
-    return this.queryItems<DepartmentRecord>({
+    const isManager = activeRole === 'manager';
+    return this.queryItemsStrict<DepartmentRecord>({
       collection: 'departments',
-      fields: [
-        'id',
-        'date_created',
-        'date_updated',
-        'business_profile',
-        'name',
-        'manager_member',
-        'is_active'
-      ],
+      fields: isManager
+        ? ['id', 'name', 'is_active']
+        : ['id', 'date_created', 'date_updated', 'business_profile', 'name', 'manager_member', 'is_active'],
       limit,
       sort: 'name',
       businessProfileId,
-      businessFilterPath: ['business_profile']
+      businessFilterPath: ['business_profile'],
+      extraFilters: isManager && activeDepartmentId
+        ? [{ path: ['id'], operator: '_eq', value: activeDepartmentId }]
+        : []
     }, token);
   }
 
@@ -935,7 +961,6 @@ export class DashboardService {
   }
 
   private buildOperationalSummary(
-    hubState: { profile: BusinessProfile | null; hasPaidAccess: boolean },
     activeRole: ActiveMemberRole,
     context: {
       activeBusinessProfileId: string | null;
@@ -955,7 +980,6 @@ export class DashboardService {
       departments: Array<unknown>;
     }
   ): OperationalDashboardSummary {
-    const profile = hubState.profile;
     const requestsRecent = payload.requestsRecent ?? [];
     const wellnessRecent = payload.wellnessRecent ?? [];
     const resultsRecent = payload.scanResultsRecent ?? [];
@@ -1041,10 +1065,9 @@ export class DashboardService {
       businessProfileId: context.activeBusinessProfileId ?? '',
       companyName:
         context.activeBusinessProfileName ||
-        sanitizeDisplayValue(profile?.company_name, '') ||
         'Active company',
-      accessLabel: this.resolveWorkspaceAccessLabel(profile, hubState.hasPaidAccess),
-      billingStatus: profile?.billing_status?.trim() ?? null,
+      accessLabel: null,
+      billingStatus: null,
       activeRole,
       teamMemberCount: payload.teamMembers.length,
       shiftTemplateCount: shiftTemplates.length
@@ -1432,29 +1455,5 @@ export class DashboardService {
       return null;
     }
     return primitive;
-  }
-
-  private resolveWorkspaceAccessLabel(
-    profile: Pick<BusinessProfile, 'billing_status'> | null,
-    hasPaidAccess: boolean
-  ): string {
-    if (hasPaidAccess) {
-      return this.normalizeText(profile?.billing_status) === 'trial' ? 'Business Trial' : 'Business';
-    }
-
-    const billingStatus = this.normalizeText(profile?.billing_status);
-    if (billingStatus) {
-      return this.toDisplayLabel(billingStatus);
-    }
-
-    return 'Free';
-  }
-
-  private toDisplayLabel(value: string): string {
-    return value
-      .split(/[_\s-]+/)
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
   }
 }

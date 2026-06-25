@@ -299,7 +299,7 @@
             <button *ngIf="canManageRoster" type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="openInviteModal('invite')">
               Invite Members
             </button>
-            <a *ngIf="canManageRoster" routerLink="/app/departments" class="dashboard-action-button">Create Department</a>
+            <a *ngIf="canManageRoster" routerLink="/app/company" [queryParams]="{ tab: 'departments' }" class="dashboard-action-button">Create Department</a>
             <button *ngIf="canSendRequest" type="button" class="dashboard-action-button" (click)="sendScanRequest()">
               Send Scan Request
             </button>
@@ -313,7 +313,7 @@
             <div tableHeader>
               <div>
                 <p class="text-sm font-semibold text-slate-50">Scoped Members</p>
-                <p class="mt-1 text-sm text-slate-300">Human-readable roster labels, no raw IDs.</p>
+                <p class="mt-1 text-sm text-slate-300">Human-readable roster labels for customer-facing review.</p>
               </div>
             </div>
 

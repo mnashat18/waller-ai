@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import {
   NavigationCancel,
   NavigationEnd,
@@ -21,8 +21,11 @@ import { TopbarComponent } from './topbar/topbar.component';
   standalone: true,
   imports: [CommonModule, RouterOutlet, SidebarComponent, TopbarComponent],
   template: `
-    <div class="app-shell" *ngIf="!isAuthOnlyRouteActive">
-      <ng-container *ngIf="appContextReady; else workspaceLoading">
+    <div
+      class="app-shell"
+      [class.is-sidebar-open]="mobileSidebarOpen"
+      *ngIf="!isAuthOnlyRouteActive">
+      <ng-container *ngIf="shellMounted; else workspaceLoading">
       <div class="app-shell__ambient" aria-hidden="true">
         <span class="app-shell__orb app-shell__orb--a"></span>
         <span class="app-shell__orb app-shell__orb--b"></span>
@@ -30,9 +33,26 @@ import { TopbarComponent } from './topbar/topbar.component';
       </div>
 
       <div class="app-shell__grid">
-        <app-dashboard-sidebar class="app-sidebar"></app-dashboard-sidebar>
+        <app-dashboard-sidebar id="app-sidebar-navigation" class="app-sidebar"></app-dashboard-sidebar>
+        <button
+          type="button"
+          class="app-sidebar-backdrop"
+          aria-label="Close navigation"
+          *ngIf="mobileSidebarOpen"
+          (click)="closeMobileSidebar()">
+        </button>
 
         <div class="app-main">
+          <button
+            type="button"
+            class="app-mobile-menu-button"
+            aria-controls="app-sidebar-navigation"
+            [attr.aria-expanded]="mobileSidebarOpen"
+            (click)="toggleMobileSidebar()">
+            <span aria-hidden="true"></span>
+            <span>Menu</span>
+          </button>
+
           <app-dashboard-topbar
             class="app-header"
             >
@@ -74,6 +94,12 @@ import { TopbarComponent } from './topbar/topbar.component';
             <div class="app-shell__loading-copy">
               <p>{{ loadingTitle }}</p>
               <span>{{ loadingSubtitle }}</span>
+            </div>
+
+            <div *ngIf="showRetryAction" class="app-shell__loading-actions">
+              <button type="button" class="app-shell__retry-button" (click)="retryWorkspaceBootstrap()">
+                Retry
+              </button>
             </div>
           </div>
         </div>
@@ -213,6 +239,39 @@ import { TopbarComponent } from './topbar/topbar.component';
       letter-spacing: 0.01em;
     }
 
+    .app-shell__loading-actions {
+      display: flex;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .app-shell__retry-button {
+      border: 1px solid rgba(125, 211, 252, 0.35);
+      background: rgba(15, 23, 42, 0.8);
+      color: #e2e8f0;
+      border-radius: 999px;
+      padding: 0.7rem 1.1rem;
+      font-size: 0.88rem;
+      font-weight: 600;
+      letter-spacing: 0;
+      cursor: pointer;
+      transition:
+        transform 120ms ease,
+        border-color 120ms ease,
+        background-color 120ms ease;
+    }
+
+    .app-shell__retry-button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(125, 211, 252, 0.65);
+      background: rgba(15, 23, 42, 0.92);
+    }
+
+    .app-shell__retry-button:focus-visible {
+      outline: 2px solid rgba(125, 211, 252, 0.85);
+      outline-offset: 2px;
+    }
+
     @keyframes app-shell-loader-spin {
       to {
         transform: rotate(360deg);
@@ -273,12 +332,16 @@ export class AppShellComponent implements OnInit, OnDestroy {
   breadcrumbs: string[] = ['Dashboard'];
   isTransitioning = false;
   isAuthOnlyRouteActive = false;
-  appContextReady = false;
+  shellMounted = false;
   loadingTitle = 'Loading session...';
-  loadingSubtitle = 'Loading workspace...';
+  loadingSubtitle = 'Loading organization...';
+  showRetryAction = false;
+  mobileSidebarOpen = false;
 
   private navSubscription?: Subscription;
   private contextSubscription?: Subscription;
+  private bootstrapTimeoutHandle?: ReturnType<typeof setTimeout>;
+  private readonly bootstrapTimeoutMs = 15000;
 
   constructor(
     private router: Router,
@@ -289,9 +352,33 @@ export class AppShellComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.updateRouteState();
     this.contextSubscription = this.companyContext.state$.subscribe((state) => {
-      this.appContextReady = state.context.authInitialized && state.context.workspaceInitialized;
-      this.loadingTitle = state.context.authInitialized ? 'Loading workspace...' : 'Loading session...';
-      this.loadingSubtitle = state.context.workspaceInitialized ? 'Loading role...' : 'Loading workspace...';
+      const hasResolvedContext =
+        state.context.isAuthenticated &&
+        state.context.authInitialized &&
+        state.context.workspaceInitialized &&
+        Boolean(state.context.activeBusinessProfileId);
+
+      if (hasResolvedContext) {
+        this.shellMounted = true;
+        this.showRetryAction = false;
+        this.clearBootstrapTimeout();
+      } else if (!state.context.isAuthenticated && state.context.authInitialized && state.context.workspaceInitialized) {
+        this.shellMounted = false;
+        this.showRetryAction = false;
+        this.clearBootstrapTimeout();
+      } else if (state.loading && !this.shellMounted) {
+        this.startBootstrapTimeout();
+      }
+
+      this.loadingTitle = state.context.authInitialized ? 'Loading organization...' : 'Loading session...';
+      this.loadingSubtitle = state.error
+        ? state.error
+        : state.context.workspaceInitialized
+          ? 'Loading access level...'
+          : 'Restoring organization context...';
+      this.showRetryAction =
+        !this.shellMounted &&
+        (Boolean(state.error) || this.showRetryAction);
       this.scheduleViewRefresh();
     });
     if (!this.isAuthOnlyRouteActive) {
@@ -310,9 +397,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
         this.updateRouteState();
         this.updateRouteMeta();
         this.isTransitioning = false;
-        if (!this.isAuthOnlyRouteActive && !this.appContextReady) {
-          void this.bootstrapWorkspaceContext();
-        }
+        this.closeMobileSidebar();
         this.scheduleViewRefresh();
         return;
       }
@@ -327,14 +412,41 @@ export class AppShellComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.navSubscription?.unsubscribe();
     this.contextSubscription?.unsubscribe();
+    this.clearBootstrapTimeout();
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    this.closeMobileSidebar();
+  }
+
+  toggleMobileSidebar(): void {
+    this.mobileSidebarOpen = !this.mobileSidebarOpen;
+    this.scheduleViewRefresh();
+  }
+
+  closeMobileSidebar(): void {
+    if (!this.mobileSidebarOpen) {
+      return;
+    }
+
+    this.mobileSidebarOpen = false;
+    this.scheduleViewRefresh();
   }
 
   private async bootstrapWorkspaceContext(): Promise<void> {
     try {
       await this.companyContext.initializeAppContext();
-    } catch (error) {
-      console.warn('[AppShell] workspace context bootstrap failed', error);
+    } catch {
+      this.showRetryAction = true;
+      this.scheduleViewRefresh();
     }
+  }
+
+  retryWorkspaceBootstrap(): void {
+    this.showRetryAction = false;
+    this.clearBootstrapTimeout();
+    void this.bootstrapWorkspaceContext();
   }
 
   private updateRouteState(): void {
@@ -372,5 +484,25 @@ export class AppShellComponent implements OnInit, OnDestroy {
         // no-op if change detection runs during teardown
       }
     });
+  }
+
+  private startBootstrapTimeout(): void {
+    if (this.bootstrapTimeoutHandle || this.shellMounted) {
+      return;
+    }
+
+    this.bootstrapTimeoutHandle = setTimeout(() => {
+      this.showRetryAction = !this.shellMounted;
+      this.scheduleViewRefresh();
+    }, this.bootstrapTimeoutMs);
+  }
+
+  private clearBootstrapTimeout(): void {
+    if (!this.bootstrapTimeoutHandle) {
+      return;
+    }
+
+    clearTimeout(this.bootstrapTimeoutHandle);
+    this.bootstrapTimeoutHandle = undefined;
   }
 }

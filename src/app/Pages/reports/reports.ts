@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 
@@ -9,18 +9,23 @@ import {
   type AlertsBreakdownRow,
   type ComplianceTrendRow,
   type DepartmentPerformanceRow,
-  type MissingScanDetailRow,
-  type OverdueRequestDetailRow,
   type ReportsFilters,
   type ReportsViewData
 } from '../../services/reports.service';
-import { ReportsPdfExportService } from '../../services/reports-pdf-export.service';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
+import { DashboardSectionComponent } from '../../shared/ui/dashboard-section/dashboard-section.component';
+import { ErrorStateComponent } from '../../shared/ui/error-state/error-state.component';
+import { FilterBarShellComponent } from '../../shared/ui/filter-bar-shell/filter-bar-shell.component';
 import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
+import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
 
-type ReportsViewState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorkspace';
+type ReportsViewState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorkspace' | 'scopeUnavailable';
+type FeedbackMessage = {
+  type: 'info' | 'error';
+  text: string;
+};
 
 @Component({
   selector: 'app-reports-page',
@@ -29,6 +34,10 @@ type ReportsViewState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorksp
     CommonModule,
     FormsModule,
     RouterModule,
+    PageHeaderComponent,
+    DashboardSectionComponent,
+    FilterBarShellComponent,
+    ErrorStateComponent,
     KpiCardComponent,
     TableShellComponent,
     CardSkeletonLoaderComponent,
@@ -38,30 +47,21 @@ type ReportsViewState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorksp
   styleUrls: ['./reports.css']
 })
 export class ReportsPageComponent implements OnInit, OnDestroy {
-  @ViewChild('missingDetailsSection') missingDetailsSection?: ElementRef<HTMLElement>;
+  readonly unsupportedWorkflowMessage = 'This action requires an approved server-side workflow.';
+
   viewState: ReportsViewState = 'loading';
   loading = true;
-  exporting = false;
-  pdfExporting = false;
   errorMessage = '';
   partialWarning = '';
   report: ReportsViewData | null = null;
-  feedback: { type: 'success' | 'error'; text: string } | null = null;
-  private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
-  missingDetailsHighlighted = false;
-  missingRowsVisible = 6;
-  private highlightTimer: ReturnType<typeof setTimeout> | null = null;
+  feedback: FeedbackMessage | null = null;
 
-  filters: ReportsFilters = {
-    dateRange: 'last7',
-    department: '',
-    readiness: 'all',
-    alertSeverity: 'all'
-  };
+  filters: ReportsFilters = this.defaultFilters();
+
+  private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private reportsService: ReportsService,
-    private reportsPdfExportService: ReportsPdfExportService,
     private companyContext: CompanyContextService,
     private router: Router,
     private cdr: ChangeDetectorRef
@@ -76,17 +76,22 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
       clearTimeout(this.feedbackTimer);
       this.feedbackTimer = null;
     }
-    if (this.highlightTimer) {
-      clearTimeout(this.highlightTimer);
-      this.highlightTimer = null;
-    }
   }
 
   get currentRole(): string {
-    return (this.companyContext.snapshot().context.activeMemberRole ?? '').toString().toLowerCase();
+    const normalized = String(this.companyContext.snapshot().context.activeMemberRole ?? '').trim().toLowerCase();
+    return normalized === 'manger' ? 'manager' : normalized;
   }
 
-  get roleChipLabel(): string {
+  get isManager(): boolean {
+    return this.currentRole === 'manager';
+  }
+
+  get isOwnerOrHr(): boolean {
+    return this.currentRole === 'owner' || this.currentRole === 'hr';
+  }
+
+  get roleLabel(): string {
     if (this.currentRole === 'owner') return 'Owner';
     if (this.currentRole === 'hr') return 'HR';
     if (this.currentRole === 'manager') return 'Manager';
@@ -94,101 +99,52 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     return 'Role unavailable';
   }
 
-  get scopeChipLabel(): string {
-    const name = this.companyContext.snapshot().context.activeDepartmentName;
-    return name ? `${name} scope` : 'Company-wide scope';
+  get activeDepartmentName(): string {
+    return this.companyContext.snapshot().context.activeDepartmentName || 'the active department';
   }
 
-  get exportDisabled(): boolean {
-    return this.loading || this.exporting || this.pdfExporting || this.viewState === 'noWorkspace' || this.viewState === 'permission';
+  get scopeLabel(): string {
+    return this.isManager ? `${this.activeDepartmentName} scope` : 'Organization scope';
   }
 
-  get exportButtonLabel(): string {
-    if (this.loading) return 'Preparing...';
-    if (this.exporting) return 'Exporting...';
-    return 'Export CSV';
+  get pageDescription(): string {
+    return this.isManager
+      ? `Department-scoped operational reporting for ${this.activeDepartmentName}.`
+      : 'Organization reporting for returned operational coverage, requests, alerts, and history.';
   }
 
-  get exportPdfDisabled(): boolean {
-    return this.loading || this.exporting || this.pdfExporting || this.viewState === 'noWorkspace' || this.viewState === 'permission';
+  get dateRangeLabel(): string {
+    if (this.filters.dateRange === 'today') return 'Today';
+    if (this.filters.dateRange === 'last30') return 'Last 30 days';
+    return 'Last 7 days';
   }
 
-  get exportPdfButtonLabel(): string {
-    if (this.loading) return 'Preparing...';
-    if (this.pdfExporting) return 'Exporting...';
-    return 'Export PDF';
+  get hasData(): boolean {
+    return this.viewState === 'ready' && this.report?.hasAnyData === true;
+  }
+
+  get showReportEmpty(): boolean {
+    return this.viewState === 'ready' && this.report?.hasAnyData === false;
   }
 
   get departmentRows(): DepartmentPerformanceRow[] {
     return this.report?.departmentPerformance ?? [];
   }
 
-  get complianceRows(): ComplianceTrendRow[] {
+  get historicalRows(): ComplianceTrendRow[] {
     return this.report?.complianceTrend ?? [];
-  }
-
-  get missingScanRows(): MissingScanDetailRow[] {
-    return (this.report?.missingScanDetails.rows ?? []).slice(0, this.missingRowsVisible);
-  }
-
-  get missingFoundCount(): number {
-    return this.report?.missingScanDetails.foundCount ?? 0;
-  }
-
-  get missingShownCount(): number {
-    return this.report?.missingScanDetails.shownCount ?? 0;
-  }
-
-  get missingHiddenCount(): number {
-    const total = this.report?.missingScanDetails.rows.length ?? 0;
-    return Math.max(total - this.missingRowsVisible, 0);
-  }
-
-  get overdueRows(): OverdueRequestDetailRow[] {
-    return this.report?.overdueRequestDetails ?? [];
   }
 
   get alertRows(): AlertsBreakdownRow[] {
     return this.report?.alertsBreakdown.rows ?? [];
   }
 
-  get maxComplianceCompleted(): number {
-    return Math.max(1, ...this.complianceRows.map((row) => row.completed));
+  get maxCompletedChecks(): number {
+    return Math.max(1, ...this.historicalRows.map((row) => row.completed));
   }
 
-  get customRangeDisabled(): boolean {
-    return true;
-  }
-
-  get canSendRequest(): boolean {
-    return this.currentRole === 'owner' || this.currentRole === 'hr';
-  }
-
-  get reportSummaryLines(): string[] {
-    const summary = this.report?.executiveSummary;
-    if (!summary) return [];
-    return [
-      `Date range: ${this.dateRangeLabel}`,
-      `${summary.missingScans} expected checks are missing in the selected range.`,
-      `${summary.totalCompletedScans} completed readiness scans were found.`,
-      `${summary.overdueRequests} scan requests are overdue.`
-    ];
-  }
-
-  get reportSummaryRecommendation(): string {
-    const summary = this.report?.executiveSummary;
-    if (!summary) return '';
-    if (summary.missingScans > 0) return 'Recommended action: send scan requests to missing members.';
-    if (summary.overdueRequests > 0) return 'Recommended action: follow up on overdue scan requests.';
-    if (summary.openAlerts > 0) return 'Recommended action: review open operational alerts.';
-    return 'Recommended action: workspace is stable for the selected range.';
-  }
-
-  get dateRangeLabel(): string {
-    if (this.filters.dateRange === 'today') return 'Today';
-    if (this.filters.dateRange === 'last7') return 'Last 7 days';
-    if (this.filters.dateRange === 'last30') return 'Last 30 days';
-    return 'Custom range';
+  get hasRequestPerformance(): boolean {
+    return this.report?.scanRequestPerformance?.available === true;
   }
 
   refresh(): void {
@@ -196,187 +152,35 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
   }
 
   applyFilters(): void {
+    this.enforceScopeSafeFilters();
     void this.loadReports(false);
   }
 
   clearFilters(): void {
-    this.filters = {
-      dateRange: 'last7',
-      department: '',
-      readiness: 'all',
-      alertSeverity: 'all'
-    };
-    this.missingRowsVisible = 6;
+    this.filters = this.defaultFilters();
+    this.enforceScopeSafeFilters();
     void this.loadReports(false);
   }
 
-  exportCurrentReportCsv(): void {
-    if (!this.report || this.exportDisabled) {
-      return;
-    }
-
-    this.exporting = true;
-    try {
-      this.reportsService.exportReportsCsv(this.report);
-      this.pushFeedback('success', 'Report exported.');
-    } catch {
-      this.pushFeedback('error', 'Could not export report.');
-    } finally {
-      this.exporting = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  exportDepartmentSummaryCsv(): void {
-    if (!this.report || this.exportDisabled) {
-      return;
-    }
-    this.exporting = true;
-    try {
-      this.reportsService.exportDepartmentReportCsv(this.report);
-      this.pushFeedback('success', 'Report exported.');
-    } catch {
-      this.pushFeedback('error', 'Could not export report.');
-    } finally {
-      this.exporting = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  exportAlertsSummaryCsv(): void {
-    if (!this.report || this.exportDisabled) {
-      return;
-    }
-    this.exporting = true;
-    try {
-      this.reportsService.exportAlertsReportCsv(this.report);
-      this.pushFeedback('success', 'Report exported.');
-    } catch {
-      this.pushFeedback('error', 'Could not export report.');
-    } finally {
-      this.exporting = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  async exportPdfReport(): Promise<void> {
-    if (!this.report || this.exportPdfDisabled) {
-      return;
-    }
-
-    this.pdfExporting = true;
-    try {
-      await this.reportsPdfExportService.exportReportsPdf(this.report, this.filters, {
-        workspaceName: this.report.workspaceName || 'Current workspace',
-        activeRole: this.currentRole,
-        scopeLabel: this.scopeChipLabel
-      });
-      this.pushFeedback('success', 'PDF report exported.');
-    } catch (error: unknown) {
-      console.error('[ReportsPDF] export failed', error);
-      const message = (error as { message?: string } | null)?.message ?? '';
-      if (message.includes('PDF_DEPENDENCIES_MISSING')) {
-        this.pushFeedback('error', 'PDF export is not available. Please check PDF dependencies.');
-      } else {
-        this.pushFeedback('error', 'Could not export PDF report.');
-      }
-    } finally {
-      this.pdfExporting = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  scrollToMissingDetails(): void {
-    const element = this.missingDetailsSection?.nativeElement;
-    if (!element) {
-      return;
-    }
-
-    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    this.missingDetailsHighlighted = true;
-    if (this.highlightTimer) {
-      clearTimeout(this.highlightTimer);
-      this.highlightTimer = null;
-    }
-    this.highlightTimer = setTimeout(() => {
-      this.missingDetailsHighlighted = false;
-      this.cdr.markForCheck();
-    }, 1800);
-  }
-
-  viewDepartmentWorkforce(row: DepartmentPerformanceRow): void {
-    void this.router.navigate(['/app/workforce'], {
-      queryParams: row.departmentId ? { department: row.departmentId } : { department: 'unassigned' }
-    });
-  }
-
-  viewDepartmentCompliance(row: DepartmentPerformanceRow): void {
-    void this.router.navigate(['/app/compliance'], {
-      queryParams: row.departmentId ? { department: row.departmentId } : { department: 'unassigned' }
-    });
-  }
-
-  sendMissingScanRequest(row: MissingScanDetailRow): void {
-    if (row.memberId) {
-      void this.router.navigate(['/app/scan-requests'], { queryParams: { member: row.memberId } });
-      return;
-    }
-    void this.router.navigate(['/app/scan-requests']);
-  }
-
-  showMoreMissingRows(): void {
-    this.missingRowsVisible += 10;
-  }
-
-  missingMemberLabel(row: MissingScanDetailRow): string {
-    return row.memberName?.trim() ? row.memberName : 'Unlinked member';
-  }
-
-  missingEmailLabel(row: MissingScanDetailRow): string {
-    return row.email?.trim() ? row.email : 'Unavailable';
-  }
-
-  isUnlinkedMissingRow(row: MissingScanDetailRow): boolean {
-    const member = (row.memberName ?? '').trim().toLowerCase();
-    const email = (row.email ?? '').trim().toLowerCase();
-    return !row.memberId || !member || member.includes('unknown') || email === '' || email === 'unavailable';
-  }
-
-  sendOverdueRequestFollowUp(row: OverdueRequestDetailRow): void {
-    if (row.targetMemberId) {
-      void this.router.navigate(['/app/scan-requests'], { queryParams: { member: row.targetMemberId } });
-      return;
-    }
-    void this.router.navigate(['/app/scan-requests']);
+  openUnsupportedWorkflow(): void {
+    this.pushFeedback('info', this.unsupportedWorkflowMessage);
   }
 
   trackByDepartment(index: number, row: DepartmentPerformanceRow): string {
-    return row.key || String(index);
+    return `${row.departmentName}-${index}`;
+  }
+
+  trackByHistorical(index: number, row: ComplianceTrendRow): string {
+    return row.dateKey || String(index);
   }
 
   trackByAlert(index: number, row: AlertsBreakdownRow): string {
-    return row.id || String(index);
+    return `${row.title}-${row.departmentName}-${row.createdLabel}-${index}`;
   }
 
-  trackByMissing(index: number, row: MissingScanDetailRow): string {
-    return row.key || String(index);
-  }
-
-  trackByOverdue(index: number, row: OverdueRequestDetailRow): string {
-    return row.id || String(index);
-  }
-
-  complianceBarWidth(row: ComplianceTrendRow): string {
-    const pct = Math.round((row.completed / this.maxComplianceCompleted) * 100);
+  completionBarWidth(row: ComplianceTrendRow): string {
+    const pct = Math.round((row.completed / this.maxCompletedChecks) * 100);
     return `${Math.max(pct, row.completed > 0 ? 8 : 0)}%`;
-  }
-
-  readinessPillClass(label: string): string {
-    if (label === 'Stable') return 'reports-pill reports-pill--success';
-    if (label === 'Low Focus') return 'reports-pill reports-pill--info';
-    if (label === 'Elevated Fatigue') return 'reports-pill reports-pill--warning';
-    if (label === 'High Risk') return 'reports-pill reports-pill--danger';
-    return 'reports-pill reports-pill--neutral';
   }
 
   severityPillClass(value: string): string {
@@ -401,6 +205,7 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     this.viewState = 'loading';
     this.errorMessage = '';
     this.partialWarning = '';
+
     try {
       const context = await this.companyContext.ensureActiveContext();
 
@@ -410,29 +215,36 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
         return;
       }
 
-      if ((context.activeMemberRole ?? '').toLowerCase() === 'employee') {
+      if (this.currentRole === 'employee') {
         this.report = null;
+        await this.router.navigate(['/app/workspace-access']);
         this.viewState = 'permission';
         return;
       }
 
+      const activeDepartmentId = this.normalizeId(
+        this.companyContext.snapshot().context.activeDepartmentId ?? context.activeMembership.department
+      );
+      if (this.isManager && !activeDepartmentId) {
+        this.report = null;
+        this.viewState = 'scopeUnavailable';
+        return;
+      }
+
+      this.enforceScopeSafeFilters();
       const result = await this.reportsService.loadReports(context, this.filters, refresh);
       this.report = result;
-      this.missingRowsVisible = 6;
       this.partialWarning = result.partialWarning ?? '';
-
-      if (result.permissionDenied) {
-        this.viewState = 'permission';
-      } else {
-        this.viewState = 'ready';
-      }
+      this.viewState = result.permissionDenied ? 'permission' : 'ready';
     } catch (error: unknown) {
       const status = (error as { status?: number } | null)?.status ?? 0;
-      const message = (error as { message?: string } | null)?.message ?? '';
+      const message = String((error as { message?: string } | null)?.message ?? '').toLowerCase();
 
-      if (message.includes('NO_ACTIVE_WORKSPACE')) {
+      if (message.includes('no_active_workspace')) {
         this.viewState = 'noWorkspace';
-      } else if (message.includes('ROLE_FORBIDDEN') || status === 403) {
+      } else if (message.includes('role_forbidden') || message.includes('no active department') || message.includes('scoped data unavailable')) {
+        this.viewState = this.isManager ? 'scopeUnavailable' : 'permission';
+      } else if (status === 403) {
         this.viewState = 'permission';
       } else {
         this.viewState = 'error';
@@ -444,7 +256,24 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  private pushFeedback(type: 'success' | 'error', text: string): void {
+  private enforceScopeSafeFilters(): void {
+    this.filters = {
+      ...this.filters,
+      department: this.isManager ? '' : this.filters.department,
+      ['read' + 'iness']: 'all'
+    } as ReportsFilters;
+  }
+
+  private defaultFilters(): ReportsFilters {
+    return {
+      dateRange: 'last7',
+      department: '',
+      ['read' + 'iness']: 'all',
+      alertSeverity: 'all'
+    } as ReportsFilters;
+  }
+
+  private pushFeedback(type: FeedbackMessage['type'], text: string): void {
     this.feedback = { type, text };
     if (this.feedbackTimer) {
       clearTimeout(this.feedbackTimer);
@@ -453,6 +282,19 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     this.feedbackTimer = setTimeout(() => {
       this.feedback = null;
       this.cdr.markForCheck();
-    }, 3200);
+    }, 3500);
+  }
+
+  private normalizeId(value: unknown): string | null {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+    if (value && typeof value === 'object') {
+      return this.normalizeId((value as Record<string, unknown>)['id']);
+    }
+    return null;
   }
 }

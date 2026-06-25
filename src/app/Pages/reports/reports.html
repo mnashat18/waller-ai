@@ -1,45 +1,29 @@
-<div class="reports-page space-y-6">
-  <section class="app-dashboard-panel reports-hero animate-dashboard-rise">
-    <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-      <div>
-        <p class="dashboard-eyebrow">INTELLIGENCE</p>
-        <h1 class="reports-title">Reports</h1>
-        <p class="reports-subtitle">
-          Analyze readiness trends, compliance performance, and operational attention across your workspace.
-        </p>
-      </div>
+<div class="reports-page app-page-shell">
+  <app-page-header
+    title="Reports"
+    [description]="pageDescription"
+    [breadcrumbs]="[
+      { label: 'Dashboard', url: '/app/dashboard' },
+      { label: 'Reports' }
+    ]">
+    <button
+      pageActions
+      type="button"
+      class="dashboard-action-button"
+      [disabled]="loading"
+      (click)="refresh()">
+      {{ loading ? 'Refreshing...' : 'Refresh' }}
+    </button>
+  </app-page-header>
 
-      <div class="reports-hero-actions">
-        <div class="flex flex-wrap items-center justify-end gap-2">
-          <select [(ngModel)]="filters.dateRange" name="reportsHeaderDateRange" class="reports-input reports-input--sm">
-            <option value="today">Today</option>
-            <option value="last7">Last 7 days</option>
-            <option value="last30">Last 30 days</option>
-            <option value="custom" [disabled]="customRangeDisabled">Custom range (soon)</option>
-          </select>
-
-          <button type="button" class="dashboard-action-button" [disabled]="loading" (click)="refresh()">Refresh</button>
-          <button type="button" class="dashboard-action-button dashboard-action-button--primary" [disabled]="exportDisabled" (click)="exportCurrentReportCsv()">
-            {{ exportButtonLabel }}
-          </button>
-          <button type="button" class="dashboard-action-button" [disabled]="exportPdfDisabled" (click)="exportPdfReport()">
-            {{ exportPdfButtonLabel }}
-          </button>
-        </div>
-
-        <div class="reports-chips">
-          <span class="dashboard-filter-chip">{{ scopeChipLabel }}</span>
-          <span class="dashboard-filter-chip">{{ roleChipLabel }}</span>
-          <span class="dashboard-filter-chip">{{ report?.workspaceName || 'Current workspace' }}</span>
-        </div>
-      </div>
-    </div>
+  <section class="reports-scope-strip app-dashboard-panel app-dashboard-panel--compact">
+    <span class="dashboard-filter-chip">{{ scopeLabel }}</span>
+    <span class="dashboard-filter-chip">{{ roleLabel }}</span>
+    <span class="dashboard-filter-chip">{{ report?.workspaceName || 'Current organization' }}</span>
   </section>
 
   @if (partialWarning) {
-    <section class="reports-warning-card">
-      {{ partialWarning }}
-    </section>
+    <section class="reports-warning-card">{{ partialWarning }}</section>
   }
 
   @if (feedback) {
@@ -49,466 +33,270 @@
   }
 
   @if (viewState === 'loading') {
-    <app-card-skeleton-loader [count]="7"></app-card-skeleton-loader>
-    <app-table-skeleton-loader [rows]="6" [columns]="8"></app-table-skeleton-loader>
+    <app-card-skeleton-loader [count]="4"></app-card-skeleton-loader>
+    <app-table-skeleton-loader [rows]="6" [columns]="6"></app-table-skeleton-loader>
+  } @else if (viewState === 'scopeUnavailable') {
+    <section class="reports-state-card reports-state-card--warning">
+      <p class="reports-state-card__title">No active department context</p>
+      <p>This manager account needs an assigned active department before Reports can be shown.</p>
+      <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="refresh()">Retry</button>
+    </section>
   } @else if (viewState === 'noWorkspace') {
-    <section class="reports-empty-card app-dashboard-panel">
-      <p class="reports-empty-title">No active workspace selected.</p>
-      <p class="reports-empty-body">Select or create a workspace before viewing reports.</p>
+    <section class="reports-state-card">
+      <p class="reports-state-card__title">No active organization selected</p>
+      <p>Select an active workspace before opening Reports.</p>
     </section>
   } @else if (viewState === 'permission') {
-    <section class="reports-error-card app-dashboard-panel">
-      <p class="reports-error-title">Reports data could not be loaded.</p>
-      <p class="reports-error-body">Your workspace permissions do not allow this data view.</p>
+    <section class="reports-state-card reports-state-card--warning">
+      <p class="reports-state-card__title">Scoped data unavailable</p>
+      <p>Your current workspace role does not allow the authenticated Reports page.</p>
     </section>
   } @else if (viewState === 'error') {
-    <section class="reports-error-card app-dashboard-panel">
-      <p class="reports-error-title">Reports data could not be loaded.</p>
-      <p class="reports-error-body">{{ errorMessage || 'Please refresh and try again.' }}</p>
-      <div class="mt-4">
-        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="refresh()">Retry</button>
-      </div>
-    </section>
+    <app-error-state
+      title="Reports data could not be loaded"
+      [message]="errorMessage || 'Please refresh and try again.'"
+      (retry)="refresh()">
+    </app-error-state>
   } @else {
-    <section class="app-dashboard-panel reports-filter-panel">
-      <div class="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p class="dashboard-section-title text-lg">Filters</p>
-          <p class="mt-1 text-sm text-slate-300">Refine analytics by date range, department, readiness outcome, and alert severity.</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" class="dashboard-action-button" (click)="clearFilters()">Clear</button>
-          <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="applyFilters()">Apply</button>
-        </div>
-      </div>
+    @if (showReportEmpty) {
+      <section class="reports-state-card">
+        <p class="reports-state-card__title">Report empty</p>
+        <p>{{ isManager ? 'No department reporting activity was returned for the active scope.' : 'No organization reporting activity was returned for the authorized scope.' }}</p>
+      </section>
+    } @else {
+      <app-filter-bar-shell>
+        <select [(ngModel)]="filters.dateRange" name="reportsDateRange" class="app-form-control" aria-label="Date range">
+          <option value="today">Today</option>
+          <option value="last7">Last 7 days</option>
+          <option value="last30">Last 30 days</option>
+        </select>
 
-      <div class="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-        <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-          Date Range
-          <select [(ngModel)]="filters.dateRange" name="reportsDateRange" class="reports-input">
-            <option value="today">Today</option>
-            <option value="last7">Last 7 days</option>
-            <option value="last30">Last 30 days</option>
-            <option value="custom" [disabled]="customRangeDisabled">Custom range (soon)</option>
-          </select>
-        </label>
-
-        <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-          Department
-          <select [(ngModel)]="filters.department" name="reportsDepartment" class="reports-input">
+        @if (isOwnerOrHr && (report?.departmentOptions?.length ?? 0) > 0) {
+          <select [(ngModel)]="filters.department" name="reportsDepartment" class="app-form-control" aria-label="Department">
             <option value="">All departments</option>
             <option value="unassigned">Unassigned</option>
             @for (department of report?.departmentOptions ?? []; track department.id) {
               <option [value]="department.id">{{ department.name }}</option>
             }
           </select>
-        </label>
-
-        <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-          Readiness
-          <select [(ngModel)]="filters.readiness" name="reportsReadiness" class="reports-input">
-            <option value="all">All</option>
-            <option value="Stable">Stable</option>
-            <option value="Low Focus">Low Focus</option>
-            <option value="Elevated Fatigue">Elevated Fatigue</option>
-            <option value="High Risk">High Risk</option>
-            <option value="No scan">No scan</option>
-          </select>
-        </label>
-
-        <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-          Alert Severity
-          <select [(ngModel)]="filters.alertSeverity" name="reportsAlertSeverity" class="reports-input">
-            <option value="all">All</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
-          </select>
-        </label>
-      </div>
-    </section>
-
-    @if (!report?.hasAnyData) {
-      <section class="reports-empty-card app-dashboard-panel">
-        <p class="reports-empty-title">No reporting activity yet.</p>
-        <p class="reports-empty-body">Send scan requests or wait for members to complete readiness checks.</p>
-      </section>
-    }
-
-    <section class="reports-summary-grid">
-      <app-kpi-card label="Average Compliance Rate" [value]="(report?.executiveSummary?.averageComplianceRate ?? 0) + '%'" helper="Completed checks across the selected range." [tone]="(report?.executiveSummary?.averageComplianceRate ?? 0) < 80 ? 'warning' : 'success'" toneLabel="Rate"></app-kpi-card>
-      <app-kpi-card label="Total Completed Scans" [value]="(report?.executiveSummary?.totalCompletedScans ?? 0).toString()" helper="Readiness checks completed in this period." tone="success" toneLabel="Completed"></app-kpi-card>
-      <button type="button" class="reports-kpi-button" (click)="scrollToMissingDetails()">
-        <app-kpi-card
-          label="Missing Scans"
-          [value]="(report?.executiveSummary?.missingScans ?? 0).toString()"
-          helper="Expected checks still missing."
-          [tone]="(report?.executiveSummary?.missingScans ?? 0) > 0 ? 'warning' : 'success'"
-          toneLabel="Missing">
-        </app-kpi-card>
-      </button>
-      <app-kpi-card label="Stable Outcomes" [value]="(report?.executiveSummary?.stableOutcomes ?? 0).toString()" helper="Stable readiness outcomes." tone="success" toneLabel="Stable"></app-kpi-card>
-      <app-kpi-card label="Attention Outcomes" [value]="(report?.executiveSummary?.attentionOutcomes ?? 0).toString()" helper="Attention outcomes from readiness scans." [tone]="(report?.executiveSummary?.attentionOutcomes ?? 0) > 0 ? 'danger' : 'neutral'" toneLabel="Attention"></app-kpi-card>
-      <app-kpi-card label="Open Alerts" [value]="(report?.executiveSummary?.openAlerts ?? 0).toString()" helper="Alerts still waiting for review." [tone]="(report?.executiveSummary?.openAlerts ?? 0) > 0 ? 'danger' : 'neutral'" toneLabel="Open"></app-kpi-card>
-      <app-kpi-card label="Overdue Requests" [value]="(report?.executiveSummary?.overdueRequests ?? 0).toString()" helper="Requests past due time." [tone]="(report?.executiveSummary?.overdueRequests ?? 0) > 0 ? 'warning' : 'neutral'" toneLabel="Overdue"></app-kpi-card>
-    </section>
-
-    <section class="app-dashboard-panel reports-summary-box">
-      <p class="dashboard-section-title text-lg">Report Summary</p>
-      <ul class="reports-summary-list mt-3">
-        @for (line of reportSummaryLines; track line) {
-          <li>{{ line }}</li>
         }
-      </ul>
-      <p class="mt-3 text-sm text-slate-300">{{ reportSummaryRecommendation }}</p>
-    </section>
 
-    <section class="grid gap-4 xl:grid-cols-2">
-      <article class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Readiness Trends</p>
-          <p class="mt-1 text-sm text-slate-300">Readiness outcome distribution for the selected range.</p>
+        <select [(ngModel)]="filters.alertSeverity" name="reportsAlertSeverity" class="app-form-control" aria-label="Alert severity">
+          <option value="all">All alert severities</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
+        </select>
+
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="applyFilters()">Apply</button>
+        <button type="button" class="dashboard-action-button" (click)="clearFilters()">Clear</button>
+        <button type="button" class="dashboard-action-button" (click)="openUnsupportedWorkflow()">Export</button>
+      </app-filter-bar-shell>
+
+      <app-dashboard-section
+        eyebrow="Overview"
+        title="Operational Summary"
+        [description]="isManager ? 'Department-scoped returned aggregates for the selected range.' : 'Organization returned aggregates for the selected range.'">
+        <div class="reports-summary-grid">
+          <app-kpi-card
+            label="Coverage"
+            [value]="(report?.executiveSummary?.averageComplianceRate ?? 0) + '%'"
+            helper="Completed expected checks divided by expected checks in returned data."
+            [tone]="(report?.executiveSummary?.averageComplianceRate ?? 0) < 80 ? 'warning' : 'success'"
+            toneLabel="Coverage"></app-kpi-card>
+
+          <app-kpi-card
+            label="Completed"
+            [value]="(report?.executiveSummary?.totalCompletedScans ?? 0).toString()"
+            helper="Returned completed checks in the selected range."
+            tone="success"
+            toneLabel="Completed"></app-kpi-card>
+
+          <app-kpi-card
+            label="Missing"
+            [value]="(report?.executiveSummary?.missingScans ?? 0).toString()"
+            helper="Expected checks without returned completion."
+            [tone]="(report?.executiveSummary?.missingScans ?? 0) > 0 ? 'warning' : 'success'"
+            toneLabel="Missing"></app-kpi-card>
+
+          <app-kpi-card
+            label="Open Alerts"
+            [value]="(report?.executiveSummary?.openAlerts ?? 0).toString()"
+            helper="Returned operational alerts still open."
+            [tone]="(report?.executiveSummary?.openAlerts ?? 0) > 0 ? 'danger' : 'neutral'"
+            toneLabel="Open"></app-kpi-card>
+
+          <app-kpi-card
+            label="Overdue"
+            [value]="(report?.executiveSummary?.overdueRequests ?? 0).toString()"
+            helper="Returned requests past due."
+            [tone]="(report?.executiveSummary?.overdueRequests ?? 0) > 0 ? 'warning' : 'neutral'"
+            toneLabel="Overdue"></app-kpi-card>
         </div>
+      </app-dashboard-section>
 
-        @if (!(report?.readinessTrends?.hasData)) {
+      <app-dashboard-section
+        eyebrow="Coverage"
+        title="Coverage History"
+        [description]="'Daily completed and missing counts for ' + dateRangeLabel + '.'">
+        @if (!historicalRows.length) {
           <div class="reports-inline-empty">
-            <p class="font-semibold text-slate-50">No completed readiness scans found for this date range.</p>
-            <p class="text-sm text-slate-300">Once employees complete mobile scans, readiness distribution will appear here.</p>
+            <p>Historical summary empty</p>
+            <span>No daily coverage rows were returned for the selected filters.</span>
           </div>
         } @else {
-          <div class="space-y-3">
-            @for (item of report?.readinessTrends?.distribution ?? []; track item.key) {
-              <div class="reports-distribution-row">
-                <div class="flex items-center justify-between gap-2 text-sm">
-                  <span class="font-semibold text-slate-100">{{ item.label }}</span>
-                  <span class="text-slate-300">{{ item.count }} ({{ item.percent }}%)</span>
+          <div class="reports-history-list">
+            @for (row of historicalRows; track trackByHistorical($index, row)) {
+              <div class="reports-history-row">
+                <div>
+                  <p>{{ row.dateLabel }}</p>
+                  <span>{{ row.completed }} completed / {{ row.missing }} missing / {{ row.activeMembers }} active</span>
                 </div>
-                <div class="reports-distribution-track">
-                  <div class="reports-distribution-fill" [style.width.%]="item.percent"></div>
+                <strong>{{ row.complianceRate }}%</strong>
+                <div class="reports-history-track">
+                  <span [style.width]="completionBarWidth(row)"></span>
                 </div>
               </div>
             }
           </div>
-
-          <div class="mt-5">
-            <p class="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Daily trend</p>
-            <div class="reports-mini-table">
-              @for (day of report?.readinessTrends?.daily ?? []; track day.dateKey) {
-                <div class="reports-mini-table-row">
-                  <span class="reports-mini-label">{{ day.dateLabel }}</span>
-                  <span class="reports-mini-value">{{ day.total }}</span>
-                </div>
-              }
-            </div>
-          </div>
         }
-      </article>
+      </app-dashboard-section>
 
-      <article class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Daily Compliance</p>
-          <p class="mt-1 text-sm text-slate-300">Completed versus missing checks by day.</p>
-        </div>
-
-        @if (!(report?.complianceTrend?.length)) {
-          <div class="reports-inline-empty">
-            <p class="font-semibold text-slate-50">No compliance data found for this range.</p>
-            <p class="text-sm text-slate-300">Expand date range or refresh later.</p>
-          </div>
-        } @else {
-          <div class="space-y-2">
-            @for (row of complianceRows; track row.dateKey) {
-              <div class="reports-compliance-bar-row">
-                <div class="flex items-center justify-between gap-3 text-sm">
-                  <span class="font-medium text-slate-100">{{ row.dateLabel }}</span>
-                  <span class="text-slate-300">{{ row.completed }}/{{ row.activeMembers }} ({{ row.complianceRate }}%)</span>
-                </div>
-                <div class="reports-distribution-track">
-                  <div class="reports-compliance-fill" [style.width]="complianceBarWidth(row)"></div>
-                </div>
-              </div>
-            }
-          </div>
-
-        }
-      </article>
-    </section>
-
-    <section #missingDetailsSection class="app-dashboard-panel" [class.reports-section-highlight]="missingDetailsHighlighted">
-      <div class="mb-4">
-        <p class="dashboard-section-title text-lg">Missing Scan Details</p>
-        <p class="mt-1 text-sm text-slate-300">Members or expected checks without a completed scan in the selected range. This is a detail section for operational follow-up.</p>
-      </div>
-
-      @if (missingFoundCount !== missingShownCount) {
-        <div class="mb-4 reports-warning-inline">
-          {{ missingFoundCount }} missing scans found, {{ missingShownCount }} shown with current filters.
-        </div>
-      }
-
-      @if (!missingFoundCount) {
-        <div class="reports-inline-empty">
-          <p class="font-semibold text-slate-50">No missing checks in this range.</p>
-          <p class="text-sm text-slate-300">All expected checks were completed for the selected filters.</p>
-        </div>
-      } @else if (!missingShownCount) {
-        <div class="reports-inline-empty">
-          <p class="font-semibold text-slate-50">No missing checks match current filters.</p>
-          <p class="text-sm text-slate-300">Adjust readiness filter to include No scan.</p>
-        </div>
-      } @else {
-        <app-table-shell>
-          <table class="reports-table reports-table--details w-full text-left">
-            <thead class="bg-slate-950/80 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-              <tr>
-                <th class="px-5 py-3">Date</th>
-                <th class="px-5 py-3">Member</th>
-                <th class="px-5 py-3">Email</th>
-                <th class="px-5 py-3">Department</th>
-                <th class="px-5 py-3">Expected Check</th>
-                <th class="px-5 py-3">Scan Status</th>
-                <th class="px-5 py-3">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of missingScanRows; track trackByMissing($index, row)) {
-                <tr class="reports-table-row border-t border-slate-800/70 text-sm text-slate-300">
-                  <td class="px-5 py-4 font-medium text-slate-50">{{ row.dateLabel }}</td>
-                  <td class="px-5 py-4">
-                    <div class="flex items-center gap-2">
-                      <span>{{ missingMemberLabel(row) }}</span>
-                      @if (isUnlinkedMissingRow(row)) {
-                        <span class="reports-pill reports-pill--neutral">Profile issue</span>
-                      }
-                    </div>
-                  </td>
-                  <td class="px-5 py-4">{{ missingEmailLabel(row) }}</td>
-                  <td class="px-5 py-4">{{ row.departmentName }}</td>
-                  <td class="px-5 py-4">{{ row.expectedCheck }}</td>
-                  <td class="px-5 py-4"><span class="reports-pill reports-pill--warning">{{ row.scanStatus }}</span></td>
-                  <td class="px-5 py-4">
-                    <button type="button" class="reports-row-action reports-row-action--primary" [disabled]="!canSendRequest" (click)="sendMissingScanRequest(row)">
-                      Send request
-                    </button>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </app-table-shell>
-        @if (missingHiddenCount > 0) {
-          <div class="mt-4 flex justify-center">
-            <button type="button" class="dashboard-action-button" (click)="showMoreMissingRows()">
-              Show more ({{ missingHiddenCount }} remaining)
-            </button>
-          </div>
-        }
-      }
-    </section>
-
-    <section class="app-dashboard-panel">
-      <div class="mb-4">
-        <p class="dashboard-section-title text-lg">Department Performance</p>
-        <p class="mt-1 text-sm text-slate-300">Department-level compliance and attention outcomes.</p>
-      </div>
-
-      <app-table-shell>
-        <table class="reports-table reports-table--department w-full text-left">
-          <thead class="bg-slate-950/80 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-            <tr>
-              <th class="px-5 py-3">Department</th>
-              <th class="px-5 py-3">Active Members</th>
-              <th class="px-5 py-3">Completed Scans</th>
-              <th class="px-5 py-3">Missing Scans</th>
-              <th class="px-5 py-3">Compliance Rate</th>
-              <th class="px-5 py-3">Attention Outcomes</th>
-              <th class="px-5 py-3">Open Alerts</th>
-              <th class="px-5 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (row of departmentRows; track trackByDepartment($index, row)) {
-              <tr class="reports-table-row border-t border-slate-800/70 text-sm text-slate-300">
-                <td class="px-5 py-4 font-semibold text-slate-50">{{ row.departmentName }}</td>
-                <td class="px-5 py-4">{{ row.activeMembers }}</td>
-                <td class="px-5 py-4">{{ row.completedScans }}</td>
-                <td class="px-5 py-4">{{ row.missingScans }}</td>
-                <td class="px-5 py-4">{{ row.complianceRate }}%</td>
-                <td class="px-5 py-4">{{ row.attentionOutcomes }}</td>
-                <td class="px-5 py-4">{{ row.openAlerts }}</td>
-                <td class="px-5 py-4">
-                  <div class="reports-row-actions">
-                    <button type="button" class="reports-row-action" (click)="viewDepartmentWorkforce(row)">View workforce</button>
-                    <button type="button" class="reports-row-action reports-row-action--primary" (click)="viewDepartmentCompliance(row)">View compliance</button>
-                  </div>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </app-table-shell>
-    </section>
-
-    <section class="grid gap-4 xl:grid-cols-2">
-      <article class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Alerts Breakdown</p>
-          <p class="mt-1 text-sm text-slate-300">Status, severity, and department distribution.</p>
-        </div>
-
-        @if (!(report?.alertsBreakdown?.rows?.length)) {
-          <div class="reports-inline-empty">
-            <p class="font-semibold text-slate-50">No operational alerts found in this date range.</p>
-            <p class="text-sm text-slate-300">Refresh later or widen the selected range.</p>
-          </div>
-        } @else {
-          <div class="grid gap-2 sm:grid-cols-3">
-            <div class="reports-stat-group">
-              <p class="reports-stat-title">By Status</p>
-              @for (item of report?.alertsBreakdown?.byStatus ?? []; track item.label) {
-                <div class="reports-stat-row"><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
-              }
+      @if (isOwnerOrHr) {
+        <app-dashboard-section
+          eyebrow="Coverage"
+          title="Department Coverage"
+          description="Department comparison from returned authorized aggregates.">
+          @if (!departmentRows.length) {
+            <div class="reports-inline-empty">
+              <p>Department coverage empty</p>
+              <span>No department coverage rows were returned for the selected filters.</span>
             </div>
-            <div class="reports-stat-group">
-              <p class="reports-stat-title">By Severity</p>
-              @for (item of report?.alertsBreakdown?.bySeverity ?? []; track item.label) {
-                <div class="reports-stat-row"><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
-              }
-            </div>
-            <div class="reports-stat-group">
-              <p class="reports-stat-title">By Department</p>
-              @for (item of report?.alertsBreakdown?.byDepartment ?? []; track item.label) {
-                <div class="reports-stat-row"><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
-              }
-            </div>
-          </div>
-
-          <div class="mt-4">
+          } @else {
             <app-table-shell>
-              <table class="reports-table min-w-[62rem] w-full text-left">
-                <thead class="bg-slate-950/80 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              <table class="reports-table min-w-[64rem] w-full text-left">
+                <thead>
                   <tr>
-                    <th class="px-5 py-3">Alert Type / Title</th>
-                    <th class="px-5 py-3">Department</th>
-                    <th class="px-5 py-3">Severity</th>
-                    <th class="px-5 py-3">Status</th>
-                    <th class="px-5 py-3">Created</th>
-                    <th class="px-5 py-3">Reviewed At</th>
-                    <th class="px-5 py-3">Action Type</th>
+                    <th>Department</th>
+                    <th>Active Members</th>
+                    <th>Completed</th>
+                    <th>Missing</th>
+                    <th>Coverage</th>
+                    <th>Open Alerts</th>
                   </tr>
                 </thead>
                 <tbody>
-                  @for (row of alertRows; track trackByAlert($index, row)) {
-                    <tr class="reports-table-row border-t border-slate-800/70 text-sm text-slate-300">
-                      <td class="px-5 py-4 font-medium text-slate-50">{{ row.title }}</td>
-                      <td class="px-5 py-4">{{ row.departmentName }}</td>
-                      <td class="px-5 py-4"><span [class]="severityPillClass(row.severity)">{{ row.severity }}</span></td>
-                      <td class="px-5 py-4"><span [class]="statusPillClass(row.status)">{{ row.status }}</span></td>
-                      <td class="px-5 py-4">{{ row.createdLabel }}</td>
-                      <td class="px-5 py-4">{{ row.reviewedAtLabel }}</td>
-                      <td class="px-5 py-4">{{ row.actionTypeLabel }}</td>
+                  @for (row of departmentRows; track trackByDepartment($index, row)) {
+                    <tr class="reports-table-row">
+                      <td><p class="reports-primary-text">{{ row.departmentName }}</p></td>
+                      <td>{{ row.activeMembers }}</td>
+                      <td>{{ row.completedScans }}</td>
+                      <td>{{ row.missingScans }}</td>
+                      <td>{{ row.complianceRate }}%</td>
+                      <td>{{ row.openAlerts }}</td>
                     </tr>
                   }
                 </tbody>
               </table>
             </app-table-shell>
-          </div>
-        }
-      </article>
+          }
+        </app-dashboard-section>
+      }
 
-      <article class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Scan Request Performance</p>
-          <p class="mt-1 text-sm text-slate-300">Request volume, completion, pending, and overdue performance.</p>
-        </div>
+      <section class="reports-grid">
+        <app-dashboard-section
+          eyebrow="Requests"
+          title="Request Summary"
+          description="Returned request counts and completion status.">
+          @if (!hasRequestPerformance) {
+            <div class="reports-inline-empty">
+              <p>Request summary unavailable</p>
+              <span>No request summary rows were returned for this scope.</span>
+            </div>
+          } @else {
+            <div class="reports-stat-grid">
+              <div class="reports-stat-card"><span>Total Sent</span><strong>{{ report?.scanRequestPerformance?.totalRequestsSent ?? 0 }}</strong></div>
+              <div class="reports-stat-card"><span>Completed</span><strong>{{ report?.scanRequestPerformance?.completedRequests ?? 0 }}</strong></div>
+              <div class="reports-stat-card"><span>Pending</span><strong>{{ report?.scanRequestPerformance?.pendingRequests ?? 0 }}</strong></div>
+              <div class="reports-stat-card"><span>Overdue</span><strong>{{ report?.scanRequestPerformance?.overdueRequests ?? 0 }}</strong></div>
+              <div class="reports-stat-card"><span>Cancelled</span><strong>{{ report?.scanRequestPerformance?.cancelledRequests ?? 0 }}</strong></div>
+              <div class="reports-stat-card"><span>Completion Rate</span><strong>{{ report?.scanRequestPerformance?.completionRate ?? 0 }}%</strong></div>
+            </div>
 
-        @if (!(report?.scanRequestPerformance?.available)) {
+            @if ((report?.scanRequestPerformance?.requestTypeBreakdown?.length ?? 0) > 0) {
+              <div class="reports-stat-group">
+                <p class="reports-stat-title">Request types</p>
+                @for (item of report?.scanRequestPerformance?.requestTypeBreakdown ?? []; track item.label) {
+                  <div class="reports-stat-row"><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
+                }
+              </div>
+            }
+          }
+        </app-dashboard-section>
+
+        <app-dashboard-section
+          eyebrow="Alerts"
+          title="Alert Distribution"
+          description="Returned alert status and severity distribution.">
+          @if (!(report?.alertsBreakdown?.byStatus?.length || report?.alertsBreakdown?.bySeverity?.length)) {
+            <div class="reports-inline-empty">
+              <p>Alert distribution empty</p>
+              <span>No operational alerts were returned for the selected filters.</span>
+            </div>
+          } @else {
+            <div class="reports-stat-group">
+              <p class="reports-stat-title">By status</p>
+              @for (item of report?.alertsBreakdown?.byStatus ?? []; track item.label) {
+                <div class="reports-stat-row"><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
+              }
+            </div>
+            <div class="reports-stat-group">
+              <p class="reports-stat-title">By severity</p>
+              @for (item of report?.alertsBreakdown?.bySeverity ?? []; track item.label) {
+                <div class="reports-stat-row"><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
+              }
+            </div>
+          }
+        </app-dashboard-section>
+      </section>
+
+      <app-dashboard-section
+        eyebrow="Alerts"
+        title="Alert Rows"
+        description="Safe returned alert facts for reporting context.">
+        @if (!alertRows.length) {
           <div class="reports-inline-empty">
-            <p class="font-semibold text-slate-50">Request performance is unavailable.</p>
-            <p class="text-sm text-slate-300">This source may be restricted by workspace permissions.</p>
+            <p>Alert rows empty</p>
+            <span>No alert rows were returned for the selected filters.</span>
           </div>
         } @else {
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div class="reports-stat-card"><span>Total Requests Sent</span><strong>{{ report?.scanRequestPerformance?.totalRequestsSent ?? 0 }}</strong></div>
-            <div class="reports-stat-card"><span>Completed Requests</span><strong>{{ report?.scanRequestPerformance?.completedRequests ?? 0 }}</strong></div>
-            <div class="reports-stat-card"><span>Pending Requests</span><strong>{{ report?.scanRequestPerformance?.pendingRequests ?? 0 }}</strong></div>
-            <div class="reports-stat-card"><span>Overdue Requests</span><strong>{{ report?.scanRequestPerformance?.overdueRequests ?? 0 }}</strong></div>
-            <div class="reports-stat-card"><span>Cancelled Requests</span><strong>{{ report?.scanRequestPerformance?.cancelledRequests ?? 0 }}</strong></div>
-            <div class="reports-stat-card"><span>Completion Rate</span><strong>{{ report?.scanRequestPerformance?.completionRate ?? 0 }}%</strong></div>
-          </div>
-
-          <div class="mt-4 reports-stat-group">
-            <p class="reports-stat-title">Request type breakdown</p>
-            @for (item of report?.scanRequestPerformance?.requestTypeBreakdown ?? []; track item.label) {
-              <div class="reports-stat-row"><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
-            }
-          </div>
-        }
-      </article>
-    </section>
-
-    @if (overdueRows.length) {
-      <section class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Overdue Request Details</p>
-          <p class="mt-1 text-sm text-slate-300">Pending requests where due time has passed.</p>
-        </div>
-
-        <app-table-shell>
-          <table class="reports-table min-w-[72rem] w-full text-left">
-            <thead class="bg-slate-950/80 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-              <tr>
-                <th class="px-5 py-3">Requested At</th>
-                <th class="px-5 py-3">Due At</th>
-                <th class="px-5 py-3">Target</th>
-                <th class="px-5 py-3">Department</th>
-                <th class="px-5 py-3">Request Type</th>
-                <th class="px-5 py-3">Status</th>
-                <th class="px-5 py-3">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of overdueRows; track trackByOverdue($index, row)) {
-                <tr class="reports-table-row border-t border-slate-800/70 text-sm text-slate-300">
-                  <td class="px-5 py-4">{{ row.requestedAtLabel }}</td>
-                  <td class="px-5 py-4">{{ row.dueAtLabel }}</td>
-                  <td class="px-5 py-4 font-medium text-slate-50">{{ row.targetName }}</td>
-                  <td class="px-5 py-4">{{ row.departmentName }}</td>
-                  <td class="px-5 py-4">{{ row.requestTypeLabel }}</td>
-                  <td class="px-5 py-4"><span class="reports-pill reports-pill--danger">{{ row.statusLabel }}</span></td>
-                  <td class="px-5 py-4">
-                    <button type="button" class="reports-row-action reports-row-action--primary" [disabled]="!canSendRequest" (click)="sendOverdueRequestFollowUp(row)">
-                      Send request
-                    </button>
-                  </td>
+          <app-table-shell>
+            <table class="reports-table min-w-[62rem] w-full text-left">
+              <thead>
+                <tr>
+                  <th>Alert Title</th>
+                  <th>Department</th>
+                  <th>Severity</th>
+                  <th>Status</th>
+                  <th>Created</th>
                 </tr>
-              }
-            </tbody>
-          </table>
-        </app-table-shell>
-      </section>
+              </thead>
+              <tbody>
+                @for (row of alertRows; track trackByAlert($index, row)) {
+                  <tr class="reports-table-row">
+                    <td><p class="reports-primary-text">{{ row.title }}</p></td>
+                    <td>{{ row.departmentName }}</td>
+                    <td><span [class]="severityPillClass(row.severity)">{{ row.severity }}</span></td>
+                    <td><span [class]="statusPillClass(row.status)">{{ row.status }}</span></td>
+                    <td>{{ row.createdLabel }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </app-table-shell>
+        }
+      </app-dashboard-section>
     }
-
-    <section class="app-dashboard-panel">
-      <div class="mb-4">
-        <p class="dashboard-section-title text-lg">Export Reports</p>
-        <p class="mt-1 text-sm text-slate-300">Export the currently filtered report data for review or client documentation.</p>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <button type="button" class="dashboard-action-button dashboard-action-button--primary" [disabled]="exportDisabled" (click)="exportCurrentReportCsv()">
-          Export current report CSV
-        </button>
-        <button type="button" class="dashboard-action-button" [disabled]="exportDisabled" (click)="exportDepartmentSummaryCsv()">
-          Export department summary CSV
-        </button>
-        <button type="button" class="dashboard-action-button" [disabled]="exportDisabled" (click)="exportAlertsSummaryCsv()">
-          Export alerts summary CSV
-        </button>
-        <button type="button" class="dashboard-action-button" [disabled]="exportPdfDisabled" (click)="exportPdfReport()">
-          {{ exportPdfButtonLabel }}
-        </button>
-      </div>
-    </section>
   }
 </div>

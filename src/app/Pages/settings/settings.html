@@ -8,7 +8,7 @@
   <header class="settings-header">
     <div>
       <p class="settings-title">Settings</p>
-      <p class="settings-subtitle">Manage your account, active workspace context, interface preferences, and session controls.</p>
+      <p class="settings-subtitle">Manage your account, active organization context, interface preferences, and session controls.</p>
     </div>
 
     <button type="button" class="settings-refresh" (click)="refreshContext()" [disabled]="refreshing || loading">
@@ -18,7 +18,7 @@
 
   <section *ngIf="loading" class="settings-loading-card">
     <h2>Loading settings...</h2>
-    <p>Preparing your account and workspace context.</p>
+    <p>Preparing your account and organization context.</p>
   </section>
 
   <section *ngIf="!loading && loadError" class="settings-error-card">
@@ -59,7 +59,7 @@
     <section class="settings-panel">
       <div *ngIf="switchingWorkspace" class="settings-overlay">
         <div class="settings-overlay-card">
-          <p>{{ switchingMessage || 'Switching workspace...' }}</p>
+          <p>{{ switchingMessage || 'Switching organization...' }}</p>
         </div>
       </div>
 
@@ -134,7 +134,7 @@
 
       <ng-container *ngIf="activeTab === 'workspace'">
         <article *ngIf="membershipError" class="settings-card warning-card">
-          <h3>Workspace memberships unavailable</h3>
+          <h3>Organization memberships unavailable</h3>
           <p>{{ membershipError }}</p>
         </article>
 
@@ -142,13 +142,13 @@
           <article class="settings-card hover-lift">
             <header class="settings-card-header space-between">
               <div>
-                <h3>Active workspace</h3>
-                <p>This controls which company context is used across Dashboard, Workforce, Scan Requests, Compliance, Alerts, and Reports.</p>
+                <h3>Active organization</h3>
+                <p>This controls which organization context is used across Dashboard, Workforce, Scan Requests, Compliance, Alerts, and Reports.</p>
               </div>
 
               <div class="workspace-switcher" (click)="$event.stopPropagation()">
                 <button type="button" class="workspace-trigger" (click)="toggleWorkspaceDropdown($event)" [disabled]="memberships.length <= 1 || switchingWorkspace">
-                  Current workspace: {{ currentWorkspaceName() }}
+                  Current organization: {{ currentWorkspaceName() }}
                 </button>
 
                 <div *ngIf="workspaceDropdownOpen" class="workspace-dropdown">
@@ -160,7 +160,7 @@
                     (click)="switchWorkspace(membership.id)">
                     <div>
                       <p>{{ membership.businessProfile.companyName }}</p>
-                      <small>{{ membership.department?.name || 'Company-wide scope' }}</small>
+                      <small>{{ membership.department?.name || 'Organization-wide' }}</small>
                     </div>
                     <div class="workspace-option-meta">
                       <span [class]="roleBadgeClass(membership.memberRoleRaw)">{{ roleBadgeLabel(membership.memberRoleRaw) }}</span>
@@ -171,82 +171,32 @@
               </div>
             </header>
 
-            <p *ngIf="memberships.length <= 1" class="workspace-lock-note">Only one active workspace is available for this account.</p>
+            <p *ngIf="memberships.length <= 1" class="workspace-lock-note">Only one active organization is available for this account.</p>
 
             <div class="workspace-context">
               <div class="context-item">
-                <span>Company</span>
-                <strong>{{ activeMembership?.businessProfile?.companyName || 'No workspace' }}</strong>
+                <span>Organization</span>
+                <strong>{{ activeMembership?.businessProfile?.companyName || 'No organization' }}</strong>
               </div>
               <div class="context-item">
-                <span>Role</span>
+                <span>Access Level</span>
                 <span [class]="roleBadgeClass(activeMembership?.memberRoleRaw)">{{ roleBadgeLabel(activeMembership?.memberRoleRaw) }}</span>
               </div>
               <div class="context-item">
-                <span>Scope</span>
+                <span>Access</span>
                 <span [class]="scopeBadgeClass()">{{ scopeLabel() }}</span>
               </div>
               <div class="context-item">
                 <span>Department</span>
                 <strong>{{ scopeDetail() }}</strong>
               </div>
-            </div>
-          </article>
-
-          <article class="settings-card hover-lift">
-            <header class="settings-card-header">
-              <div>
-                <h3>Active workspace</h3>
-                <p>Current workspace summary for your active operating context.</p>
-              </div>
-            </header>
-
-            <div class="settings-grid two-col">
-              <div class="detail-row">
-                <span>Company name</span>
-                <strong>{{ activeMembership?.businessProfile?.companyName || 'Not available' }}</strong>
-              </div>
-
-              <div class="detail-row">
-                <span>Workspace status</span>
-                <span class="badge" [class.badge-active]="activeMembership?.businessProfile?.isActive" [class.badge-muted]="!activeMembership?.businessProfile?.isActive">
-                  {{ activeMembership?.businessProfile?.isActive ? 'Active' : 'Inactive' }}
-                </span>
-              </div>
-
-              <div class="detail-row">
-                <span>Plan code</span>
+              <div class="context-item">
+                <span>Plan</span>
                 <strong>{{ activeMembership?.businessProfile?.planCode || 'Not set' }}</strong>
               </div>
-
-              <div class="detail-row">
+              <div class="context-item">
                 <span>Billing status</span>
                 <strong>{{ activeMembership?.businessProfile?.billingStatus || 'Not set' }}</strong>
-              </div>
-
-              <div class="detail-row">
-                <span>Created date</span>
-                <strong>{{ activeMembership?.businessProfile?.dateCreated ? (activeMembership?.businessProfile?.dateCreated | date:'yyyy-MM-dd') : 'Not available' }}</strong>
-              </div>
-
-              <div class="detail-row">
-                <span>Updated date</span>
-                <strong>{{ activeMembership?.businessProfile?.dateUpdated ? (activeMembership?.businessProfile?.dateUpdated | date:'yyyy-MM-dd') : 'Not available' }}</strong>
-              </div>
-
-              <div class="detail-row">
-                <span>Active role</span>
-                <span [class]="roleBadgeClass(activeMembership?.memberRoleRaw)">{{ roleBadgeLabel(activeMembership?.memberRoleRaw) }}</span>
-              </div>
-
-              <div class="detail-row">
-                <span>Department / Scope</span>
-                <strong>{{ activeMembership?.department?.name || 'Company-wide scope' }}</strong>
-              </div>
-
-              <div class="detail-row">
-                <span>Membership status</span>
-                <span class="badge" [class.badge-active]="membershipStatusLabel() === 'Active'" [class.badge-muted]="membershipStatusLabel() !== 'Active'">{{ membershipStatusLabel() }}</span>
               </div>
             </div>
           </article>
@@ -263,7 +213,20 @@
               <span *ngFor="let item of currentAccessChips()" class="chip">{{ item }}</span>
             </div>
             <div class="settings-actions">
-              <a routerLink="/app/company" class="btn-secondary nav-button">Open Company settings</a>
+              <a routerLink="/app/company" class="btn-secondary nav-button">Open Organization overview</a>
+            </div>
+          </article>
+
+          <article *ngIf="isOwnerAccess()" class="settings-card hover-lift">
+            <header class="settings-card-header">
+              <div>
+                <h3>Plan &amp; Support</h3>
+                <p>Enterprise Pilot</p>
+              </div>
+            </header>
+            <p class="settings-helper">Billing is managed by your account team.</p>
+            <div class="settings-actions">
+              <a routerLink="/contact" class="btn-secondary nav-button">Contact Support</a>
             </div>
           </article>
         </ng-container>
@@ -271,8 +234,8 @@
         <article *ngIf="(invites.length || invitesError) && !membershipError" class="settings-card hover-lift">
           <header class="settings-card-header">
             <div>
-              <h3>Pending invites</h3>
-              <p>Invite records for this workspace context.</p>
+              <h3>Pending invitations</h3>
+              <p>Invitation records for this organization context.</p>
             </div>
           </header>
 
@@ -282,13 +245,10 @@
             <table class="invite-table">
               <thead>
                 <tr>
-                  <th>Invite email</th>
-                  <th>Role</th>
+                  <th>Invitation email</th>
+                  <th>Access Level</th>
                   <th>Department</th>
-                  <th>Invite status</th>
-                  <th>Sent at</th>
-                  <th>Accepted / claimed at</th>
-                  <th>Invited by</th>
+                  <th>Invitation status</th>
                 </tr>
               </thead>
               <tbody>
@@ -297,9 +257,6 @@
                   <td>{{ invite.role }}</td>
                   <td>{{ invite.departmentName || 'Unassigned' }}</td>
                   <td>{{ invite.status }}</td>
-                  <td>{{ invite.sentAt ? (invite.sentAt | date:'yyyy-MM-dd HH:mm') : 'Not sent' }}</td>
-                  <td>{{ invite.claimedAt ? (invite.claimedAt | date:'yyyy-MM-dd HH:mm') : 'Not accepted' }}</td>
-                  <td>{{ invite.invitedBy }}</td>
                 </tr>
               </tbody>
             </table>
@@ -312,7 +269,7 @@
           <header class="settings-card-header space-between">
             <div>
               <h3>Operational UI preferences</h3>
-              <p>These preferences are stored locally on this browser and do not change backend workspace data.</p>
+              <p>These preferences are stored locally on this browser and do not change backend organization data.</p>
             </div>
             <span class="saved-hint" *ngIf="preferencesHint">{{ preferencesHint }}</span>
           </header>
@@ -355,7 +312,7 @@
 
             <label class="settings-field pref-card">
               <span>Default landing page</span>
-              <small>Page to open after login when workspace access is ready.</small>
+              <small>Page to open after login when organization access is ready.</small>
               <select [ngModel]="preferences.defaultLandingPage" (ngModelChange)="updatePreferenceSelect('defaultLandingPage', $event)">
                 <option value="dashboard">Dashboard</option>
                 <option value="workforce">Workforce</option>
@@ -391,10 +348,11 @@
         <article class="settings-card hover-lift">
           <header class="settings-card-header">
             <div>
-              <h3>Local workspace cache</h3>
-              <p>Clears locally cached workspace context from this browser. It does not delete backend data.</p>
+              <h3>Troubleshooting</h3>
+              <p>Use this only when the browser is showing stale organization context after a session or workspace change.</p>
             </div>
           </header>
+          <p class="settings-helper">Clear cache removes local browser workspace state and reloads it from the verified server context.</p>
           <div class="settings-actions">
             <button type="button" class="btn-secondary" (click)="clearWorkspaceCache()" [disabled]="clearingWorkspaceCache">
               {{ clearingWorkspaceCache ? 'Clearing...' : 'Clear cache' }}

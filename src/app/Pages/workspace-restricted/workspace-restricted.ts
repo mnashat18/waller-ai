@@ -9,14 +9,14 @@ import { RouterModule } from '@angular/router';
   template: `
     <section class="workpage-shell">
       <div class="workpage-shell__panel app-dashboard-panel">
-        <p class="workpage-shell__eyebrow">Workspace Access</p>
-        <h1>Workspace Access Restricted</h1>
+        <p class="workpage-shell__eyebrow">Organization Access</p>
+        <h1>Organization Access Restricted</h1>
         <p class="workpage-shell__copy">
-          Your access to this workspace is inactive. Contact your company owner or HR team.
+          Your organization access is inactive. Contact your organization owner or HR team.
         </p>
         <div class="workpage-shell__actions">
-          <a routerLink="/app/workspace-access" class="workpage-shell__button workpage-shell__button--primary">Back to Workspace Access</a>
-          <a routerLink="/login" class="workpage-shell__button">Logout</a>
+          <a routerLink="/app/workspace-access" class="workpage-shell__button workpage-shell__button--primary">Back to Organization Access</a>
+          <a routerLink="/" class="workpage-shell__button">Logout</a>
         </div>
       </div>
     </section>

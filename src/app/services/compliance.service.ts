@@ -291,7 +291,13 @@ export class ComplianceService {
 
       const departmentsPromise = this.loadDepartments(token, workspaceId);
       const wellnessScansPromise = this.loadWellnessScans(token, workspaceId, activeDepartmentId);
-      const scanResultsPromise = this.loadScanResults(token);
+      // scan_results has no reliable tenant column, so scope it to the IDs of the
+      // already tenant-filtered wellness_scans (scan_results.scan_id -> wellness_scans.id).
+      // If wellness scans fail to load there are no safe IDs, so query for nothing.
+      const scanResultsPromise = wellnessScansPromise.then(
+        (scans) => this.loadScanResults(token, this.collectScopedScanIds(scans)),
+        () => this.loadScanResults(token, [])
+      );
       const memberRiskPromise = this.loadMemberRiskProfiles(token, workspaceId, activeDepartmentId);
 
       const [
@@ -1064,7 +1070,30 @@ export class ComplianceService {
     );
   }
 
-  private async loadScanResults(token: string): Promise<ScanResultsLoadResult> {
+  private collectScopedScanIds(scans: WellnessScanRecord[]): string[] {
+    const ids = new Set<string>();
+    for (const scan of scans ?? []) {
+      const id = this.normalizeId(scan.id);
+      if (id) {
+        ids.add(id);
+      }
+    }
+    return Array.from(ids.values());
+  }
+
+  private async loadScanResults(token: string, scopedScanIds: string[]): Promise<ScanResultsLoadResult> {
+    // Defense-in-depth: never pull scan_results without a tenant-safe scope.
+    // scopedScanIds come from the already business_profile-filtered wellness_scans.
+    if (!scopedScanIds.length) {
+      return {
+        rows: [],
+        state: 'available',
+        missingFields: []
+      };
+    }
+
+    const scanIdFilter = { path: ['scan_id'], operator: '_in', value: scopedScanIds.join(',') };
+
     const fieldVariants: string[][] = [
       [
         'id',
@@ -1109,6 +1138,7 @@ export class ComplianceService {
           fields,
           token,
           {
+            filters: [scanIdFilter],
             sort: '-date_created',
             limit: 1500
           }

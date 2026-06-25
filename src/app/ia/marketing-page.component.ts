@@ -38,7 +38,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
           <a routerLink="/contact" class="rounded-full bg-[#f5c451] px-5 py-3 text-sm font-semibold text-slate-900">
             Request Demo
           </a>
-          <a routerLink="/login" class="rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white">
+          <a routerLink="/" [queryParams]="{ auth: 'login' }" class="rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white">
             Log In
           </a>
         </div>

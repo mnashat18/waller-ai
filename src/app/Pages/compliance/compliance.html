@@ -1,61 +1,33 @@
-<div class="compliance-page space-y-6">
-  <section class="app-dashboard-panel compliance-hero animate-dashboard-rise">
-    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <div>
-        <p class="dashboard-eyebrow">OPERATIONS</p>
-        <h1 class="compliance-title">Compliance</h1>
-        <p class="compliance-subtitle">
-          Track scan completion, missing readiness checks, and operational follow-up across the active workspace.
-        </p>
-      </div>
+<div class="compliance-page app-page-shell">
+  <app-page-header
+    title="Compliance"
+    [description]="pageDescription"
+    [breadcrumbs]="[
+      { label: 'Dashboard', url: '/app/dashboard' },
+      { label: 'Compliance' }
+    ]">
+    <button
+      pageActions
+      type="button"
+      class="dashboard-action-button"
+      [disabled]="loading"
+      (click)="refresh()">
+      {{ loading ? 'Refreshing...' : 'Refresh' }}
+    </button>
+  </app-page-header>
 
-      <div class="compliance-hero-actions">
-        <div class="flex flex-wrap items-center justify-end gap-3">
-          <button
-            type="button"
-            class="dashboard-action-button"
-            [disabled]="loading"
-            (click)="refresh()">
-            Refresh
-          </button>
-
-          <button
-            type="button"
-            class="dashboard-action-button dashboard-action-button--primary"
-            [disabled]="!canSendScanRequest"
-            [attr.title]="!canSendScanRequest ? 'Only owner and HR can send scan requests.' : null"
-            (click)="goToScanRequests()">
-            Send Scan Request
-          </button>
-
-          <button
-            type="button"
-            class="dashboard-action-button"
-            [disabled]="exportDisabled"
-            (click)="exportComplianceSummaryCsv()">
-            {{ exportButtonLabel }}
-          </button>
-        </div>
-
-        <div class="compliance-chips">
-          <span class="dashboard-filter-chip">{{ scopeChipLabel }}</span>
-          <span class="dashboard-filter-chip">{{ roleChipLabel }}</span>
-          <span class="dashboard-filter-chip">{{ overview?.workspaceName || 'Current workspace' }}</span>
-        </div>
-      </div>
-    </div>
+  <section class="compliance-scope-strip app-dashboard-panel app-dashboard-panel--compact">
+    <span class="dashboard-filter-chip">{{ scopeLabel }}</span>
+    <span class="dashboard-filter-chip">{{ roleLabel }}</span>
+    <span class="dashboard-filter-chip">{{ overview?.workspaceName || 'Current organization' }}</span>
   </section>
 
   @if (partialWarning) {
-    <section class="compliance-warning-card">
-      {{ partialWarning }}
-    </section>
+    <section class="compliance-warning-card">{{ partialWarning }}</section>
   }
 
-  @if (departmentGroupingWarning) {
-    <section class="compliance-warning-card">
-      {{ departmentGroupingWarning }}
-    </section>
+  @if (overview?.departmentGroupingWarning) {
+    <section class="compliance-warning-card">{{ overview?.departmentGroupingWarning }}</section>
   }
 
   @if (feedback) {
@@ -65,269 +37,225 @@
   }
 
   @if (viewState === 'loading') {
-    <app-card-skeleton-loader [count]="6"></app-card-skeleton-loader>
-    <app-table-skeleton-loader [rows]="6" [columns]="8"></app-table-skeleton-loader>
+    <app-card-skeleton-loader [count]="4"></app-card-skeleton-loader>
+    <app-table-skeleton-loader [rows]="6" [columns]="6"></app-table-skeleton-loader>
+  } @else if (viewState === 'scopeUnavailable') {
+    <section class="compliance-state-card compliance-state-card--warning">
+      <p class="compliance-state-card__title">No active department context</p>
+      <p>This manager account needs an assigned active department before Compliance can be shown.</p>
+      <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="refresh()">Retry</button>
+    </section>
   } @else if (viewState === 'noWorkspace') {
-    <section class="compliance-empty-card app-dashboard-panel">
-      <p class="compliance-empty-title">No active workspace selected.</p>
-      <p class="compliance-empty-body">Select or create a workspace before viewing compliance.</p>
+    <section class="compliance-state-card">
+      <p class="compliance-state-card__title">No active organization selected</p>
+      <p>Select an active workspace before opening Compliance.</p>
     </section>
   } @else if (viewState === 'permission') {
-    <section class="compliance-error-card app-dashboard-panel">
-      <p class="compliance-error-title">Compliance data could not be loaded.</p>
-      <p class="compliance-error-body">Your workspace permissions do not allow this data view.</p>
+    <section class="compliance-state-card compliance-state-card--warning">
+      <p class="compliance-state-card__title">Scoped data unavailable</p>
+      <p>Your current workspace role does not allow the authenticated Compliance page.</p>
     </section>
   } @else if (viewState === 'error') {
-    <section class="compliance-error-card app-dashboard-panel">
-      <p class="compliance-error-title">Compliance data could not be loaded.</p>
-      <p class="compliance-error-body">{{ errorMessage || 'Please refresh and try again.' }}</p>
-      <div class="mt-4">
-        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="refresh()">Retry</button>
-      </div>
-    </section>
+    <app-error-state
+      title="Compliance data could not be loaded"
+      [message]="errorMessage || 'Please refresh and try again.'"
+      (retry)="refresh()">
+    </app-error-state>
   } @else {
-    @if (!overview?.hasAnyData) {
-      <section class="compliance-empty-card app-dashboard-panel">
-        <p class="compliance-empty-title">No compliance activity yet.</p>
-        <p class="compliance-empty-body">Send scan requests or wait for employees to complete readiness checks.</p>
+    @if (showPageEmpty) {
+      <section class="compliance-state-card">
+        <p class="compliance-state-card__title">No compliance activity yet</p>
+        <p>Coverage, exceptions, and evidence will appear when authorized scan requests, scan completions, or operational alerts are returned.</p>
       </section>
     } @else {
-      <section class="app-dashboard-panel compliance-filter-panel">
-        <div class="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p class="dashboard-section-title text-lg">Filters</p>
-            <p class="mt-1 text-sm text-slate-300">Refine compliance visibility by range, department, status, and readiness.</p>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button type="button" class="dashboard-action-button" (click)="clearFilters()">Clear</button>
-            <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="applyFilters()">Apply</button>
-          </div>
-        </div>
+      <app-filter-bar-shell>
+        <select [(ngModel)]="filters.dateRange" name="complianceDateRange" class="app-form-control" aria-label="Date range">
+          <option value="today">Today</option>
+          <option value="last7">Last 7 days</option>
+          <option value="last30">Last 30 days</option>
+        </select>
 
-        <div class="mt-4 grid gap-3 xl:grid-cols-4">
-          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-            Date Range
-            <select [(ngModel)]="filters.dateRange" name="complianceDateRange" class="compliance-input">
-              <option value="today">Today</option>
-              <option value="last7">Last 7 days</option>
-              <option value="last30">Last 30 days</option>
-            </select>
-          </label>
-
-          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-            Department
-            <select [(ngModel)]="filters.department" name="complianceDepartment" class="compliance-input">
-              <option value="">All departments</option>
-              <option value="unassigned">Unassigned</option>
-              @for (department of overview?.departmentOptions ?? []; track department.id) {
-                <option [value]="department.id">{{ department.name }}</option>
-              }
-            </select>
-          </label>
-
-          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-            Status
-            <select [(ngModel)]="filters.status" name="complianceStatus" class="compliance-input">
-              <option value="all">All</option>
-              <option value="completed">Completed</option>
-              <option value="missing">Missing</option>
-              <option value="attention">Attention</option>
-              <option value="overdue">Overdue</option>
-            </select>
-          </label>
-
-          <label class="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-            Readiness
-            <select [(ngModel)]="filters.readiness" name="complianceReadiness" class="compliance-input">
-              <option value="all">All</option>
-              <option value="Stable">Stable</option>
-              <option value="Low Focus">Low Focus</option>
-              <option value="Elevated Fatigue">Elevated Fatigue</option>
-              <option value="High Risk">High Risk</option>
-              <option value="No scan">No scan</option>
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <section class="compliance-summary-grid">
-        <app-kpi-card
-          label="Compliance Rate"
-          [value]="(overview?.summary?.complianceRate ?? 0) + '%'"
-          [helper]="'Completed today'"
-          [tone]="(overview?.summary?.complianceRate ?? 0) < 80 ? 'warning' : 'success'"
-          toneLabel="Rate">
-        </app-kpi-card>
-        <app-kpi-card
-          label="Completed"
-          [value]="(overview?.summary?.completedScans ?? 0).toString()"
-          helper="Scans done"
-          tone="success"
-          toneLabel="Completed">
-        </app-kpi-card>
-        <app-kpi-card
-          label="Missing"
-          [value]="(overview?.summary?.missingScans ?? 0).toString()"
-          helper="Need scan"
-          [tone]="(overview?.summary?.missingScans ?? 0) > 0 ? 'warning' : 'success'"
-          toneLabel="Missing">
-        </app-kpi-card>
-        <app-kpi-card
-          label="Open Alerts"
-          [value]="(overview?.summary?.openAlerts ?? 0).toString()"
-          helper="Awaiting review"
-          [tone]="(overview?.summary?.openAlerts ?? 0) > 0 ? 'danger' : 'neutral'"
-          toneLabel="Open">
-        </app-kpi-card>
-        <app-kpi-card
-          label="High Attention"
-          [value]="highAttentionDisplay"
-          [helper]="highAttentionHelper"
-          [tone]="(overview?.summary?.highAttention ?? 0) > 0 ? 'danger' : 'neutral'"
-          toneLabel="Attention">
-        </app-kpi-card>
-        <app-kpi-card
-          label="Overdue"
-          [value]="(overview?.summary?.overdueRequests ?? 0).toString()"
-          helper="Past due"
-          [tone]="(overview?.summary?.overdueRequests ?? 0) > 0 ? 'warning' : 'neutral'"
-          toneLabel="Overdue">
-        </app-kpi-card>
-      </section>
-
-      <section class="app-dashboard-panel compliance-action-summary">
-        <p class="dashboard-section-title text-lg">Today's follow-up</p>
-        @if (isWorkspaceClear) {
-          <p class="mt-2 text-sm text-emerald-200">Workspace is clear for the selected range.</p>
-        } @else {
-          <div class="compliance-followup-grid mt-3">
-            <article class="compliance-followup-item">
-              <span>Missing scans</span>
-              <strong>{{ summaryMissingScans }}</strong>
-            </article>
-            <article class="compliance-followup-item">
-              <span>Overdue requests</span>
-              <strong>{{ summaryOverdueRequests }}</strong>
-            </article>
-            <article class="compliance-followup-item">
-              <span>High attention</span>
-              <strong>{{ highAttentionDisplay }}</strong>
-            </article>
-            <article class="compliance-followup-item">
-              <span>Open alerts</span>
-              <strong>{{ summaryOpenAlerts }}</strong>
-            </article>
-          </div>
-          <p class="mt-3 text-sm text-slate-300">{{ actionSummaryRecommendation }}</p>
-        }
-      </section>
-
-      <section class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Department Compliance</p>
-          <p class="mt-1 text-sm text-slate-300">Completion and alert coverage by department plus unassigned members.</p>
-          @if (departmentGroupingWarning) {
-            <p class="mt-2 text-sm text-amber-200">{{ departmentGroupingWarning }}</p>
+        <select [(ngModel)]="filters.status" name="complianceStatus" class="app-form-control" aria-label="Exception status">
+          <option value="all">All exception statuses</option>
+          <option value="completed">Completed scan</option>
+          <option value="missing">Missing scan</option>
+          @if (isOwnerOrHr) {
+            <option value="attention">Needs attention</option>
           }
-        </div>
+          <option value="overdue">Overdue request</option>
+        </select>
 
-        @if (!departmentRows.length) {
-          <div class="compliance-inline-empty">
-            <p class="font-semibold text-slate-50">No departments configured yet.</p>
-            <p class="text-sm text-slate-300">Members without a department are grouped as Unassigned.</p>
+        @if (isOwnerOrHr) {
+          <select [(ngModel)]="filters.readiness" name="complianceReadiness" class="app-form-control" aria-label="Readiness">
+            <option value="all">All readiness states</option>
+            <option value="Stable">Stable</option>
+            <option value="Low Focus">Low Focus</option>
+            <option value="Elevated Fatigue">Elevated Fatigue</option>
+            <option value="High Risk">High Risk</option>
+            <option value="No scan">No scan</option>
+          </select>
+        }
+
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="applyFilters()">Apply</button>
+        <button type="button" class="dashboard-action-button" [disabled]="!hasActiveFilters()" (click)="clearFilters()">Clear</button>
+      </app-filter-bar-shell>
+
+      @if (showFilteredEmpty) {
+        <section class="compliance-state-card">
+          <p class="compliance-state-card__title">No matching compliance records</p>
+          <p>The selected filters returned no exceptions or evidence rows. Coverage data may still be available below.</p>
+          <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="clearFilters()">Clear Filters</button>
+        </section>
+      }
+
+      <app-dashboard-section eyebrow="Coverage" title="Coverage Summary" [description]="coverageDescription">
+        @if (showCoverageSummary) {
+          <div class="compliance-summary-grid">
+            <app-kpi-card
+              label="Coverage"
+              [value]="coverageRateDisplay"
+              helper="Completed checks divided by returned scan-eligible members for the selected range."
+              [tone]="coverageRateTone"
+              toneLabel="Coverage"></app-kpi-card>
+
+            <app-kpi-card
+              label="Completed"
+              [value]="(overview?.summary?.completedScans ?? 0).toString()"
+              helper="Returned readiness checks completed in the selected range."
+              tone="success"
+              toneLabel="Completed"></app-kpi-card>
+
+            <app-kpi-card
+              label="Missing"
+              [value]="(overview?.summary?.missingScans ?? 0).toString()"
+              helper="Returned scan-eligible members without a completed check."
+              [tone]="(overview?.summary?.missingScans ?? 0) > 0 ? 'warning' : 'success'"
+              toneLabel="Missing"></app-kpi-card>
+
+            <app-kpi-card
+              label="Open Alerts"
+              [value]="(overview?.summary?.openAlerts ?? 0).toString()"
+              helper="Returned operational alerts still open."
+              [tone]="(overview?.summary?.openAlerts ?? 0) > 0 ? 'danger' : 'neutral'"
+              toneLabel="Open"></app-kpi-card>
+
+            @if (isOwnerOrHr) {
+              <app-kpi-card
+                label="Readiness Follow-Up"
+                [value]="highAttentionDisplay"
+                [helper]="readinessUnavailable ? 'Readiness result access is unavailable in this scope.' : 'Returned readiness cases needing attention.'"
+                [tone]="(overview?.summary?.highAttention ?? 0) > 0 ? 'danger' : 'neutral'"
+                toneLabel="Readiness"></app-kpi-card>
+            }
+
+            <app-kpi-card
+              label="Overdue"
+              [value]="(overview?.summary?.overdueRequests ?? 0).toString()"
+              helper="Returned scan requests past due."
+              [tone]="(overview?.summary?.overdueRequests ?? 0) > 0 ? 'warning' : 'neutral'"
+              toneLabel="Overdue"></app-kpi-card>
           </div>
         } @else {
-          <div class="compliance-department-grid">
-            @for (row of departmentRows; track trackByDepartment($index, row)) {
-              <article class="compliance-department-card">
-                <div class="compliance-department-card__head">
-                  <h3 class="compliance-department-card__title">{{ row.departmentName }}</h3>
-                  <span [class]="departmentFollowUpClass(row)">{{ departmentFollowUpLabel(row) }}</span>
-                </div>
-                @if (row.note) {
-                  <p class="mt-2 text-xs text-amber-200">{{ row.note }}</p>
-                }
-                <div class="compliance-department-card__stats">
-                  <div><span>Active members</span><strong>{{ row.activeMembers }}</strong></div>
-                  <div><span>Scan eligible</span><strong>{{ row.scanEligible }}</strong></div>
-                  <div><span>Completed</span><strong>{{ row.completedToday }}</strong></div>
-                  <div><span>Missing</span><strong>{{ row.missingScans }}</strong></div>
-                  <div><span>Compliance rate</span><strong>{{ row.complianceRate }}%</strong></div>
-                  <div><span>Open alerts</span><strong>{{ row.openAlerts }}</strong></div>
-                </div>
-                <div class="compliance-row-actions mt-4">
-                  <button
-                    type="button"
-                    class="compliance-row-action compliance-row-action--primary"
-                    [class.compliance-row-action--disabled]="isDepartmentRequestActionDisabled(row)"
-                    [disabled]="isDepartmentRequestActionDisabled(row)"
-                    [attr.title]="departmentRequestTooltip(row)"
-                    (click)="sendDepartmentRequest(row)">
-                    {{ departmentRequestButtonLabel(row) }}
-                  </button>
-                  <button type="button" class="compliance-row-action" (click)="viewDepartmentInWorkforce(row)">View workforce</button>
-                </div>
-              </article>
-            }
+          <div class="compliance-inline-empty">
+            <p>Coverage empty</p>
+            <span>No returned scan-eligible members or completion records support a coverage summary in this scope.</span>
           </div>
         }
-      </section>
+      </app-dashboard-section>
 
-      <section class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Compliance Exceptions</p>
-          <p class="mt-1 text-sm text-slate-300">Active members with missing scans, overdue requests, open alerts, or elevated readiness attention.</p>
-        </div>
+      @if (departmentRows.length) {
+        <app-dashboard-section
+          eyebrow="Coverage"
+          [title]="isManager ? 'Department Coverage' : 'Department Comparison'"
+          [description]="isManager ? 'Coverage for the active department only.' : 'Department coverage from returned authorized data.'">
+          <app-table-shell>
+            <table class="compliance-table min-w-[58rem] w-full text-left">
+              <thead>
+                <tr>
+                  <th>Department</th>
+                  <th>Active Members</th>
+                  <th>Scan Eligible</th>
+                  <th>Completed</th>
+                  <th>Missing</th>
+                  <th>Coverage</th>
+                  <th>Open Alerts</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of departmentRows; track trackByDepartment($index, row)) {
+                  <tr class="compliance-table-row">
+                    <td>
+                      <p class="compliance-primary-text">{{ row.departmentName }}</p>
+                      @if (row.note) {
+                        <p class="compliance-muted-text">{{ row.note }}</p>
+                      }
+                    </td>
+                    <td>{{ row.activeMembers }}</td>
+                    <td>{{ row.scanEligible }}</td>
+                    <td>{{ row.completedToday }}</td>
+                    <td>{{ row.missingScans }}</td>
+                    <td>{{ row.scanEligible > 0 ? row.complianceRate + '%' : 'Unavailable' }}</td>
+                    <td>{{ row.openAlerts }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </app-table-shell>
+        </app-dashboard-section>
+      } @else if (showCoverageEmpty) {
+        <section class="compliance-state-card">
+          <p class="compliance-state-card__title">Coverage empty</p>
+          <p>No department coverage rows are available for the current authorized scope.</p>
+        </section>
+      }
 
+      <app-dashboard-section eyebrow="Exceptions" title="Exceptions" [description]="exceptionsDescription">
         @if (!exceptionRows.length) {
           <div class="compliance-inline-empty">
-            <p class="font-semibold text-slate-50">No compliance exceptions in the current filters.</p>
-            <p class="text-sm text-slate-300">Adjust filters or refresh to check recent updates.</p>
+            <p>Exceptions empty</p>
+            <span>{{ isManager ? 'No missing scans, overdue requests, or open alerts were returned for the current filters.' : 'No missing, overdue, open-alert, or readiness follow-up records were returned for the current filters.' }}</span>
           </div>
         } @else {
           <app-table-shell>
-            <table class="compliance-table compliance-table--exceptions w-full text-left">
-              <thead class="bg-slate-950/80 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            <table class="compliance-table compliance-table--exceptions min-w-[70rem] w-full text-left">
+              <thead>
                 <tr>
-                  <th class="px-5 py-3">Member</th>
-                  <th class="px-5 py-3">Department</th>
-                  <th class="px-5 py-3">Problem</th>
-                  <th class="px-5 py-3">Expected check</th>
-                  <th class="px-5 py-3">Today's scan</th>
-                  <th class="px-5 py-3">Readiness</th>
-                  <th class="px-5 py-3">Alert status</th>
-                  <th class="px-5 py-3">Last scan</th>
-                  <th class="px-5 py-3">Actions</th>
+                  <th>Member</th>
+                  <th>Department</th>
+                  <th>Exception</th>
+                  <th>Expected Check</th>
+                  <th>Scan Status</th>
+                  @if (isOwnerOrHr) {
+                    <th>Readiness</th>
+                  }
+                  <th>Alert</th>
+                  <th>Last Check</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 @for (row of exceptionRows; track trackByException($index, row)) {
-                  <tr class="compliance-table-row border-t border-slate-800/70 text-sm text-slate-300">
-                    <td class="px-5 py-4">
-                      <p class="font-semibold text-slate-50">{{ row.memberName }}</p>
-                      <p class="mt-1 text-xs text-slate-400">{{ row.memberEmail }}</p>
-                      @if (row.reason) {
-                        <p class="mt-1 text-xs text-amber-200">{{ row.reason }}</p>
-                      }
-                      @if (row.linkedInviteEmail && row.linkedInviteEmail !== row.memberEmail) {
-                        <p class="mt-1 text-xs text-slate-500">Invite email: {{ row.linkedInviteEmail }}</p>
+                  <tr class="compliance-table-row">
+                    <td>
+                      <p class="compliance-primary-text">{{ row.memberName }}</p>
+                      @if (!isManager) {
+                        <p class="compliance-muted-text">{{ row.memberEmail }}</p>
                       }
                     </td>
-                    <td class="px-5 py-4">{{ row.departmentName }}</td>
-                    <td class="px-5 py-4">{{ exceptionProblemType(row) }}</td>
-                    <td class="px-5 py-4">{{ row.expectedCheck }}</td>
-                    <td class="px-5 py-4"><span [class]="todayScanBadgeClass(row.todayScan)">{{ row.todayScan }}</span></td>
-                    <td class="px-5 py-4"><span [class]="readinessBadgeClass(row.readiness)">{{ row.readiness }}</span></td>
-                    <td class="px-5 py-4"><span [class]="alertBadgeClass(row.alertStatus)">{{ row.alertStatus }}</span></td>
-                    <td class="px-5 py-4">{{ row.lastScanLabel }}</td>
-                    <td class="px-5 py-4">
+                    <td>{{ row.departmentName }}</td>
+                    <td>{{ exceptionProblemType(row) }}</td>
+                    <td>{{ row.expectedCheck }}</td>
+                    <td><span [class]="todayScanBadgeClass(row.todayScan)">{{ row.todayScan }}</span></td>
+                    @if (isOwnerOrHr) {
+                      <td><span [class]="readinessBadgeClass(row.readiness)">{{ row.readiness }}</span></td>
+                    }
+                    <td><span [class]="alertBadgeClass(row.alertStatus)">{{ row.alertStatus }}</span></td>
+                    <td>{{ row.lastScanLabel }}</td>
+                    <td>
                       <div class="compliance-row-actions">
-                        <button type="button" class="compliance-row-action" (click)="viewMember(row)">View member</button>
-                        @if (row.openAlertId) {
-                          <button type="button" class="compliance-row-action" (click)="reviewAlert(row)">Review alert</button>
-                        }
-                        @if (canSendScanRequest) {
-                          <button type="button" class="compliance-row-action compliance-row-action--primary" (click)="sendMemberRequest(row)">Send request</button>
+                        <button type="button" class="compliance-row-action" (click)="openExceptionDetails(row)">View</button>
+                        @if (isOwnerOrHr) {
+                          <button type="button" class="compliance-row-action" (click)="openUnsupportedWorkflow()">Follow up</button>
                         }
                       </div>
                     </td>
@@ -337,212 +265,78 @@
             </table>
           </app-table-shell>
         }
-      </section>
+      </app-dashboard-section>
 
-      @if (profileLinkageIssues.length) {
-        <section class="app-dashboard-panel">
-          <details class="compliance-admin-review">
-            <summary>
-              <span>Profile linkage issues</span>
-              <span class="compliance-admin-review__badge">Admin review only</span>
-            </summary>
-            <p class="mt-3 text-sm text-slate-300">These records need admin review because the user profile relation is missing or inaccessible.</p>
-            <div class="mt-3">
-              <app-table-shell>
-                <table class="compliance-table w-full text-left">
-                  <thead class="bg-slate-950/80 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
-                    <tr>
-                      <th class="px-5 py-3">Membership</th>
-                      <th class="px-5 py-3">Role</th>
-                      <th class="px-5 py-3">Department</th>
-                      <th class="px-5 py-3">Joined</th>
-                      <th class="px-5 py-3">Invite email</th>
-                      <th class="px-5 py-3">Reason</th>
-                      <th class="px-5 py-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (issue of profileLinkageIssues; track trackByLinkage($index, issue)) {
-                      <tr class="compliance-table-row border-t border-slate-800/70 text-sm text-slate-300">
-                        <td class="px-5 py-4 font-semibold text-slate-50">{{ issue.membershipId }}</td>
-                        <td class="px-5 py-4">{{ toDisplayRole(issue.role) }}</td>
-                        <td class="px-5 py-4">{{ issue.department }}</td>
-                        <td class="px-5 py-4">{{ issue.joinedAt ? (issue.joinedAt | date: 'MMM d, y') : 'Unavailable' }}</td>
-                        <td class="px-5 py-4">{{ issue.inviteEmail || 'Unavailable' }}</td>
-                        <td class="px-5 py-4">{{ issue.reason }}</td>
-                        <td class="px-5 py-4">
-                          <button type="button" class="compliance-row-action" (click)="reviewLinkageIssueInWorkforce(issue)">Review in Workforce</button>
-                        </td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </app-table-shell>
-            </div>
-          </details>
-        </section>
-      }
-
-      <section class="app-dashboard-panel">
-        <div class="mb-4">
-          <p class="dashboard-section-title text-lg">Recent Compliance Activity</p>
-          <p class="mt-1 text-sm text-slate-300">Recent scan completions, alert actions, and request updates in the selected date range.</p>
-        </div>
-
-        @if (!(overview?.activityRows?.length)) {
+      <app-dashboard-section eyebrow="Evidence" title="Evidence" [description]="evidenceDescription">
+        @if (!evidenceRows.length) {
           <div class="compliance-inline-empty">
-            <p class="font-semibold text-slate-50">No compliance activity in this range.</p>
-            <p class="text-sm text-slate-300">Try a wider date range or create a scan request.</p>
+            <p>Evidence empty</p>
+            <span>No readable compliance-supporting activity was returned for the selected range and scope.</span>
           </div>
         } @else {
           <app-table-shell>
-            <table class="compliance-table compliance-table--activity min-w-[56rem] w-full text-left">
-              <thead class="bg-slate-950/80 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+            <table class="compliance-table min-w-[54rem] w-full text-left">
+              <thead>
                 <tr>
-                  <th class="px-5 py-3">Event</th>
-                  <th class="px-5 py-3">Detail</th>
-                  <th class="px-5 py-3">Department</th>
-                  <th class="px-5 py-3">Time</th>
+                  <th>Evidence Type</th>
+                  <th>Summary</th>
+                  <th>Department</th>
+                  <th>Time</th>
                 </tr>
               </thead>
               <tbody>
-                @for (row of overview?.activityRows ?? []; track trackByActivity($index, row)) {
-                  <tr class="compliance-table-row border-t border-slate-800/70 text-sm text-slate-300">
-                    <td class="px-5 py-4 font-semibold text-slate-50">{{ row.title }}</td>
-                    <td class="px-5 py-4">{{ row.detail }}</td>
-                    <td class="px-5 py-4">{{ row.departmentName }}</td>
-                    <td class="px-5 py-4">{{ row.happenedAt | date: 'MMM d, HH:mm' }}</td>
+                @for (row of evidenceRows; track trackByEvidence($index, row)) {
+                  <tr class="compliance-table-row">
+                    <td><span class="compliance-pill compliance-pill--neutral">{{ evidenceTypeLabel(row.type) }}</span></td>
+                    <td>{{ evidenceDetail(row) }}</td>
+                    <td>{{ row.departmentName }}</td>
+                    <td>{{ row.happenedAt | date: 'MMM d, HH:mm' }}</td>
                   </tr>
                 }
               </tbody>
             </table>
           </app-table-shell>
         }
-      </section>
+      </app-dashboard-section>
     }
   }
 </div>
 
-@if (showDepartmentRequestModal && departmentRequestTarget; as row) {
-  <div class="compliance-modal">
-    <div class="compliance-modal__scrim" (click)="closeDepartmentRequestModal()"></div>
-
-    <div class="compliance-modal__panel app-dashboard-panel">
-      <div class="compliance-modal__header">
-        <div>
-          <p class="dashboard-eyebrow">Department Request</p>
-          <h3 class="mt-2 text-xl font-semibold text-slate-50">Send Department Scan Request</h3>
-        </div>
-        <button type="button" class="dashboard-action-button" [disabled]="sendingDepartmentRequest" (click)="closeDepartmentRequestModal()">Close</button>
-      </div>
-
-      <div class="compliance-modal__facts">
-        <div class="compliance-modal__fact"><span>Target name</span><strong>{{ departmentRequestTargetName(row) }}</strong></div>
-        <div class="compliance-modal__fact"><span>Eligible members</span><strong>{{ row.scanEligible }}</strong></div>
-      </div>
-
-      @if (departmentRequestErrorMessage) {
-        <p class="compliance-modal__error">{{ departmentRequestErrorMessage }}</p>
-      }
-
-      <div class="compliance-modal__body">
-        <label class="grid gap-2 text-sm font-medium text-slate-200">
-          Due time
-          <select [(ngModel)]="departmentRequestForm.dueTime" name="departmentRequestDueTime" class="compliance-input">
-            <option value="">Select due time</option>
-            <option value="endOfToday">End of today</option>
-            <option value="in1Hour">In 1 hour</option>
-            <option value="in2Hours">In 2 hours</option>
-            <option value="custom">Custom date and time</option>
-          </select>
-        </label>
-
-        @if (departmentRequestForm.dueTime === 'custom') {
-          <label class="grid gap-2 text-sm font-medium text-slate-200">
-            Custom due
-            <input [(ngModel)]="departmentRequestForm.customDueAt" name="departmentRequestCustomDueAt" type="datetime-local" class="compliance-input" />
-          </label>
-        }
-
-        <label class="grid gap-2 text-sm font-medium text-slate-200">
-          Priority
-          <select [(ngModel)]="departmentRequestForm.priority" name="departmentRequestPriority" class="compliance-input">
-            <option value="normal">Normal</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
-          </select>
-        </label>
-
-        <label class="grid gap-2 text-sm font-medium text-slate-200">
-          Optional message
-          <textarea
-            [(ngModel)]="departmentRequestForm.message"
-            name="departmentRequestMessage"
-            rows="3"
-            class="compliance-input compliance-input--textarea"
-            maxlength="600"
-            placeholder="Add optional note for this request."></textarea>
-        </label>
-      </div>
-
-      <div class="compliance-modal__footer">
-        <button type="button" class="dashboard-action-button" [disabled]="sendingDepartmentRequest" (click)="closeDepartmentRequestModal()">Cancel</button>
-        <button
-          type="button"
-          class="dashboard-action-button dashboard-action-button--primary"
-          [disabled]="!canSubmitDepartmentRequest"
-          [attr.aria-busy]="sendingDepartmentRequest ? 'true' : 'false'"
-          (click)="submitDepartmentRequest()">
-          Send Request
-        </button>
-      </div>
-    </div>
-  </div>
-}
-
 @if (selectedException; as row) {
   <div class="compliance-modal">
-    <div class="compliance-modal__scrim" (click)="closeMemberModal()"></div>
+    <div class="compliance-modal__scrim" (click)="closeExceptionDetails()"></div>
 
     <div class="compliance-modal__panel app-dashboard-panel compliance-member-modal">
       <div class="compliance-modal__header">
         <div>
-          <p class="dashboard-eyebrow">Member Profile</p>
-          <h3 class="mt-2 text-xl font-semibold text-slate-50">{{ row.memberName }}</h3>
-          <p class="mt-1 text-sm text-slate-300">{{ row.memberEmail }}</p>
+          <p class="dashboard-eyebrow">Exception Detail</p>
+          <h3>{{ row.memberName }}</h3>
+          @if (!isManager) {
+            <p>{{ row.memberEmail }}</p>
+          }
         </div>
-        <button type="button" class="dashboard-action-button" (click)="closeMemberModal()">Close</button>
+        <button type="button" class="dashboard-action-button" (click)="closeExceptionDetails()">Close</button>
       </div>
 
       <div class="compliance-modal__facts">
         <div class="compliance-modal__fact"><span>Role</span><strong>{{ toDisplayRole(row.memberRole) }}</strong></div>
         <div class="compliance-modal__fact"><span>Department</span><strong>{{ row.departmentName }}</strong></div>
-        <div class="compliance-modal__fact"><span>Membership status</span><strong>{{ toDisplayStatus(row.membershipStatus) }}</strong></div>
-        <div class="compliance-modal__fact"><span>Joined</span><strong>{{ row.joinedAt ? (row.joinedAt | date: 'MMM d, y, HH:mm') : 'Unavailable' }}</strong></div>
-        <div class="compliance-modal__fact"><span>Last scan</span><strong>{{ row.lastScanLabel }}</strong></div>
-        <div class="compliance-modal__fact"><span>Last readiness result</span><strong>{{ row.readiness }}</strong></div>
-        <div class="compliance-modal__fact"><span>Open request status</span><strong>{{ openRequestStatusLabel(row) }}</strong></div>
-        <div class="compliance-modal__fact"><span>Missing/overdue reason</span><strong>{{ row.todayScan }}</strong></div>
-        <div class="compliance-modal__fact"><span>Linked invite email</span><strong>{{ row.linkedInviteEmail || 'Unavailable' }}</strong></div>
-        <div class="compliance-modal__fact"><span>Requested / Invited by</span><strong>{{ row.invitedBy || 'Unavailable' }}</strong></div>
+        <div class="compliance-modal__fact"><span>Status</span><strong>{{ toDisplayStatus(row.membershipStatus) }}</strong></div>
+        <div class="compliance-modal__fact"><span>Expected check</span><strong>{{ row.expectedCheck }}</strong></div>
+        <div class="compliance-modal__fact"><span>Scan status</span><strong>{{ row.todayScan }}</strong></div>
+        @if (isOwnerOrHr) {
+          <div class="compliance-modal__fact"><span>Readiness</span><strong>{{ row.readiness }}</strong></div>
+        }
+        <div class="compliance-modal__fact"><span>Alert status</span><strong>{{ row.alertStatus }}</strong></div>
+        <div class="compliance-modal__fact"><span>Last check</span><strong>{{ row.lastScanLabel }}</strong></div>
+        <div class="compliance-modal__fact"><span>Request status</span><strong>{{ openRequestStatusLabel(row) }}</strong></div>
       </div>
 
-      <details class="compliance-tech-details">
-        <summary>Technical details</summary>
-        <div class="compliance-tech-grid">
-          <div><span>Membership ID</span><strong>{{ row.memberId }}</strong></div>
-          <div><span>User ID</span><strong>{{ row.userId || '-' }}</strong></div>
-          <div><span>Invite ID</span><strong>-</strong></div>
-          <div><span>Scan Request ID</span><strong>{{ row.openRequestId || '-' }}</strong></div>
-        </div>
-      </details>
-
       <div class="compliance-modal__footer">
-        @if (canSendScanRequest) {
-          <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="sendMemberRequest(row)">Send Scan Request</button>
+        @if (isOwnerOrHr) {
+          <button type="button" class="dashboard-action-button" (click)="openUnsupportedWorkflow()">Follow up</button>
         }
-        <button type="button" class="dashboard-action-button" (click)="viewMemberInWorkforce(row)">View in Workforce</button>
-        <button type="button" class="dashboard-action-button" (click)="closeMemberModal()">Close</button>
+        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="closeExceptionDetails()">Close</button>
       </div>
     </div>
   </div>

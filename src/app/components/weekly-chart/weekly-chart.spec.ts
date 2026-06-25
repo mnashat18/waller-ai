@@ -1,18 +1,19 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { WeeklyChart } from './weekly-chart';
+import { WeeklyChartComponent } from './weekly-chart';
 
-describe('WeeklyChart', () => {
-  let component: WeeklyChart;
-  let fixture: ComponentFixture<WeeklyChart>;
+describe('WeeklyChartComponent', () => {
+  let component: WeeklyChartComponent;
+  let fixture: ComponentFixture<WeeklyChartComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [WeeklyChart]
+      imports: [WeeklyChartComponent]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(WeeklyChart);
+    WeeklyChartComponent.prototype.ngAfterViewInit = () => undefined;
+    fixture = TestBed.createComponent(WeeklyChartComponent);
     component = fixture.componentInstance;
     await fixture.whenStable();
   });

@@ -12,7 +12,6 @@ import {
   type WorkspaceRouteDefinition
 } from '../../ia/wellar-ia';
 import { CompanyContextService } from '../../core/context/company-context.service';
-import { BusinessCenterService } from '../../services/business-center.service';
 import { SubscriptionService } from '../../services/subscription.service';
 
 type SidebarSectionViewModel = {
@@ -29,9 +28,9 @@ type SidebarSectionViewModel = {
 })
 export class SidebarComponent implements OnInit, OnDestroy {
   loadingAccessState = true;
-  activeCompanyLabel = 'Loading company...';
-  activeDepartmentLabel = 'Loading scope...';
-  memberRoleLabel = 'Loading role...';
+  activeCompanyLabel = 'Loading organization...';
+  activeDepartmentLabel = 'Loading department...';
+  memberRoleLabel = 'Loading access level...';
   sections: SidebarSectionViewModel[] = [];
 
   private accessSub?: RxSubscription;
@@ -42,7 +41,6 @@ export class SidebarComponent implements OnInit, OnDestroy {
 
   constructor(
     private companyContext: CompanyContextService,
-    private businessCenter: BusinessCenterService,
     private subscriptions: SubscriptionService,
     private router: Router
   ) {}
@@ -56,14 +54,13 @@ export class SidebarComponent implements OnInit, OnDestroy {
       const activeDepartment = state.context.activeDepartmentId;
       const companyName =
         state.context.activeBusinessProfileName ||
-        this.businessCenter.getCachedHubAccessState()?.profile?.company_name ||
         state.context.availableCompanies.find((item) => item.id === activeBusinessProfile)?.name ||
         activeBusinessProfile ||
-        'No active company';
+        'No active organization';
 
       this.activeCompanyLabel = companyName;
-      this.activeDepartmentLabel = activeDepartment || 'Company-wide';
-      this.memberRoleLabel = role ? this.toTitleCase(role) : 'No role';
+      this.activeDepartmentLabel = activeDepartment || 'Organization-wide';
+      this.memberRoleLabel = role ? this.toTitleCase(role) : 'No access level';
       this.sections = this.buildSections(role, activeBusinessProfile, activeDepartment);
       this.loadingAccessState = state.loading;
     });
@@ -90,7 +87,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     if (this.loadingAccessState) {
       return 'Loading...';
     }
-    return this.activeDepartmentLabel === 'Company-wide' ? 'Company scope' : 'Department scope';
+    return this.activeDepartmentLabel === 'Organization-wide' ? 'Organization-wide' : 'Department';
   }
 
   companyInitial(): string {
@@ -98,9 +95,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     return label ? label.slice(0, 1).toUpperCase() : 'W';
   }
 
-  onNavigate(item: WorkspaceRouteDefinition): void {
-    console.log('[Sidebar] navigate', item.label, this.toAppRoute(item.path));
-  }
+  onNavigate(_item: WorkspaceRouteDefinition): void {}
 
   toAppRoute(path: string): string {
     return `/app/${path.replace(/^\/+/, '')}`;
@@ -129,11 +124,10 @@ export class SidebarComponent implements OnInit, OnDestroy {
     const role = normalizeActiveMemberRole(this.readStorage('active_member_role'));
     const activeBusinessProfile = this.readStorage('active_business_profile');
     const activeDepartment = this.readStorage('active_department');
-    const cachedCompanyName = this.businessCenter.getCachedHubAccessState()?.profile?.company_name ?? null;
 
-    this.activeCompanyLabel = cachedCompanyName || activeBusinessProfile || 'No active company';
-    this.activeDepartmentLabel = activeDepartment || 'Company-wide';
-    this.memberRoleLabel = role ? this.toTitleCase(role) : 'No role';
+    this.activeCompanyLabel = this.readStorage('active_business_profile_name') || activeBusinessProfile || 'No active organization';
+    this.activeDepartmentLabel = activeDepartment || 'Organization-wide';
+    this.memberRoleLabel = role ? this.toTitleCase(role) : 'No access level';
     this.sections = this.buildSections(role, activeBusinessProfile, activeDepartment);
   }
 

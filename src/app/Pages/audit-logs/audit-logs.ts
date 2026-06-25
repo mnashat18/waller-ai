@@ -1,8 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { of } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { of, throwError } from 'rxjs';
+import { catchError, map, timeout } from 'rxjs/operators';
 import { AdminTokenService } from '../../services/admin-token';
 import { environment } from '../../../environments/environment';
 
@@ -127,8 +127,12 @@ export class AuditLogs implements OnInit {
       this.adminTokens.getToken().subscribe({
         next: (adminToken) => {
           const userToken = this.getUserToken();
-          const token = adminToken ?? userToken;
-          const tokenSource = adminToken ? 'admin' : userToken ? 'user' : 'none';
+          // Prefer the admin token only when it is present and not expired; a
+          // stale admin token must not shadow a valid user token (which would
+          // force an unauthenticated request via buildAuthHeaders).
+          const usingAdmin = !!adminToken && !this.isTokenExpired(adminToken);
+          const token = usingAdmin ? adminToken : userToken;
+          const tokenSource = usingAdmin ? 'admin' : userToken ? 'user' : 'none';
           console.info('[audit-logs] submit using token source:', tokenSource);
 
           this.resolveUserId(effectiveEmail, token).subscribe({
@@ -251,8 +255,11 @@ export class AuditLogs implements OnInit {
 
     this.adminTokens.getToken().subscribe({
       next: (adminToken) => {
-        const token = adminToken ?? userToken;
-        const tokenSource = adminToken ? 'admin' : userToken ? 'user' : 'none';
+        // Prefer the admin token only when present and not expired; otherwise
+        // fall back to the user token rather than sending a stale/unusable one.
+        const usingAdmin = !!adminToken && !this.isTokenExpired(adminToken);
+        const token = usingAdmin ? adminToken : userToken;
+        const tokenSource = usingAdmin ? 'admin' : userToken ? 'user' : 'none';
         console.info('[audit-logs] using token source:', tokenSource);
 
         this.fetchLogs(token).subscribe({
@@ -352,6 +359,11 @@ export class AuditLogs implements OnInit {
     return `${datePart} ${timePart}`;
   }
 
+  // Admin/reviewer-only: resolves a typed email to a Directus user id so a
+  // submitted audit log can reference the user relation instead of a raw email.
+  // Both callers are gated behind isAdminUser / canReviewLogs, so this lookup is
+  // intentionally cross-tenant; there is no business_profile/workspace id in this
+  // component to scope by. `fields` is already restricted to `id` (no PII pulled).
   private resolveUserId(email: string, token: string | null) {
     if (!email) {
       return of(null);
@@ -369,7 +381,16 @@ export class AuditLogs implements OnInit {
       url,
       headers ? { headers } : {}
     ).pipe(
-      map(res => res?.data?.[0]?.id ?? null)
+      timeout(15000),
+      map(res => (Array.isArray(res?.data) ? res.data[0]?.id : null) ?? null),
+      catchError((err) => {
+        // Surface enough to diagnose without leaking the looked-up email or URL.
+        console.error('[audit-logs] resolve user id failed:', {
+          status: typeof err?.status === 'number' ? err.status : 0
+        });
+        // Re-throw so each caller's existing error handler decides the fallback.
+        return throwError(() => err);
+      })
     );
   }
 

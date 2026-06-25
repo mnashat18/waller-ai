@@ -20,15 +20,15 @@ export class PostLoginRoutingService {
   async resolveDestination(): Promise<string> {
     const user = await this.auth.getCurrentUserAfterRestore();
     if (!user?.id) {
-      return '/login';
+      return '/?auth=login';
     }
-    this.invites.debugFlow('auth success', { userId: this.normalizeId(user.id) });
+    this.invites.debugFlow('auth success');
 
     const inviteTokenFromUrl = this.invites.getInviteTokenFromCurrentUrl();
     const pendingInviteToken = inviteTokenFromUrl || this.invites.getPendingInviteToken();
     if (pendingInviteToken) {
       this.invites.setPendingInviteToken(pendingInviteToken);
-      this.invites.debugFlow('pending token found', { token: pendingInviteToken });
+      this.invites.debugFlow('pending token found');
       return await this.resolvePendingInviteDestination(pendingInviteToken);
     }
 
@@ -50,11 +50,7 @@ export class PostLoginRoutingService {
 
     const context = this.companyContext.snapshot().context;
     if (context.activeBusinessProfileId && this.isDashboardRole(context.activeMemberRole)) {
-      this.invites.debugFlow('final route decision', {
-        route: '/app/dashboard',
-        activeBusinessProfileId: context.activeBusinessProfileId,
-        activeMemberRole: context.activeMemberRole
-      });
+      this.invites.debugFlow('final route decision', { route: '/app/dashboard' });
       return '/app/dashboard';
     }
 
@@ -67,6 +63,46 @@ export class PostLoginRoutingService {
     } catch {
       return this.buildBestEffortRoute();
     }
+  }
+
+  async resolveDestinationStrict(): Promise<string> {
+    const user = await this.auth.getCurrentUserAfterRestore();
+    if (!user?.id) {
+      throw new Error('Authentication is required before opening organization access.');
+    }
+
+    this.invites.debugFlow('auth success');
+
+    const inviteTokenFromUrl = this.invites.getInviteTokenFromCurrentUrl();
+    const pendingInviteToken = inviteTokenFromUrl || this.invites.getPendingInviteToken();
+    if (pendingInviteToken) {
+      this.invites.setPendingInviteToken(pendingInviteToken);
+      this.invites.debugFlow('pending token found');
+      return await this.resolvePendingInviteDestination(pendingInviteToken);
+    }
+
+    await this.withTimeout(
+      this.refreshAuthAndWorkspaceContext({ force: true, failOnError: true }),
+      this.resolveTimeoutMs,
+      'Timed out while restoring workspace context.'
+    );
+
+    const context = this.companyContext.snapshot().context;
+    if (context.activeBusinessProfileId && this.isDashboardRole(context.activeMemberRole)) {
+      const explicitRedirect = this.sanitizeExplicitRedirect(this.auth.consumePostAuthRedirect(''));
+      const route = this.authorizePostAuthRedirect(explicitRedirect, context.activeMemberRole) || '/app/dashboard';
+      this.invites.debugFlow('final route decision', { route: this.safeRouteForDebug(route) });
+      return route;
+    }
+
+    const resolvedRoute = await this.withTimeout(
+      this.resolveDestinationFromMembership(),
+      this.resolveTimeoutMs,
+      'Timed out while resolving destination from membership.'
+    );
+    const refreshedContext = this.companyContext.snapshot().context;
+    const explicitRedirect = this.sanitizeExplicitRedirect(this.auth.consumePostAuthRedirect(''));
+    return this.authorizePostAuthRedirect(explicitRedirect, refreshedContext.activeMemberRole) || resolvedRoute;
   }
 
   async navigateToPostInviteDestination(
@@ -101,9 +137,8 @@ export class PostLoginRoutingService {
       const inviteSuccessRoute = this.resolveClaimSuccessRoute(resolvedRole);
       if (inviteSuccessRoute) {
         this.invites.debugFlow('final route decision', {
-          route: inviteSuccessRoute,
-          role: resolvedRole,
-          token: logToken ?? null
+          route: this.safeRouteForDebug(inviteSuccessRoute),
+          role: resolvedRole
         });
         return inviteSuccessRoute;
       }
@@ -112,20 +147,20 @@ export class PostLoginRoutingService {
     return await this.resolveDestinationFromMembership(undefined, memberships, logToken);
   }
 
-  async refreshAuthAndWorkspaceContext(options: { force?: boolean } = {}): Promise<ActiveMembershipContext[]> {
+  async refreshAuthAndWorkspaceContext(options: { force?: boolean; failOnError?: boolean } = {}): Promise<ActiveMembershipContext[]> {
     const forceRefresh = options.force ?? true;
 
     this.invites.debugFlow('refreshed current user started');
     await this.companyContext.refreshCurrentUser({ force: forceRefresh });
-    this.invites.debugFlow('refreshed current user', {
-      activeBusinessProfileId: this.companyContext.snapshot().context.activeBusinessProfileId,
-      activeMemberRole: this.companyContext.snapshot().context.activeMemberRole
-    });
+    this.invites.debugFlow('refreshed current user');
 
     await this.companyContext.refreshWorkspaceContext({ force: forceRefresh });
     this.invites.debugFlow('refreshed workspace context');
 
-    const memberships = await this.companyContext.refreshMemberships({ force: forceRefresh });
+    const memberships = await this.companyContext.refreshMemberships({
+      force: forceRefresh,
+      failOnError: options.failOnError ?? false
+    });
     this.invites.debugFlow('refreshed memberships', {
       count: memberships.length
     });
@@ -164,9 +199,7 @@ export class PostLoginRoutingService {
     if (context.activeBusinessProfileId && this.isDashboardRole(context.activeMemberRole)) {
       this.invites.debugFlow('final route decision', {
         route: '/app/dashboard',
-        activeBusinessProfileId: context.activeBusinessProfileId,
-        activeMemberRole: context.activeMemberRole,
-        token: logToken ?? null
+        activeMemberRole: context.activeMemberRole
       });
       return '/app/dashboard';
     }
@@ -180,7 +213,7 @@ export class PostLoginRoutingService {
         await this.companyContext.activateFromMembership(targetMembership as any);
       } catch {
         const failedRoute = this.resolveRouteForRole(activeProfileId, this.normalizeRole(claimed?.memberRole), true);
-        this.invites.debugFlow('final route decision', { route: failedRoute, reason: 'activation_failed', token: logToken ?? null });
+        this.invites.debugFlow('final route decision', { route: this.safeRouteForDebug(failedRoute), reason: 'activation_failed' });
         return failedRoute;
       }
     }
@@ -197,10 +230,8 @@ export class PostLoginRoutingService {
     const nextRoute = this.resolveRouteForRole(resolvedProfileId, resolvedRole, Boolean(claimed));
 
     this.invites.debugFlow('final route decision', {
-      route: nextRoute,
-      activeBusinessProfileId: resolvedProfileId,
-      activeMemberRole: resolvedRole,
-      token: logToken ?? null
+      route: this.safeRouteForDebug(nextRoute),
+      activeMemberRole: resolvedRole
     });
     return nextRoute;
   }
@@ -310,7 +341,7 @@ export class PostLoginRoutingService {
 
     if (this.invites.hasClaimSucceededForToken(normalizedToken)) {
       this.invites.markClaimCompleted(normalizedToken);
-      this.invites.debugFlow('claim already succeeded for token', { token: normalizedToken });
+      this.invites.debugFlow('claim already succeeded for token');
       return await this.resolveAttemptedInviteDestination(normalizedToken);
     }
 
@@ -319,7 +350,7 @@ export class PostLoginRoutingService {
     }
 
     if (this.invites.hasClaimAttemptedForToken(normalizedToken)) {
-      this.invites.debugFlow('claim already attempted for token', { token: normalizedToken });
+      this.invites.debugFlow('claim already attempted for token');
       return await this.resolveAttemptedInviteDestination(normalizedToken);
     }
 
@@ -352,8 +383,6 @@ export class PostLoginRoutingService {
     try {
       const claimResult = await firstValueFrom(this.invites.claimInvite(token));
       this.invites.debugFlow('claim success', {
-        token,
-        businessProfileId: claimResult.businessProfileId,
         memberRole: claimResult.memberRole
       });
       this.invites.markClaimSucceededForToken(token);
@@ -363,13 +392,14 @@ export class PostLoginRoutingService {
       this.invites.clearClaimInProgressForToken(token);
       this.invites.clearInviteClaimError();
       await this.refreshAuthTokenAfterInviteRoleChange();
+      await this.activateClaimedInviteMembership(claimResult.businessProfileId);
       await this.refreshInviteContexts();
       return await this.resolveFinalRouteAfterClaim(token, claimResult);
     } catch (error) {
       this.invites.clearClaimInProgressForToken(token);
 
       if ((error as { message?: unknown })?.message === 'Workspace joined successfully. Please sign in again to activate your access.') {
-        return '/login';
+        return '/?auth=login';
       }
 
       const detail = this.invites.extractInviteErrorDetail(error) ?? this.invites.getReadableInviteError(error);
@@ -410,7 +440,6 @@ export class PostLoginRoutingService {
 
       if (ready) {
         this.invites.debugFlow('auth token ready', {
-          token,
           attempt: attempt + 1
         });
         return true;
@@ -426,6 +455,24 @@ export class PostLoginRoutingService {
     await this.refreshAuthAndWorkspaceContext({ force: true });
   }
 
+  private async activateClaimedInviteMembership(businessProfileId: string | null): Promise<void> {
+    const profileId = this.normalizeId(businessProfileId);
+    if (!profileId) {
+      this.invites.debugFlow('claim response missing business profile id');
+      return;
+    }
+
+    const membership = await this.companyContext.activateClaimedMembershipForCurrentUser(profileId);
+    if (!membership?.id) {
+      this.invites.debugFlow('claimed active membership not found after claim');
+      return;
+    }
+
+    this.invites.debugFlow('claimed active membership activated', {
+      memberRole: membership.member_role
+    });
+  }
+
   private async resolveFinalRouteAfterClaim(
     token: string,
     claimed: { businessProfileId: string | null; memberRole: string | null; departmentId: string | null }
@@ -435,18 +482,17 @@ export class PostLoginRoutingService {
     const activeBusinessProfileId = context.activeBusinessProfileId ?? null;
     const activeMemberRole = normalizedContextRole;
 
-    this.invites.debugFlow('active_business_profile', { value: activeBusinessProfileId });
-    this.invites.debugFlow('active_member_role', { value: activeMemberRole || null });
+    this.invites.debugFlow('active context resolved', { role: activeMemberRole || null });
 
     if (activeBusinessProfileId && activeMemberRole) {
       const route = this.resolveClaimedWorkspaceDestination(activeBusinessProfileId, activeMemberRole, true);
-      this.invites.debugFlow('navigating to dashboard', { route, token });
+      this.invites.debugFlow('navigating to dashboard', { route: this.safeRouteForDebug(route) });
       return route;
     }
 
     const nextRoute = await this.navigateToPostInviteDestination(claimed, token);
     if (nextRoute === '/app/dashboard' || nextRoute === '/app/workspace-access?joined=1') {
-      this.invites.debugFlow('navigating to dashboard', { route: nextRoute, token });
+      this.invites.debugFlow('navigating to dashboard', { route: this.safeRouteForDebug(nextRoute) });
       return nextRoute;
     }
 
@@ -461,7 +507,7 @@ export class PostLoginRoutingService {
     const roleAfterMembership = this.normalizeRole(contextAfterMembership.activeMemberRole);
     if (profileAfterMembership && roleAfterMembership) {
       const route = this.resolveClaimedWorkspaceDestination(profileAfterMembership, roleAfterMembership, true);
-      this.invites.debugFlow('navigating to dashboard', { route, token });
+      this.invites.debugFlow('navigating to dashboard', { route: this.safeRouteForDebug(route) });
       return route;
     }
 
@@ -533,6 +579,52 @@ export class PostLoginRoutingService {
     }
 
     return normalized;
+  }
+
+  private safeRouteForDebug(path: string): string {
+    const normalized = path.trim();
+    if (!normalized) {
+      return '';
+    }
+    return normalized.split('?')[0].split('#')[0];
+  }
+
+  private authorizePostAuthRedirect(path: string, roleValue: unknown): string {
+    const normalized = path.trim();
+    if (!normalized) {
+      return '';
+    }
+
+    const role = this.normalizeRole(roleValue);
+    const routePath = normalized.split('?')[0].split('#')[0].toLowerCase();
+
+    if (!routePath.startsWith('/app/')) {
+      return '';
+    }
+
+    if (role === 'owner' || role === 'hr') {
+      return normalized;
+    }
+
+    if (role === 'manager') {
+      const allowedManagerRoutes = new Set([
+        '/app/dashboard',
+        '/app/workforce',
+        '/app/scan-requests',
+        '/app/requests',
+        '/app/compliance',
+        '/app/alerts',
+        '/app/reports',
+        '/app/workspace-access'
+      ]);
+      return allowedManagerRoutes.has(routePath) ? normalized : '';
+    }
+
+    if (role === 'employee') {
+      return routePath === '/app/workspace-access' ? normalized : '';
+    }
+
+    return '';
   }
 
   private buildBestEffortRoute(): string {

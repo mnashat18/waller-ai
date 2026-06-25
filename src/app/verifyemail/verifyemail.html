@@ -1,5 +1,23 @@
-<div class="verify-container">
-  <h2>✅ Email Verified</h2>
-  <p>Your email has been successfully verified.</p>
-  <p>Redirecting you to login...</p>
+<div class="verify-page">
+  <div class="verify-card">
+    <span class="verify-card__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="2.2"
+          stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </span>
+
+    <p class="verify-card__eyebrow">Wellar AI</p>
+    <h1 class="verify-card__title">Email verified</h1>
+    <p class="verify-card__body">
+      Your email address has been confirmed. You can now sign in to your operational control center.
+    </p>
+
+    <a routerLink="/" [queryParams]="{ auth: 'login' }"
+      class="verify-card__button">
+      Continue to Login
+    </a>
+
+    <p class="verify-card__hint">Redirecting you to login automatically…</p>
+  </div>
 </div>

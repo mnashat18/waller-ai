@@ -1,29 +1,19 @@
-<div class="dashboard-page">
-  <header class="dashboard-header app-dashboard-panel animate-dashboard-rise">
-    <div class="dashboard-header__copy">
-      <h1 class="dashboard-header__title">Operational Dashboard</h1>
-      <p class="dashboard-header__subtitle" *ngIf="view as vm; else loadingSubtitle">
-        Today's readiness overview for {{ vm.company.companyName }}.
-      </p>
-      <ng-template #loadingSubtitle>
-        <p class="dashboard-header__subtitle">Today's readiness overview for the active company.</p>
-      </ng-template>
-    </div>
-
-    <div class="dashboard-header__meta">
-      <div class="dashboard-header__actions">
-        <button type="button" class="dashboard-action-button" (click)="refresh()">Refresh</button>
-        <a routerLink="/app/scan-requests" class="dashboard-action-button">Send Scan Request</a>
-        <a routerLink="/app/alerts" class="dashboard-action-button dashboard-action-button--primary">Review Alerts</a>
-      </div>
-
-      <div class="dashboard-header__chips" *ngIf="view as vm">
-        <span class="dashboard-filter-chip">{{ vm.scope.label }}</span>
-        <span class="dashboard-filter-chip">{{ vm.company.activeRole | titlecase }}</span>
-        <span class="dashboard-filter-chip" *ngIf="vm.currentMember.departmentName">{{ vm.currentMember.departmentName }}</span>
-      </div>
-    </div>
-  </header>
+<div class="dashboard-page app-page-shell">
+  <app-page-header
+    eyebrow="Operations"
+    title="Operational Overview"
+    [description]="dashboardDescription"
+    [breadcrumbs]="[{ label: 'Dashboard' }]">
+    <button pageActions type="button" class="dashboard-action-button" (click)="refresh()" [disabled]="loading">
+      {{ loading ? 'Refreshing...' : 'Refresh' }}
+    </button>
+    <a pageActions routerLink="/app/scan-requests" class="dashboard-action-button">
+      Scan Requests
+    </a>
+    <a pageActions routerLink="/app/alerts" class="dashboard-action-button dashboard-action-button--primary">
+      Review Alerts
+    </a>
+  </app-page-header>
 
   <ng-container *ngIf="loading">
     <app-card-skeleton-loader [count]="4"></app-card-skeleton-loader>
@@ -39,95 +29,163 @@
   </app-error-state>
 
   <ng-container *ngIf="!loading && !errorMessage && view as vm">
-    <section class="dashboard-summary-grid">
-      <app-kpi-card
-        *ngFor="let card of vm.kpis; trackBy: trackByKpi"
-        class="dashboard-card"
-        [label]="card.label"
-        [value]="card.value"
-        [helper]="card.description"
-        [tone]="card.tone"
-        [toneLabel]="card.toneLabel"
-        [showToneLabel]="false">
-      </app-kpi-card>
+    <section class="dashboard-context-strip app-dashboard-panel app-dashboard-panel--compact" aria-label="Dashboard scope">
+      <span class="dashboard-filter-chip">{{ scopeDisplayLabel }}</span>
+      <span class="dashboard-filter-chip">{{ roleDisplayLabel }}</span>
+      <span class="dashboard-filter-chip" *ngIf="vm.company.companyName">{{ vm.company.companyName }}</span>
+      <span class="dashboard-filter-chip dashboard-filter-chip--muted" *ngIf="freshnessLabel">{{ freshnessLabel }}</span>
+    </section>
+
+    <section class="dashboard-scope-warning app-dashboard-panel" *ngIf="isManager && !hasActiveDepartmentContext">
+      <div>
+        <p class="dashboard-scope-warning__eyebrow">Scoped view unavailable</p>
+        <h2>No active department context</h2>
+        <p>
+          Manager dashboard data is limited to the assigned department. Select an active workspace with
+          a department assignment to view operational readiness.
+        </p>
+      </div>
+    </section>
+
+    <section class="dashboard-setup-callout app-dashboard-panel" *ngIf="showSetupCallout">
+      <div class="dashboard-setup-callout__copy">
+        <p class="dashboard-setup-callout__eyebrow">Workspace readiness</p>
+        <h2>Setup progress</h2>
+        <p>{{ setupProgressLabel }}. Complete setup items to improve operational coverage.</p>
+      </div>
+
+      <div
+        class="dashboard-setup-callout__progress"
+        role="progressbar"
+        [attr.aria-valuenow]="onboardingDoneCount"
+        aria-valuemin="0"
+        [attr.aria-valuemax]="onboardingSteps.length">
+        <span
+          class="dashboard-setup-callout__progress-fill"
+          [style.width.%]="(onboardingDoneCount / onboardingSteps.length) * 100"></span>
+      </div>
+
+      <ol class="dashboard-setup-callout__steps">
+        <li
+          *ngFor="let step of onboardingSteps"
+          class="dashboard-setup-callout__step"
+          [class.is-done]="step.done">
+          <span class="dashboard-setup-callout__status" aria-hidden="true">{{ step.done ? 'Done' : 'Open' }}</span>
+          <div>
+            <p class="dashboard-setup-callout__label">{{ step.label }}</p>
+            <p class="dashboard-setup-callout__description">{{ step.description }}</p>
+          </div>
+        </li>
+      </ol>
+
+      <button type="button" class="dashboard-action-button dashboard-action-button--quiet" (click)="dismissOnboarding()">
+        Dismiss
+      </button>
     </section>
 
     <app-dashboard-section
-      class="dashboard-section-fade"
-      eyebrow="Attention"
-      title="Needs Attention"
-      description="Items that may need manager follow-up today."
+      eyebrow="Today"
+      title="Operational Status"
+      [description]="isManager ? 'Department-level signals from the data available in your scope.' : 'Organization-level signals from the active workspace.'"
+      tone="blue">
+      <div class="dashboard-summary-grid" *ngIf="vm.kpis.length; else kpiEmpty">
+        <app-kpi-card
+          *ngFor="let card of vm.kpis; trackBy: trackByKpi"
+          class="dashboard-card"
+          [label]="card.label"
+          [value]="card.value"
+          [helper]="card.description"
+          [tone]="card.tone"
+          [toneLabel]="card.toneLabel"
+          [showToneLabel]="true">
+        </app-kpi-card>
+      </div>
+
+      <ng-template #kpiEmpty>
+        <div class="dashboard-empty-state">
+          <h3>{{ noOperationalDataTitle }}</h3>
+          <p>{{ noOperationalDataMessage }}</p>
+        </div>
+      </ng-template>
+    </app-dashboard-section>
+
+    <app-dashboard-section
+      eyebrow="Attention Queue"
+      title="Needs Attention Today"
+      [description]="isManager ? 'Department items that may require follow-up.' : 'Organization items that may require follow-up.'"
       tone="rose">
       <div *ngIf="vm.needsAttention.error" class="dashboard-section-error">
         <div>
-          <p class="dashboard-section-error__title">Some follow-up items could not be loaded.</p>
+          <p class="dashboard-section-error__title">Attention items could not be fully loaded.</p>
           <p class="dashboard-section-error__body">{{ vm.needsAttention.error }}</p>
         </div>
         <button type="button" class="dashboard-section-error__button" (click)="refresh()">Retry</button>
       </div>
 
       <ng-container *ngIf="!vm.needsAttention.error">
-        <ng-container *ngIf="vm.needsAttention.items.length; else attentionEmpty">
-          <div class="dashboard-attention-grid">
-            <article *ngFor="let item of vm.needsAttention.items; trackBy: trackByAttention" class="dashboard-attention-card">
-              <div class="dashboard-attention-card__top">
-                <div>
-                  <p class="dashboard-attention-card__name">{{ item.employeeName }}</p>
-                  <p class="dashboard-attention-card__meta">{{ item.department }}</p>
-                </div>
-                <app-risk-badge *ngIf="item.riskLevel" [risk]="item.riskLevel"></app-risk-badge>
+        <div class="dashboard-attention-list" *ngIf="vm.needsAttention.items.length; else attentionEmpty">
+          <article *ngFor="let item of vm.needsAttention.items; trackBy: trackByAttention" class="dashboard-attention-row">
+            <div class="dashboard-attention-row__main">
+              <div>
+                <p class="dashboard-attention-row__reason">{{ item.reason }}</p>
+                <p class="dashboard-attention-row__person">{{ item.employeeName }}</p>
               </div>
+              <app-risk-badge *ngIf="item.riskLevel" [risk]="item.riskLevel"></app-risk-badge>
+            </div>
 
-              <p class="dashboard-attention-card__reason">{{ item.reason }}</p>
-              <p class="dashboard-attention-card__detail">{{ item.detail }}</p>
-              <p class="dashboard-attention-card__time">{{ item.timeLabel }}</p>
+            <div class="dashboard-attention-row__detail">
+              <span>{{ item.department }}</span>
+              <span>{{ item.detail }}</span>
+              <span>{{ item.timeLabel }}</span>
+            </div>
 
-              <div class="dashboard-attention-card__actions">
-                <a [routerLink]="item.primaryActionRoute" class="dashboard-chip-button dashboard-chip-button--primary">
-                  {{ item.primaryActionLabel }}
-                </a>
-                <a
-                  *ngIf="item.secondaryActionLabel && item.secondaryActionRoute"
-                  [routerLink]="item.secondaryActionRoute"
-                  class="dashboard-chip-button">
-                  {{ item.secondaryActionLabel }}
-                </a>
-              </div>
-            </article>
-          </div>
-        </ng-container>
+            <div class="dashboard-attention-row__actions">
+              <a [routerLink]="item.primaryActionRoute" class="dashboard-chip-button dashboard-chip-button--primary">
+                {{ item.primaryActionLabel }}
+              </a>
+              <a
+                *ngIf="item.secondaryActionLabel && item.secondaryActionRoute"
+                [routerLink]="item.secondaryActionRoute"
+                class="dashboard-chip-button">
+                {{ item.secondaryActionLabel }}
+              </a>
+            </div>
+          </article>
+        </div>
       </ng-container>
 
       <ng-template #attentionEmpty>
         <div class="dashboard-empty-state">
           <h3>No immediate attention items</h3>
-          <p>No high-risk scans, overdue requests, or missing scan follow-ups in this scope.</p>
-          <a routerLink="/app/compliance" class="dashboard-action-button dashboard-action-button--primary">Review Compliance</a>
+          <p>No high-risk scans, overdue requests, open alerts, or missing scan follow-ups were returned in this scope.</p>
+          <a routerLink="/app/compliance" class="dashboard-action-button dashboard-action-button--primary">
+            Review Compliance
+          </a>
         </div>
       </ng-template>
     </app-dashboard-section>
 
-    <app-dashboard-section
-      class="dashboard-section-fade"
-      eyebrow="Readiness"
-      title="Readiness Distribution"
-      description="Today's completed scans by readiness level."
-      tone="cyan">
-      <div *ngIf="vm.readinessDistribution.error" class="dashboard-section-error">
-        <div>
-          <p class="dashboard-section-error__title">Readiness distribution is partially unavailable.</p>
-          <p class="dashboard-section-error__body">{{ vm.readinessDistribution.error }}</p>
+    <div class="dashboard-two-column">
+      <app-dashboard-section
+        class="dashboard-section-fade"
+        eyebrow="Readiness"
+        title="Readiness Coverage"
+        description="Completed scans grouped by readiness level for today."
+        tone="cyan">
+        <div *ngIf="vm.readinessDistribution.error" class="dashboard-section-error">
+          <div>
+            <p class="dashboard-section-error__title">Readiness coverage is unavailable.</p>
+            <p class="dashboard-section-error__body">{{ vm.readinessDistribution.error }}</p>
+          </div>
+          <button type="button" class="dashboard-section-error__button" (click)="refresh()">Retry</button>
         </div>
-        <button type="button" class="dashboard-section-error__button" (click)="refresh()">Retry</button>
-      </div>
 
-      <ng-container *ngIf="!vm.readinessDistribution.error">
-        <ng-container *ngIf="vm.readinessDistribution.items.length; else readinessEmpty">
-          <div class="dashboard-readiness-grid">
+        <ng-container *ngIf="!vm.readinessDistribution.error">
+          <div class="dashboard-readiness-grid" *ngIf="vm.readinessDistribution.items.length; else readinessEmpty">
             <article *ngFor="let item of vm.readinessDistribution.items; trackBy: trackByBucket" class="dashboard-readiness-card">
               <div class="dashboard-readiness-card__head">
                 <app-risk-badge [risk]="item.label"></app-risk-badge>
-                <span class="dashboard-readiness-card__percent">{{ item.percentage }}%</span>
+                <span>{{ item.percentage }}%</span>
               </div>
               <p class="dashboard-readiness-card__count">{{ item.count }}</p>
               <div class="dashboard-readiness-card__bar">
@@ -136,123 +194,107 @@
             </article>
           </div>
         </ng-container>
-      </ng-container>
 
-      <ng-template #readinessEmpty>
-        <div class="dashboard-empty-state">
-          <h3>No completed scans yet today</h3>
-          <p>The readiness distribution will populate once completed scans are available in this scope.</p>
+        <ng-template #readinessEmpty>
+          <div class="dashboard-empty-state dashboard-empty-state--compact">
+            <h3>No completed scans today</h3>
+            <p>Readiness coverage will populate when completed scans are available in this scope.</p>
+          </div>
+        </ng-template>
+      </app-dashboard-section>
+
+      <app-dashboard-section
+        class="dashboard-section-fade"
+        eyebrow="Compliance"
+        [title]="isManager ? 'Department Compliance' : 'Compliance by Department'"
+        [description]="isManager ? 'Scan completion coverage for your department scope today.' : 'Scan completion coverage across active departments today.'"
+        tone="emerald">
+        <div *ngIf="vm.complianceByDepartment.error" class="dashboard-section-error">
+          <div>
+            <p class="dashboard-section-error__title">Compliance coverage is unavailable.</p>
+            <p class="dashboard-section-error__body">{{ vm.complianceByDepartment.error }}</p>
+          </div>
+          <button type="button" class="dashboard-section-error__button" (click)="refresh()">Retry</button>
         </div>
-      </ng-template>
-    </app-dashboard-section>
 
-    <app-dashboard-section
-      class="dashboard-section-fade"
-      eyebrow="Compliance"
-      title="Compliance by Department"
-      description="Today's scan completion rate across active teams."
-      tone="blue">
-      <div *ngIf="vm.complianceByDepartment.error" class="dashboard-section-error">
-        <div>
-          <p class="dashboard-section-error__title">Department compliance is partially unavailable.</p>
-          <p class="dashboard-section-error__body">{{ vm.complianceByDepartment.error }}</p>
-        </div>
-        <button type="button" class="dashboard-section-error__button" (click)="refresh()">Retry</button>
-      </div>
-
-      <ng-container *ngIf="!vm.complianceByDepartment.error">
-        <ng-container *ngIf="vm.complianceByDepartment.items.length; else departmentEmpty">
-          <div class="dashboard-department-list">
-            <article *ngFor="let item of vm.complianceByDepartment.items; trackBy: trackByDepartment" class="dashboard-department-card">
-              <div class="dashboard-department-card__top">
+        <ng-container *ngIf="!vm.complianceByDepartment.error">
+          <div class="dashboard-department-list" *ngIf="vm.complianceByDepartment.items.length; else departmentEmpty">
+            <article *ngFor="let item of vm.complianceByDepartment.items; trackBy: trackByDepartment" class="dashboard-department-row">
+              <div class="dashboard-department-row__top">
                 <div>
-                  <p class="dashboard-department-card__name">{{ item.name }}</p>
-                  <p class="dashboard-department-card__meta" *ngIf="item.note; else departmentStats">{{ item.note }}</p>
+                  <p class="dashboard-department-row__name">{{ item.name }}</p>
+                  <p class="dashboard-department-row__meta" *ngIf="item.note; else departmentStats">{{ item.note }}</p>
                   <ng-template #departmentStats>
-                    <p class="dashboard-department-card__meta">
+                    <p class="dashboard-department-row__meta">
                       {{ item.activeEligibleMembers }} active, {{ item.completedToday }} completed, {{ item.missingToday }} missing
                     </p>
                   </ng-template>
                 </div>
-                <span class="dashboard-department-card__rate">{{ item.complianceRate }}%</span>
+                <span class="dashboard-department-row__rate">{{ item.complianceRate }}%</span>
               </div>
-              <div class="dashboard-department-card__bar">
-                <span class="dashboard-department-card__fill" [style.width.%]="item.progress"></span>
-              </div>
-            </article>
-          </div>
-        </ng-container>
-      </ng-container>
-
-      <ng-template #departmentEmpty>
-        <div class="dashboard-empty-state">
-          <h3>No departments created yet</h3>
-          <p>Create a department to start tracking team-level readiness and compliance.</p>
-          <a routerLink="/app/departments" class="dashboard-action-button dashboard-action-button--primary">Create Department</a>
-        </div>
-      </ng-template>
-    </app-dashboard-section>
-
-    <app-dashboard-section
-      class="dashboard-section-fade"
-      eyebrow="Activity"
-      title="Recent Scan Activity"
-      description="Latest completed readiness scans in this scope."
-      tone="emerald">
-      <div *ngIf="vm.recentScans.error" class="dashboard-section-error">
-        <div>
-          <p class="dashboard-section-error__title">Recent scan activity is partially unavailable.</p>
-          <p class="dashboard-section-error__body">{{ vm.recentScans.error }}</p>
-        </div>
-        <button type="button" class="dashboard-section-error__button" (click)="refresh()">Retry</button>
-      </div>
-
-      <ng-container *ngIf="!vm.recentScans.error">
-        <ng-container *ngIf="vm.recentScans.items.length; else scanEmpty">
-          <div class="dashboard-scan-list">
-            <article *ngFor="let item of vm.recentScans.items; trackBy: trackByScan" class="dashboard-scan-card">
-              <div>
-                <p class="dashboard-scan-card__name">{{ item.employeeName }}</p>
-                <p class="dashboard-scan-card__meta">{{ item.department }}</p>
-              </div>
-
-              <div class="dashboard-scan-card__body">
-                <span>{{ item.completedLabel }}</span>
-                <span>Readiness {{ item.readinessScore }}</span>
-              </div>
-
-              <div class="dashboard-scan-card__footer">
-                <app-risk-badge [risk]="item.riskLevel"></app-risk-badge>
-                <span class="dashboard-scan-card__source">{{ item.sourceLabel }}</span>
-                <button type="button" class="dashboard-chip-button" disabled title="No scan result detail route is configured yet.">
-                  View Result
-                </button>
+              <div class="dashboard-department-row__bar">
+                <span class="dashboard-department-row__fill" [style.width.%]="item.progress"></span>
               </div>
             </article>
           </div>
         </ng-container>
-      </ng-container>
 
-      <ng-template #scanEmpty>
-        <div class="dashboard-empty-state">
-          <h3>No completed scans yet today</h3>
-          <p>Latest completed readiness scans will appear here once members start scanning.</p>
-        </div>
-      </ng-template>
-    </app-dashboard-section>
+        <ng-template #departmentEmpty>
+          <div class="dashboard-empty-state dashboard-empty-state--compact">
+            <h3>{{ isManager ? 'No department compliance data' : 'No department coverage yet' }}</h3>
+            <p>
+              {{
+                isManager
+                  ? 'No department-level compliance data is available in your current scope.'
+                  : 'Department compliance will populate after departments and eligible members are available.'
+              }}
+            </p>
+          </div>
+        </ng-template>
+      </app-dashboard-section>
+    </div>
 
     <app-dashboard-section
-      class="dashboard-section-fade"
-      eyebrow="Preview"
-      title="Recent Alerts / Requests Preview"
-      description="A compact look at recent alerts and pending scan requests."
+      eyebrow="Recent Operations"
+      title="Recent Changes"
+      [description]="isManager ? 'Recent department scans, alerts, and scan requests.' : 'Recent organization scans, alerts, and scan requests.'"
       tone="amber">
-      <div class="dashboard-preview-grid">
-        <article class="dashboard-preview-card">
-          <div class="dashboard-preview-card__head">
+      <div class="dashboard-operations-grid">
+        <article class="dashboard-operations-card">
+          <div class="dashboard-operations-card__head">
             <div>
-              <p class="dashboard-preview-card__eyebrow">Recent Alerts</p>
-              <h3>Latest alert items</h3>
+              <p class="dashboard-operations-card__eyebrow">Scan Activity</p>
+              <h3>Latest completed scans</h3>
+            </div>
+          </div>
+
+          <div *ngIf="vm.recentScans.error" class="dashboard-mini-error">{{ vm.recentScans.error }}</div>
+
+          <ng-container *ngIf="!vm.recentScans.error">
+            <div class="dashboard-operations-list" *ngIf="vm.recentScans.items.length; else scanEmpty">
+              <article *ngFor="let item of vm.recentScans.items; trackBy: trackByScan" class="dashboard-operations-row">
+                <div>
+                  <p class="dashboard-operations-row__name">{{ item.employeeName }}</p>
+                  <p class="dashboard-operations-row__meta">{{ item.department }} / {{ item.completedLabel }}</p>
+                </div>
+                <div class="dashboard-operations-row__side">
+                  <app-risk-badge [risk]="item.riskLevel"></app-risk-badge>
+                  <span class="dashboard-preview-row__badge">Readiness {{ item.readinessScore }}</span>
+                </div>
+              </article>
+            </div>
+          </ng-container>
+
+          <ng-template #scanEmpty>
+            <div class="dashboard-preview-empty">No completed scans were returned in this scope.</div>
+          </ng-template>
+        </article>
+
+        <article class="dashboard-operations-card">
+          <div class="dashboard-operations-card__head">
+            <div>
+              <p class="dashboard-operations-card__eyebrow">Alerts</p>
+              <h3>Open alert review</h3>
             </div>
             <a routerLink="/app/alerts" class="dashboard-chip-button dashboard-chip-button--primary">Open Alerts</a>
           </div>
@@ -260,34 +302,30 @@
           <div *ngIf="vm.recentAlerts.error" class="dashboard-mini-error">{{ vm.recentAlerts.error }}</div>
 
           <ng-container *ngIf="!vm.recentAlerts.error">
-            <ng-container *ngIf="vm.recentAlerts.items.length; else alertsEmpty">
-              <div class="dashboard-preview-list">
-                <article *ngFor="let item of vm.recentAlerts.items; trackBy: trackByAlert" class="dashboard-preview-row">
-                  <div>
-                    <p class="dashboard-preview-row__name">{{ item.employeeName }}</p>
-                    <p class="dashboard-preview-row__meta">{{ item.title }}</p>
-                  </div>
-                  <div class="dashboard-preview-row__side">
-                    <span class="dashboard-preview-row__badge">{{ item.severity }}</span>
-                    <app-status-badge [status]="item.statusLabel"></app-status-badge>
-                    <span class="dashboard-preview-row__time">{{ item.createdLabel }}</span>
-                    <a routerLink="/app/alerts" class="dashboard-chip-button">Review</a>
-                  </div>
-                </article>
-              </div>
-            </ng-container>
+            <div class="dashboard-operations-list" *ngIf="vm.recentAlerts.items.length; else alertsEmpty">
+              <article *ngFor="let item of vm.recentAlerts.items; trackBy: trackByAlert" class="dashboard-operations-row">
+                <div>
+                  <p class="dashboard-operations-row__name">{{ item.title }}</p>
+                  <p class="dashboard-operations-row__meta">{{ item.employeeName }} / {{ item.createdLabel }}</p>
+                </div>
+                <div class="dashboard-operations-row__side">
+                  <span class="dashboard-preview-row__badge">{{ item.severity }}</span>
+                  <app-status-badge [status]="item.statusLabel"></app-status-badge>
+                </div>
+              </article>
+            </div>
           </ng-container>
 
           <ng-template #alertsEmpty>
-            <div class="dashboard-preview-empty">No recent alerts in this scope.</div>
+            <div class="dashboard-preview-empty">No open alerts were returned in this scope.</div>
           </ng-template>
         </article>
 
-        <article class="dashboard-preview-card">
-          <div class="dashboard-preview-card__head">
+        <article class="dashboard-operations-card">
+          <div class="dashboard-operations-card__head">
             <div>
-              <p class="dashboard-preview-card__eyebrow">Pending Requests</p>
-              <h3>Latest open scan requests</h3>
+              <p class="dashboard-operations-card__eyebrow">Requests</p>
+              <h3>Pending scan requests</h3>
             </div>
             <a routerLink="/app/scan-requests" class="dashboard-chip-button dashboard-chip-button--primary">Open Requests</a>
           </div>
@@ -295,26 +333,21 @@
           <div *ngIf="vm.pendingRequests.error" class="dashboard-mini-error">{{ vm.pendingRequests.error }}</div>
 
           <ng-container *ngIf="!vm.pendingRequests.error">
-            <ng-container *ngIf="vm.pendingRequests.items.length; else requestsEmpty">
-              <div class="dashboard-preview-list">
-                <article *ngFor="let item of vm.pendingRequests.items; trackBy: trackByRequest" class="dashboard-preview-row">
-                  <div>
-                    <p class="dashboard-preview-row__name">{{ item.employeeName }}</p>
-                    <p class="dashboard-preview-row__meta">Requested by {{ item.requestedBy }}</p>
-                  </div>
-                  <div class="dashboard-preview-row__side">
-                    <span class="dashboard-preview-row__badge">{{ item.department }}</span>
-                    <app-status-badge [status]="item.statusLabel"></app-status-badge>
-                    <span class="dashboard-preview-row__time">{{ item.dueAtLabel }}</span>
-                    <a routerLink="/app/scan-requests" class="dashboard-chip-button">Open</a>
-                  </div>
-                </article>
-              </div>
-            </ng-container>
+            <div class="dashboard-operations-list" *ngIf="vm.pendingRequests.items.length; else requestsEmpty">
+              <article *ngFor="let item of vm.pendingRequests.items; trackBy: trackByRequest" class="dashboard-operations-row">
+                <div>
+                  <p class="dashboard-operations-row__name">{{ item.employeeName }}</p>
+                  <p class="dashboard-operations-row__meta">{{ item.department }} / {{ item.dueAtLabel }}</p>
+                </div>
+                <div class="dashboard-operations-row__side">
+                  <app-status-badge [status]="item.statusLabel"></app-status-badge>
+                </div>
+              </article>
+            </div>
           </ng-container>
 
           <ng-template #requestsEmpty>
-            <div class="dashboard-preview-empty">No pending scan requests in this scope.</div>
+            <div class="dashboard-preview-empty">No pending scan requests were returned in this scope.</div>
           </ng-template>
         </article>
       </div>

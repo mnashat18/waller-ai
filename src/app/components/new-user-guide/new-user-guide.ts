@@ -26,22 +26,22 @@ const ROUTE_GUIDES: Record<string, RouteGuide> = {
     summary: 'This page gives you a live snapshot of team health and recent activity.',
     points: [
       'Use KPI cards to track urgent vs stable trends quickly.',
-      'Open Business Center for exports, automation rules, and billing tools.',
-      'Use Requests to invite team members and trigger new scans.'
+      'Open Reports for organization summaries and exported views.',
+      'Use Requests to send invitations and trigger new scans.'
     ],
     ctaLabel: 'Open Requests',
     ctaLink: '/requests'
   },
   requests: {
     title: 'How requests work',
-    summary: 'Create scan requests, send invites, and monitor response status from one place.',
+    summary: 'Create scan requests, send invitations, and monitor response status from one place.',
     points: [
       'Target can be a user ID, email, or phone.',
-      'Business plan unlocks invite channels like email, WhatsApp, and SMS.',
+      'Invitation channels are managed through your organization rollout.',
       'Pending rows update as users complete their scans.'
     ],
-    ctaLabel: 'Open Business Center',
-    ctaLink: '/business-center'
+    ctaLabel: 'Open Requests',
+    ctaLink: '/requests'
   },
   history: {
     title: 'Scan history explained',
@@ -49,7 +49,7 @@ const ROUTE_GUIDES: Record<string, RouteGuide> = {
     points: [
       'Review trends over time and compare behavior patterns.',
       'Use this to validate policy impact after new rules.',
-      'Export snapshots from Business Center when needed for compliance.'
+      'Use Reports when you need compliance-ready organization summaries.'
     ]
   },
   profile: {
@@ -58,7 +58,7 @@ const ROUTE_GUIDES: Record<string, RouteGuide> = {
     points: [
       'Keep contact information updated for team-level workflows.',
       'Security-sensitive changes are handled through authenticated calls.',
-      'Your access level is controlled by active subscription and permissions.'
+      'Your access level is controlled by organization permissions.'
     ]
   },
   'audit-logs': {
@@ -66,48 +66,37 @@ const ROUTE_GUIDES: Record<string, RouteGuide> = {
     summary: 'This page is your compliance timeline for key operational events.',
     points: [
       'Filter events to investigate incidents quickly.',
-      'Track who did what and when across your workspace.',
+      'Track who did what and when across your organization.',
       'Pair logs with scheduled exports for external audits.'
     ]
   },
-  'business-center': {
-    title: 'Business Center',
-    summary: 'Paid operational tools are grouped here: exports, invites, locations, automation, and billing.',
-    points: [
-      'Each block is marked as paid and unlocked during your trial.',
-      'Create automation rules to speed up response workflows.',
-      'Use billing and renewal controls before trial ends.'
-    ],
-    ctaLabel: 'Compare Plans',
-    ctaLink: '/pricing'
-  },
   pricing: {
-    title: 'Free vs Business plans',
-    summary: 'This page shows exactly what is included in each plan and your current offer.',
+    title: 'Enterprise Pilot options',
+    summary: 'This page shows public pricing and organization rollout options.',
     points: [
-      'Business pricing is shown with a new-user discount where eligible.',
-      'Feature comparison clearly marks what is paid.',
-      'Use Payment to submit company and billing details.'
+      'Public pricing is independent from the signed-in application.',
+      'Enterprise Pilot setup is handled with your account team.',
+      'Use Contact Support to discuss organization rollout.'
     ],
-    ctaLabel: 'Open Payment',
-    ctaLink: '/payment'
+    ctaLabel: 'Contact Support',
+    ctaLink: '/contact'
   },
   'upgrade-plan': {
-    title: 'Payment flow',
-    summary: 'Complete business and company details to activate advanced access.',
+    title: 'Organization support',
+    summary: 'Contact support to coordinate organization access.',
     points: [
-      'Base price is shown first, then new-user discount is applied.',
-      'If eligible, total today becomes 0 for trial activation.',
-      'The request payload is saved for backend and billing processing.'
+      'Organization setup is reviewed before activation.',
+      'Billing is managed by your account team.',
+      'Activation is coordinated through support.'
     ]
   },
   payment: {
-    title: 'Payment flow',
-    summary: 'Complete business and company details to activate advanced access.',
+    title: 'Organization support',
+    summary: 'Contact support to coordinate organization access.',
     points: [
-      'Base price is shown first, then new-user discount is applied.',
-      'If eligible, total today becomes 0 for trial activation.',
-      'The request payload is saved for backend and billing processing.'
+      'Organization setup is reviewed before activation.',
+      'Billing is managed by your account team.',
+      'Activation is coordinated through support.'
     ]
   }
 };

@@ -14,6 +14,7 @@ export const environment = {
 
   DIRECTUS_CLAIM_INVITE_FLOW_ID: '5bba9797-b6de-4819-a51b-6366d30a5bf0',
   CLAIM_INVITE_FLOW_ENDPOINT: '',
+  WORKSPACE_CREATE_ENDPOINT: 'https://dash.conntinuity.com/wellar/workspaces/create',
 
   ADMIN_TOKEN_ENDPOINT: '',
   ADMIN_TOKEN_SECRET: '',

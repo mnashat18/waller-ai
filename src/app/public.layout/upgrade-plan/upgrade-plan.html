@@ -1,10 +1,10 @@
 <section class="upgrade-shell">
   <div class="upgrade-header">
-    <span class="pill">Payment</span>
-    <h1>Business Payment Activation</h1>
+    <span class="pill">Organization Support</span>
+    <h1>Organization Activation Support</h1>
     <p>
-      Fill in your business details to activate Business access. New users get a 14-day Business trial,
-      and paid features are locked after the trial ends unless payment is completed.
+      Fill in your organization details so the Wellar account team can review setup and coordinate activation.
+      Billing and rollout are handled with your account team.
     </p>
   </div>
 
@@ -49,7 +49,7 @@
             <option value="">Select industry</option>
             <option *ngFor="let option of industryOptions" [value]="option">{{ option }}</option>
           </select>
-          <small>Choose the company sector used across Business workflows.</small>
+          <small>Choose the company sector used across organization workflows.</small>
         </label>
 
         <label class="field">
@@ -85,7 +85,7 @@
 
       <label class="accept-line">
         <input type="checkbox" [(ngModel)]="form.acceptTerms" />
-        <span>I agree to submit these business details for account setup and required backend collections.</span>
+        <span>I agree to submit these organization details for account-team setup review.</span>
       </label>
 
       <div class="actions">
@@ -94,38 +94,33 @@
           class="primary-btn"
           [disabled]="submitting || loading"
           (click)="submitUpgradeRequest()">
-          {{ submitting ? 'Submitting...' : 'Continue To Payment' }}
+          {{ submitting ? 'Submitting...' : 'Contact Support' }}
         </button>
         <a routerLink="/pricing" class="ghost-btn">Back to Pricing</a>
       </div>
 
       <p *ngIf="feedback" class="feedback" [ngClass]="feedbackType">{{ feedback }}</p>
-      <p *ngIf="requestId" class="request-id">Request ID: {{ requestId }}</p>
+      <p *ngIf="requestId" class="request-id">Your support request was received.</p>
     </article>
 
     <article class="summary-card">
-      <h3>Pricing summary</h3>
+      <h3>Account-team summary</h3>
 
       <div class="summary-row">
-        <span>Business price</span>
-        <strong>${{ basePriceUsd }}</strong>
-      </div>
-
-      <div class="summary-row discount" *ngIf="isTrialEligible">
-        <span>New user offer</span>
-        <strong>-${{ discountUsd }}</strong>
+        <span>Activation model</span>
+        <strong>Account-team managed</strong>
       </div>
 
       <div class="summary-row total">
-        <span>Total today</span>
-        <strong>${{ totalTodayUsd }}</strong>
+        <span>Pricing</span>
+        <strong>Confirmed before activation</strong>
       </div>
 
       <p class="summary-note" *ngIf="isTrialEligible">
-        New user offer: Business access is free today with a 14-day trial window.
+        Pilot access is coordinated with your account team before activation.
       </p>
       <p class="summary-note" *ngIf="!isTrialEligible">
-        New user offer already used. Your payment request will be reviewed for paid activation.
+        Your account-team request will be reviewed before activation.
       </p>
     </article>
   </div>

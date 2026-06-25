@@ -1,18 +1,20 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 
-import { Verifyemail } from './verifyemail';
+import { VerifyEmailComponent } from './verifyemail';
 
-describe('Verifyemail', () => {
-  let component: Verifyemail;
-  let fixture: ComponentFixture<Verifyemail>;
+describe('VerifyEmailComponent', () => {
+  let component: VerifyEmailComponent;
+  let fixture: ComponentFixture<VerifyEmailComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [Verifyemail]
+      imports: [VerifyEmailComponent],
+      providers: [provideRouter([])]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(Verifyemail);
+    fixture = TestBed.createComponent(VerifyEmailComponent);
     component = fixture.componentInstance;
     await fixture.whenStable();
   });

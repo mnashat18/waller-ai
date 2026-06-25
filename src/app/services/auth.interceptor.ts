@@ -103,9 +103,9 @@ export class AuthInterceptor implements HttpInterceptor {
       this.clearStoredAuthState();
       if (!environment.production) {
         if (this.isInviteLikeToken(normalized)) {
-          console.error('[Auth] invalid auth token storage contained invite token', { source: 'interceptor', token: normalized });
+          console.error('[Auth] invalid auth credential storage contained an invite credential', { source: 'interceptor' });
         } else {
-          console.error('[Auth] invalid auth token storage', { source: 'interceptor', token: normalized });
+          console.error('[Auth] invalid auth credential storage', { source: 'interceptor' });
         }
       }
       return null;
@@ -144,7 +144,6 @@ export class AuthInterceptor implements HttpInterceptor {
     localStorage.removeItem('directus_token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('directus_refresh_token');
-    localStorage.removeItem('wellar_business_hub_access_state_v1');
   }
 
   private isLikelyJwt(token: string): boolean {

@@ -16,7 +16,6 @@
     radial-gradient(800px at 90% 30%, rgba(56, 189, 248, 0.18), transparent 65%),
     radial-gradient(800px at 50% 85%, rgba(245, 196, 81, 0.2), transparent 65%);
   opacity: 0.8;
-  animation: infoGlow 14s ease-in-out infinite;
   z-index: -1;
 }
 

@@ -63,12 +63,12 @@
 
     <!-- Metadata -->
     <div>
-      <label class="label">Metadata (JSON)</label>
+      <label class="label">Additional Context</label>
       <textarea
         #metadataInput
         rows="4"
-        class="input font-mono text-xs"
-        placeholder='{ "sleep_hours": 4, "stress": "high" }'></textarea>
+        class="input"
+        placeholder="Add optional context such as sleep hours, stress level, or shift notes."></textarea>
     </div>
 
     <button
@@ -192,15 +192,8 @@
       </p>
       <p *ngIf="log.responseTimestamp" class="text-xs text-slate-400 mt-1">
         {{ log.responseTimestamp }}
-        <span *ngIf="log.responseBy">· {{ log.responseBy }}</span>
+        <span *ngIf="log.responseBy">- {{ log.responseBy }}</span>
       </p>
-    </div>
-
-    <div>
-      <p class="font-medium mb-1">Metadata</p>
-      <pre class="bg-slate-100 rounded-lg p-4 text-xs">
-{{ log.metadata | json }}
-      </pre>
     </div>
 
   </div>

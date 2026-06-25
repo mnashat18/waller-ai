@@ -208,17 +208,17 @@ export class InvitesPageComponent implements OnInit {
 
   canResend(row: InviteRow): boolean {
     const status = (row.status ?? '').trim().toLowerCase();
-    return !row.claimed_at && status !== 'revoked';
+    return status !== 'revoked' && status !== 'claimed' && status !== 'accepted';
   }
 
   canExpire(row: InviteRow): boolean {
     const status = (row.status ?? '').trim().toLowerCase();
-    return !row.claimed_at && (status === 'pending' || status === 'sent');
+    return status === 'pending' || status === 'sent';
   }
 
   canRevoke(row: InviteRow): boolean {
     const status = (row.status ?? '').trim().toLowerCase();
-    return !row.claimed_at && status !== 'revoked';
+    return status !== 'revoked' && status !== 'claimed' && status !== 'accepted';
   }
 
   trackByInvite(index: number, row: InviteRow): string {

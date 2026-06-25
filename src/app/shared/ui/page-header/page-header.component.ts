@@ -12,23 +12,23 @@ export type PageBreadcrumb = {
   standalone: true,
   imports: [CommonModule, RouterLink],
   template: `
-    <section class="rounded-[2rem] border border-slate-200 bg-white px-6 py-6 shadow-sm">
-      <nav *ngIf="breadcrumbs.length" class="mb-4 flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+    <section class="app-page-header app-dashboard-panel">
+      <nav *ngIf="breadcrumbs.length" class="app-page-header__breadcrumbs">
         <ng-container *ngFor="let crumb of breadcrumbs; let last = last">
-          <a *ngIf="crumb.url && !last" [routerLink]="crumb.url" class="transition hover:text-slate-700">{{ crumb.label }}</a>
-          <span *ngIf="!crumb.url || last" [class.text-slate-700]="last">{{ crumb.label }}</span>
-          <span *ngIf="!last">/</span>
+          <a *ngIf="crumb.url && !last" [routerLink]="crumb.url">{{ crumb.label }}</a>
+          <span *ngIf="!crumb.url || last" [class.is-current]="last">{{ crumb.label }}</span>
+          <span *ngIf="!last" aria-hidden="true">/</span>
         </ng-container>
       </nav>
 
-      <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div class="app-page-header__layout">
         <div>
-          <p *ngIf="eyebrow" class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{{ eyebrow }}</p>
-          <h1 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ title }}</h1>
-          <p *ngIf="description" class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{{ description }}</p>
+          <p *ngIf="eyebrow" class="app-page-header__eyebrow">{{ eyebrow }}</p>
+          <h1>{{ title }}</h1>
+          <p *ngIf="description" class="app-page-header__description">{{ description }}</p>
         </div>
 
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="app-page-header__actions">
           <ng-content select="[pageActions]"></ng-content>
         </div>
       </div>

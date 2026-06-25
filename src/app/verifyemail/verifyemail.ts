@@ -1,10 +1,11 @@
 import { Component, OnInit } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 @Component({
   selector: 'app-verify-email',
   templateUrl: './verifyemail.html',
-  styleUrls: ['./verifyemail.css']
+  styleUrls: ['./verifyemail.css'],
+  imports: [RouterLink]
 })
 export class VerifyEmailComponent implements OnInit {
 
@@ -16,7 +17,7 @@ export class VerifyEmailComponent implements OnInit {
   ngOnInit(): void {
     // Simple waiting UX page
     setTimeout(() => {
-      this.router.navigate(['/login']);
+      this.router.navigate(['/'], { queryParams: { auth: 'login' } });
     }, 3000);
   }
 }

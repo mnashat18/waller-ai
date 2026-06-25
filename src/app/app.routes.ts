@@ -1,25 +1,20 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, CanMatchFn, Router, Routes } from '@angular/router';
-import { catchError, map, of, timeout } from 'rxjs';
+import { catchError, firstValueFrom, map, of, timeout } from 'rxjs';
 import { environment } from '../environments/environment';
 
 import { PublicLayout } from './public.layout/public.layout';
 import { Authlanding } from './public.layout/authlanding/authlanding';
 import { DownloadAppLanding } from './public.layout/download-app/download-app';
-import { SignupComponent } from './public.layout/signup/signup';
-import { LoginComponent } from './public.layout/login/login';
 
 import { DashboardMobileComponent } from './Pages/mobile/dashboard-mobile.component';
 import { RequestsMobileComponent } from './Pages/mobile/requests-mobile.component';
 import { HistoryMobileComponent } from './Pages/mobile/history-mobile.component';
 import { ProfileMobileComponent } from './Pages/mobile/profile-mobile.component';
 import { AuditLogsMobileComponent } from './Pages/mobile/audit-logs-mobile.component';
-import { BusinessCenterMobileComponent } from './Pages/mobile/business-center-mobile.component';
 
-import { BusinessCenterService } from './services/business-center.service';
 import { CompanyContextService } from './core/context/company-context.service';
 import { InviteService } from './services/invites';
-import { PostLoginRoutingService } from './services/post-login-routing.service';
 import { SubscriptionService } from './services/subscription.service';
 import { AppShellComponent } from './dashboard-shell/app-shell.component';
 
@@ -44,29 +39,57 @@ const INVITE_CLAIM_SUCCESS_PREFIX = 'invite_claim_success_';
 const INVITE_CLAIM_COMPLETED_KEY = 'invite_claim_completed';
 const INVITE_CLAIM_IN_PROGRESS_PREFIX = 'invite_claim_in_progress_';
 const ACTIVE_MEMBERSHIP_STORAGE_KEY = 'active_workspace_membership_v1';
+const WORKSPACE_RECOVERY_RETURN_URL_KEY = 'wellar_workspace_recovery_return_url';
+
+const storeWorkspaceRecoveryTarget = (requestedUrl: string): void => {
+  if (typeof sessionStorage === 'undefined') {
+    return;
+  }
+
+  const normalized = requestedUrl.trim();
+  if (!normalized) {
+    return;
+  }
+
+  sessionStorage.setItem(WORKSPACE_RECOVERY_RETURN_URL_KEY, normalized);
+};
+
+const createWorkspaceRecoveryTree = (router: Router, requestedUrl: string) => {
+  storeWorkspaceRecoveryTarget(requestedUrl);
+  return router.createUrlTree(['/app/workspace-access'], {
+    queryParams: { returnUrl: requestedUrl }
+  });
+};
 
 const getPendingInviteToken = (): string | null => {
-  if (typeof localStorage === 'undefined') {
+  if (typeof sessionStorage === 'undefined') {
     return null;
   }
 
-  const token = localStorage.getItem('pending_invite_token')?.trim() ?? '';
-  return token || null;
+  try {
+    const token = sessionStorage.getItem('pending_invite_token')?.trim() ?? '';
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('pending_invite_token');
+    }
+    return token || null;
+  } catch {
+    return null;
+  }
 };
 
 const hasInviteClaimSuccessMarker = (): boolean => {
-  if (typeof localStorage === 'undefined' || typeof sessionStorage === 'undefined') {
+  if (typeof sessionStorage === 'undefined') {
     return false;
   }
 
   try {
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = sessionStorage.key(index);
       if (!key || !key.startsWith(INVITE_CLAIM_SUCCESS_PREFIX)) {
         continue;
       }
 
-      if (localStorage.getItem(key) === 'true' || sessionStorage.getItem(key) === '1') {
+      if (sessionStorage.getItem(key) === 'true' || sessionStorage.getItem(key) === '1') {
         return true;
       }
     }
@@ -267,7 +290,6 @@ const mobileRequestsMatch: CanMatchFn = () => isMobileViewport();
 const mobileHistoryMatch: CanMatchFn = () => isMobileViewport();
 const mobileProfileMatch: CanMatchFn = () => isMobileViewport();
 const mobileAuditLogsMatch: CanMatchFn = () => isMobileViewport();
-const mobileBusinessCenterMatch: CanMatchFn = () => isMobileViewport();
 
 const appAuthGuard: CanActivateFn = () => {
   const router = inject(Router);
@@ -313,11 +335,11 @@ const paymentAccessGuard: CanActivateFn = () => {
   return subscriptions.isBusinessOnboardingComplete().pipe(
     timeout(8000),
     map((completed) => (completed ? router.createUrlTree(['/app/dashboard']) : true)),
-    catchError(() => of(true))
+    catchError(() => of(createWorkspaceRecoveryTree(router, '/payment')))
   );
 };
 
-const businessOnboardingGuard: CanActivateFn = (_, state) => {
+export const businessOnboardingGuard: CanActivateFn = (_, state) => {
   const token = getStoredToken();
 
   if (!token) {
@@ -328,8 +350,6 @@ const businessOnboardingGuard: CanActivateFn = (_, state) => {
 
   const publicOrAuthPaths = new Set([
     '/',
-    '/login',
-    '/signup',
     '/auth-callback',
     '/verify-email',
     '/download-app',
@@ -342,7 +362,10 @@ const businessOnboardingGuard: CanActivateFn = (_, state) => {
     '/security',
     '/pricing',
     '/payment',
-    '/upgrade-plan'
+    '/upgrade-plan',
+    '/app/workspace-access',
+    '/app/workspace/request',
+    '/app/workspace-restricted'
   ]);
 
   if (publicOrAuthPaths.has(targetPath)) {
@@ -386,25 +409,17 @@ const businessOnboardingGuard: CanActivateFn = (_, state) => {
         return true;
       }
 
-      return router.createUrlTree(['/payment'], {
-        queryParams: { onboarding: 'required' }
-      });
+      return router.createUrlTree(['/app/workspace-access']);
     }),
-    // Fail-open on network/timeout so routes do not get stuck.
-    catchError(() => of(true))
+    catchError(() => of(createWorkspaceRecoveryTree(router, state.url)))
   );
 };
 
-const dashboardWorkspaceGuard: CanActivateFn = async () => {
+export const dashboardWorkspaceGuard: CanActivateFn = async (_, state) => {
   const router = inject(Router);
   const token = getStoredToken();
   if (!token) {
     return router.createUrlTree(['/']);
-  }
-
-  if (hasStoredActiveWorkspace()) {
-    debugRouteGuard('dashboard allowed because active workspace exists');
-    return true;
   }
 
   const pendingInviteToken = getPendingInviteToken();
@@ -414,33 +429,32 @@ const dashboardWorkspaceGuard: CanActivateFn = async () => {
     });
   }
 
+  const invites = inject(InviteService);
+  const companyContext = inject(CompanyContextService);
   const claimFlowActive =
     hasInviteClaimSuccessMarker() ||
     hasInviteClaimCompletedMarker() ||
     hasInviteClaimInProgressMarker();
-  if (!claimFlowActive) {
-    return true;
-  }
-
-  const invites = inject(InviteService);
-  const postLoginRouting = inject(PostLoginRoutingService);
-  const companyContext = inject(CompanyContextService);
 
   try {
-    await postLoginRouting.refreshAuthAndWorkspaceContext({ force: true });
+    await firstValueFrom(companyContext.ensureLoaded().pipe(timeout(8000)));
   } catch {
-    // Continue with best effort checks below.
+    return createWorkspaceRecoveryTree(router, state.url);
   }
 
   const context = companyContext.snapshot().context;
   const hasActiveWorkspace =
     Boolean(context.activeBusinessProfileId) && Boolean(context.activeMemberRole);
-  if (hasActiveWorkspace || hasStoredActiveWorkspace()) {
+  if (hasActiveWorkspace) {
     debugRouteGuard('dashboard allowed because active workspace exists', {
       activeBusinessProfileId: context.activeBusinessProfileId ?? null,
       activeMemberRole: context.activeMemberRole ?? null
     });
     return true;
+  }
+
+  if (!claimFlowActive) {
+    return createWorkspaceRecoveryTree(router, state.url);
   }
 
   const inviteToken =
@@ -465,6 +479,7 @@ const employeeWebOperationalGuard: CanActivateFn = (_, state) => {
     '/app/scan-requests',
     '/app/compliance',
     '/app/alerts',
+    '/app/activity',
     '/app/reports',
     '/app/company',
     '/app/settings'
@@ -478,26 +493,37 @@ const employeeWebOperationalGuard: CanActivateFn = (_, state) => {
   return true;
 };
 
-const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
+const activeRoleRouteGuard = (allowedRoles: string[]): CanActivateFn => (_, state) => {
+  const role = normalizeStoredRole();
+  if (!allowedRoles.includes(role)) {
+    const router = inject(Router);
+    const redirectTo = role === 'employee' ? '/employee-web-access' : '/app/dashboard';
+    return router.createUrlTree([redirectTo], {
+      queryParams: { restricted: state.url.split('?')[0].toLowerCase() }
+    });
+  }
+
+  return true;
+};
+
+const ownerHrRouteGuard = activeRoleRouteGuard(['owner', 'hr']);
+
+export const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
   const token = getStoredToken();
 
   if (!token) {
     return true;
   }
 
-  const businessCenter = inject(BusinessCenterService);
+  const companyContext = inject(CompanyContextService);
   const router = inject(Router);
   const targetPath = state.url.split('?')[0];
 
-  return businessCenter.getHubAccessState().pipe(
+  return companyContext.ensureLoaded().pipe(
     timeout(8000),
-    map((accessState) => {
-      if (!accessState?.hasPaidAccess) {
-        return true;
-      }
-
-      const role = (accessState.memberRole ?? '').toString().trim().toLowerCase();
-      if (role === 'owner' || role === 'admin' || role === 'manager') {
+    map((state) => {
+      const role = (state.context.activeMemberRole ?? '').toString().trim().toLowerCase();
+      if (role === 'owner' || role === 'hr' || role === 'manager') {
         return true;
       }
 
@@ -506,9 +532,9 @@ const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
         return true;
       }
 
-      if (targetPath === '/business-center' || targetPath === '/app/company') {
+      if (targetPath === '/app/company') {
         return router.createUrlTree(['/app/dashboard'], {
-          queryParams: { restricted: 'business-center' }
+          queryParams: { restricted: 'company' }
         });
       }
 
@@ -516,7 +542,7 @@ const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
         queryParams: { restricted: 'team' }
       });
     }),
-    catchError(() => of(true))
+    catchError(() => of(createWorkspaceRecoveryTree(router, state.url)))
   );
 };
 
@@ -552,12 +578,6 @@ export const routes: Routes = [
     canActivate: [businessOnboardingGuard],
     component: ProfileMobileComponent
   },
-  {
-    path: 'business-center',
-    canMatch: [mobileBusinessCenterMatch],
-    canActivate: [businessOnboardingGuard],
-    component: BusinessCenterMobileComponent
-  },
 
   /* ================= OLD DESKTOP URLS -> NEW APP URLS ================= */
   {
@@ -581,11 +601,6 @@ export const routes: Routes = [
     redirectTo: '/app/workspace-access'
   },
   {
-    path: 'business-center',
-    pathMatch: 'full',
-    redirectTo: '/app/company'
-  },
-  {
     path: 'audit-logs',
     pathMatch: 'full',
     redirectTo: '/app/dashboard'
@@ -600,14 +615,6 @@ export const routes: Routes = [
         path: '',
         pathMatch: 'full',
         component: Authlanding
-      },
-      {
-        path: '',
-        component: LoginComponent
-      },
-      {
-        path: '',
-        component: SignupComponent
       },
       {
         path: 'download-app',
@@ -674,16 +681,17 @@ export const routes: Routes = [
     ]
   },
 
-  /* ================= AUTH ================= */
+  /* ========= LEGACY AUTH PATHS -> LANDING MODAL ========= */
+  // Login/Signup are a modal overlay on the landing page, not standalone
+  // pages. Any deep link to /login or /signup opens that modal via the
+  // ?auth= query param handled by Authlanding.applyRouteAuthMode().
   {
-    path: 'auth',
-    component: PublicLayout,
-    children: [
-      {
-        path: 'login',
-        component: LoginComponent
-      }
-    ]
+    path: 'login',
+    redirectTo: () => inject(Router).parseUrl('/?auth=login')
+  },
+  {
+    path: 'signup',
+    redirectTo: () => inject(Router).parseUrl('/?auth=signup')
   },
 
   /* ================= NEW AUTHENTICATED APP ================= */
@@ -705,13 +713,13 @@ export const routes: Routes = [
       },
       {
         path: 'workforce',
-        canActivate: [employeeWebOperationalGuard],
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard],
         loadComponent: () =>
           import('./Pages/workforce/workforce').then((m) => m.WorkforcePageComponent)
       },
       {
         path: 'scan-requests',
-        canActivate: [employeeWebOperationalGuard],
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard],
         loadComponent: () =>
           import('./Pages/requests/requests').then((m) => m.RequestsPageComponent)
       },
@@ -722,31 +730,53 @@ export const routes: Routes = [
       },
       {
         path: 'company',
-        canActivate: [employeeWebOperationalGuard],
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard, ownerHrRouteGuard],
         loadComponent: () =>
           import('./Pages/company/company').then((m) => m.CompanyPageComponent)
       },
       {
+        path: 'company/settings',
+        pathMatch: 'full',
+        redirectTo: 'company'
+      },
+      {
+        path: 'business-center',
+        pathMatch: 'full',
+        redirectTo: 'dashboard'
+      },
+      {
+        path: 'invites',
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard, ownerHrRouteGuard],
+        loadComponent: () =>
+          import('./Pages/invites/invites').then((m) => m.InvitesPageComponent)
+      },
+      {
         path: 'compliance',
-        canActivate: [employeeWebOperationalGuard],
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard],
         loadComponent: () =>
           import('./Pages/compliance/compliance').then((m) => m.CompliancePageComponent)
       },
       {
         path: 'alerts',
-        canActivate: [employeeWebOperationalGuard],
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard],
         loadComponent: () =>
           import('./Pages/alerts/alerts').then((m) => m.AlertsPageComponent)
       },
       {
+        path: 'activity',
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard, ownerHrRouteGuard],
+        loadComponent: () =>
+          import('./Pages/activity/activity').then((m) => m.ActivityPageComponent)
+      },
+      {
         path: 'reports',
-        canActivate: [employeeWebOperationalGuard],
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard],
         loadComponent: () =>
           import('./Pages/reports/reports').then((m) => m.ReportsPageComponent)
       },
       {
         path: 'settings',
-        canActivate: [employeeWebOperationalGuard],
+        canActivate: [dashboardWorkspaceGuard, employeeWebOperationalGuard, ownerHrRouteGuard],
         loadComponent: () =>
           import('./Pages/settings/settings').then((m) => m.SettingsPageComponent)
       },
@@ -755,6 +785,27 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./Pages/workspace-access/workspace-access').then(
             (m) => m.WorkspaceAccessPageComponent
+          )
+      },
+      {
+        path: 'workspace/request',
+        canActivate: [dashboardWorkspaceGuard],
+        loadComponent: () =>
+          import('./Pages/workspace-request/workspace-request').then(
+            (m) => m.WorkspaceRequestPageComponent
+          )
+      },
+      {
+        path: 'my-readiness',
+        pathMatch: 'full',
+        redirectTo: '/employee-web-access'
+      },
+      {
+        path: 'workspace-restricted',
+        canActivate: [dashboardWorkspaceGuard],
+        loadComponent: () =>
+          import('./Pages/workspace-restricted/workspace-restricted').then(
+            (m) => m.WorkspaceRestrictedPageComponent
           )
       }
     ]
@@ -778,7 +829,7 @@ export const routes: Routes = [
   },
   {
     path: 'employee-web-access',
-    canActivate: [appAuthGuard],
+    canActivate: [appAuthGuard, dashboardWorkspaceGuard],
     loadComponent: () =>
       import('./Pages/employee-web-access/employee-web-access').then(
         (m) => m.EmployeeWebAccessPageComponent
@@ -788,6 +839,7 @@ export const routes: Routes = [
   /* ================= FALLBACK ================= */
   {
     path: '**',
-    redirectTo: ''
+    loadComponent: () =>
+      import('./Pages/not-found/not-found').then((m) => m.NotFoundComponent)
   }
 ];

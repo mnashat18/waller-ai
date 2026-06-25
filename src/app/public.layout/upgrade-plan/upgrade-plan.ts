@@ -8,14 +8,14 @@ import { RouterModule } from '@angular/router';
   imports: [CommonModule, RouterModule],
   template: `
     <section class="mx-auto max-w-3xl px-6 py-20 text-center text-white">
-      <p class="text-sm uppercase tracking-[0.2em] text-slate-400">Wellar Workspace</p>
-      <h1 class="mt-4 text-4xl font-semibold">Workspace activation has moved.</h1>
+      <p class="text-sm uppercase tracking-[0.2em] text-slate-400">Wellar Organization</p>
+      <h1 class="mt-4 text-4xl font-semibold">Organization activation is account-team managed.</h1>
       <p class="mt-4 text-slate-300">
-        Use the main dashboard after sign-in and select the active company workspace to continue.
+        Use the main dashboard after sign-in and select the active organization to continue.
       </p>
       <div class="mt-8 flex items-center justify-center gap-3">
-        <a routerLink="/dashboard" class="rounded-full bg-[#f5c451] px-6 py-3 text-slate-900">Open Dashboard</a>
-        <a routerLink="/contact" class="rounded-full border border-white/15 px-6 py-3 text-white">Contact Wellar</a>
+        <a routerLink="/app/dashboard" class="rounded-full bg-[#f5c451] px-6 py-3 text-slate-900">Open Dashboard</a>
+        <a routerLink="/contact" class="rounded-full border border-white/15 px-6 py-3 text-white">Contact Support</a>
       </div>
     </section>
   `

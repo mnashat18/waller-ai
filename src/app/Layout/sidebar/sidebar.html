@@ -7,13 +7,13 @@
   <div class="sidebar-plan-card sidebar-company-card">
     <div class="sidebar-company-card__avatar">{{ companyInitial() }}</div>
     <div class="sidebar-company-card__body">
-      <p class="sidebar-plan-title">Active Company</p>
+      <p class="sidebar-plan-title">Active Organization</p>
       <p class="sidebar-plan-name">{{ activeCompanyLabel }}</p>
       <p class="sidebar-plan-meta">{{ statusText() }}</p>
-      <p class="sidebar-plan-meta">Role: {{ memberRoleLabel }}</p>
+      <p class="sidebar-plan-meta">Access Level: {{ memberRoleLabel }}</p>
     </div>
     <span class="sidebar-company-card__badge">{{ activeDepartmentLabel }}</span>
-    <a routerLink="/app/company" class="sidebar-plan-link">Open Company</a>
+    <a routerLink="/app/company" class="sidebar-plan-link">Open Organization</a>
   </div>
 
   <nav class="sidebar-nav">

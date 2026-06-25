@@ -19,5 +19,5 @@ import { Component, Input } from '@angular/core';
 })
 export class LoadingStateComponent {
   @Input() title = 'Loading';
-  @Input() description = 'Please wait while the workspace context loads.';
+  @Input() description = 'Please wait while the organization context loads.';
 }

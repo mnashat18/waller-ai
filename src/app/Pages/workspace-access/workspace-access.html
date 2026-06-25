@@ -22,23 +22,30 @@
       </p>
 
       <p class="workspace-access-page__supporting">
-        Create a workspace, join with an invite, or select the company you already manage.
+        Join with an invitation, request organization access, or select an organization you already belong to.
       </p>
 
       <div class="workspace-access-page__pill">
-        You need an active workspace membership before accessing operational tools.
+        You need active organization access before using operational tools.
       </div>
     </aside>
 
     <main class="workspace-access-page__content app-dashboard-panel">
-      <div class="workspace-access-page__loading-note" *ngIf="loading">
-        Checking your workspace access...
+      <div class="workspace-access-loading" *ngIf="loading" role="status" aria-live="polite">
+        <span class="workspace-access-page__section-label">Organization Access</span>
+        <span class="workspace-access-loading__hint">Checking your organization access...</span>
+        <div class="workspace-access-loading__bar"></div>
+        <div class="workspace-access-loading__bar workspace-access-loading__bar--short"></div>
+        <div class="workspace-access-loading__cards">
+          <div class="workspace-access-loading__card"></div>
+          <div class="workspace-access-loading__card"></div>
+        </div>
       </div>
 
       <ng-container *ngIf="state as vm">
         <div class="workspace-access-page__error" *ngIf="vm.mode === 'error'">
-          <p class="workspace-access-page__error-title">We could not load your workspace access.</p>
-          <p class="workspace-access-page__error-copy">{{ errorMessage || 'We could not load your workspace access right now.' }}</p>
+          <p class="workspace-access-page__error-title">We could not load your organization access.</p>
+          <p class="workspace-access-page__error-copy">{{ errorMessage || 'We could not load your organization access right now.' }}</p>
 
           <div class="workspace-access-page__actions">
             <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="retry()">
@@ -53,50 +60,65 @@
         <ng-container *ngIf="vm.mode !== 'error'">
           <div class="workspace-access-page__header">
             <div>
-              <p class="workspace-access-page__section-label">Workspace Access</p>
+              <p class="workspace-access-page__section-label">Organization Access</p>
               <h2 *ngIf="vm.mode === 'no-workspace'">Welcome to Wellar AI</h2>
-              <h2 *ngIf="vm.mode === 'pending-application'">Workspace request under review</h2>
+              <h2 *ngIf="vm.mode === 'pending-application'">Organization access request under review</h2>
               <h2 *ngIf="vm.mode === 'needs-more-info'">More information needed</h2>
-              <h2 *ngIf="vm.mode === 'application-rejected'">Workspace request not approved</h2>
-              <h2 *ngIf="vm.mode === 'pending-invite'">Pending Invite</h2>
-              <h2 *ngIf="vm.mode === 'multiple-workspaces'">Choose Workspace</h2>
+              <h2 *ngIf="vm.mode === 'application-rejected'">Organization access request not approved</h2>
+              <h2 *ngIf="vm.mode === 'application-approved'">Organization access request approved</h2>
+              <h2 *ngIf="vm.mode === 'application-closed'">Organization access request closed</h2>
+              <h2 *ngIf="vm.mode === 'pending-invite'">Pending Invitation</h2>
+              <h2 *ngIf="vm.mode === 'multiple-workspaces'">Choose Organization</h2>
               <h2 *ngIf="vm.mode === 'employee-access'">Employee Access</h2>
-              <h2 *ngIf="vm.mode === 'restricted'">Workspace Access Restricted</h2>
+              <h2 *ngIf="vm.mode === 'restricted'">Organization Access Restricted</h2>
 
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'no-workspace'">
-                Request an enterprise workspace or join your team with an invite.
+                Join with an invitation or request organization access.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'pending-application'">
-                {{ vm.pendingApplication?.companyName || 'Your workspace request' }} is under review.
+                {{ vm.pendingApplication?.companyName || 'Your organization access request' }} is under review.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'needs-more-info'">
-                The Wellar team needs more information before approving your workspace request.
+                The Wellar team needs more information before approving your organization access request.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'application-rejected'">
-                Your workspace request was not approved. Contact the Wellar team for more information.
+                Your organization access request was not approved. Contact the Wellar team for more information.
+              </p>
+              <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'application-approved'">
+                Your organization access request was approved. Refresh access to open the organization when membership is active.
+              </p>
+              <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'application-closed'">
+                This organization access request is closed. Contact the Wellar team or submit a new request.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'pending-invite'">
-                You have an invitation to join {{ vm.selectedInvite?.companyName || 'your company' }}.
+                You have an invitation to join {{ vm.selectedInvite?.companyName || 'your organization' }}.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'multiple-workspaces'">
-                Select the company workspace you want to manage.
+                Select the organization you want to access.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'employee-access'">
                 Your account is active, but the operational dashboard is available only to owners, HR, and managers.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'restricted'">
-                Your access to this workspace is inactive. Contact your company owner or HR team.
+                Your organization access is inactive. Contact your organization owner or HR team.
               </p>
             </div>
 
             <div
               class="workspace-access-page__header-actions"
               *ngIf="vm.mode === 'no-workspace' || vm.mode === 'pending-invite'">
-              <button type="button" class="workspace-access-button" (click)="openInviteLink()">
-                Enter Invite Code
+              <button
+                *ngIf="vm.mode === 'no-workspace'"
+                type="button"
+                class="workspace-access-button workspace-access-button--primary"
+                (click)="openCreateCompany()">
+                Create My Company
               </button>
-              <button type="button" class="workspace-access-button" (click)="startWorkspaceSetup()">
-                Request Enterprise Workspace
+              <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="startWorkspaceSetup()">
+                Request organization access
+              </button>
+              <button type="button" class="workspace-access-button" (click)="openInviteLink()">
+                Enter invitation code
               </button>
             </div>
           </div>
@@ -107,7 +129,7 @@
             (ngSubmit)="joinWithInviteCode()"
             #inviteCodeForm="ngForm">
             <label>
-              <span>Invite Code</span>
+              <span>Invitation code</span>
               <input
                 class="workspace-access-input"
                 [(ngModel)]="inviteCode"
@@ -119,7 +141,74 @@
               type="submit"
               class="workspace-access-button workspace-access-button--primary"
               [disabled]="inviteCodeLoading || inviteCodeForm.invalid">
-              {{ inviteCodeLoading ? 'Joining workspace...' : 'Join Workspace' }}
+              {{ inviteCodeLoading ? 'Joining organization...' : 'Join with invitation' }}
+            </button>
+          </form>
+
+          <form
+            class="workspace-access-page__create-form"
+            *ngIf="createCompanyOpen && vm.mode === 'no-workspace'"
+            (ngSubmit)="createCompany()"
+            #createCompanyFormRef="ngForm">
+            <div class="workspace-access-page__form-header">
+              <h3>Create your company workspace</h3>
+              <p>You will become Owner only of this new company. Existing companies must be joined by invitation.</p>
+            </div>
+
+            <div class="workspace-access-page__create-grid">
+              <label>
+                <span>Company name</span>
+                <input
+                  class="workspace-access-input"
+                  [(ngModel)]="createCompanyForm.companyName"
+                  name="companyName"
+                  maxlength="120"
+                  required />
+              </label>
+              <label>
+                <span>Contact name</span>
+                <input
+                  class="workspace-access-input"
+                  [(ngModel)]="createCompanyForm.contactName"
+                  name="contactName"
+                  maxlength="100" />
+              </label>
+              <label>
+                <span>Work email</span>
+                <input
+                  class="workspace-access-input"
+                  [(ngModel)]="createCompanyForm.workEmail"
+                  name="workEmail"
+                  type="email"
+                  maxlength="120" />
+              </label>
+              <label>
+                <span>Phone</span>
+                <input
+                  class="workspace-access-input"
+                  [(ngModel)]="createCompanyForm.phone"
+                  name="phone"
+                  maxlength="30" />
+              </label>
+              <label>
+                <span>Country</span>
+                <input
+                  class="workspace-access-input"
+                  [(ngModel)]="createCompanyForm.country"
+                  name="country"
+                  maxlength="80" />
+              </label>
+            </div>
+
+            <p class="workspace-access-page__invite-error" *ngIf="createCompanyError">
+              {{ createCompanyError }}
+            </p>
+
+            <button
+              type="submit"
+              class="workspace-access-button workspace-access-button--primary"
+              [disabled]="createCompanyLoading || createCompanyFormRef.invalid">
+              {{ createCompanyLoading ? 'Creating company...' : 'Create Company Workspace' }}
             </button>
           </form>
 
@@ -133,24 +222,34 @@
 
           <ng-container [ngSwitch]="vm.mode">
             <section *ngSwitchCase="'no-workspace'" class="workspace-access-page__stack">
+                <article class="workspace-access-card workspace-access-card--primary">
+                  <span class="workspace-access-card__tag">Recommended</span>
+                  <h3>Create your company workspace</h3>
+                  <p>Start a new company workspace for your organization. You become Owner only of this newly created company.</p>
+                  <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="openCreateCompany()">
+                    Create My Company
+                  </button>
+                </article>
+
                 <article class="workspace-access-card">
-                  <h3>Request Enterprise Workspace</h3>
-                  <p>Submit a workspace request for review by the Wellar team.</p>
+                  <h3>Request organization access</h3>
+                  <p>Tell us about your organization to manage teams, send scan requests, and track readiness on Wellar AI.</p>
+                  <p class="workspace-access-card__note">Submitting this sends an organization access request that the Wellar team reviews before access is activated.</p>
                   <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="startWorkspaceSetup()">
-                    Request Enterprise Workspace
+                    Request organization access
                   </button>
                 </article>
 
               <article class="workspace-access-card">
-                <h3>Join with Invite</h3>
-                <p>Use an invite link or invite code from your company.</p>
+                <h3>Join with an invitation</h3>
+                <p>Already invited? Use the invitation link or code from your organization.</p>
                 <button type="button" class="workspace-access-button" (click)="openInviteLink()">
-                  Enter Invite Code
+                  Enter invitation code
                 </button>
               </article>
 
               <p class="workspace-access-page__footer-note">
-                You need an active workspace membership before accessing operational tools.
+                You need active organization access before using operational tools.
               </p>
             </section>
 
@@ -159,17 +258,17 @@
                 <div class="workspace-access-card__top">
                   <div>
                     <p class="workspace-access-card__eyebrow">Request</p>
-                    <h3>{{ application.companyName || 'Workspace request' }}</h3>
+                    <h3>{{ application.companyName || 'Organization access request' }}</h3>
                   </div>
                   <span class="workspace-access-chip">Pending Review</span>
                 </div>
 
                 <p class="workspace-access-card__copy">
-                  Your company workspace request is being reviewed by the Wellar team.
+                  Your organization access request is being reviewed by the Wellar team.
                 </p>
 
                 <div class="workspace-access-card__meta">
-                  <span>Company: {{ application.companyName || 'Unknown company' }}</span>
+                  <span>Organization: {{ application.companyName || 'Unknown organization' }}</span>
                   <span *ngIf="application.submittedAt">Submitted: {{ application.submittedAt | date : 'mediumDate' }}</span>
                   <span>Status: Pending Review</span>
                 </div>
@@ -179,7 +278,7 @@
                     Contact Support
                   </a>
                   <a routerLink="/app/workspace-access" class="workspace-access-button">
-                    Back to Workspace Access
+                    Back to Organization Access
                   </a>
                   <button type="button" class="workspace-access-button" (click)="logout()">
                     Logout
@@ -199,11 +298,11 @@
                 </div>
 
                 <p class="workspace-access-card__copy">
-                  The Wellar team needs more information before approving your workspace request.
+                  The Wellar team needs more information before approving your organization access request.
                 </p>
 
                 <div class="workspace-access-card__meta">
-                  <span>Company: {{ application.companyName || 'Unknown company' }}</span>
+                  <span>Organization: {{ application.companyName || 'Unknown organization' }}</span>
                   <span *ngIf="application.submittedAt">Submitted: {{ application.submittedAt | date : 'mediumDate' }}</span>
                   <span>Status: {{ application.status }}</span>
                 </div>
@@ -231,27 +330,95 @@
                 <div class="workspace-access-card__top">
                   <div>
                     <p class="workspace-access-card__eyebrow">Request</p>
-                    <h3>Workspace request not approved</h3>
+                    <h3>Organization access request not approved</h3>
                   </div>
                   <span class="workspace-access-chip">Rejected</span>
                 </div>
 
                 <p class="workspace-access-card__copy">
-                  Your workspace request was not approved. Contact the Wellar team for more information.
+                  Your organization access request was not approved. Contact the Wellar team for more information.
                 </p>
 
                 <div class="workspace-access-card__meta">
-                  <span>Company: {{ application.companyName || 'Unknown company' }}</span>
+                  <span>Organization: {{ application.companyName || 'Unknown organization' }}</span>
                   <span *ngIf="application.submittedAt">Submitted: {{ application.submittedAt | date : 'mediumDate' }}</span>
                   <span>Status: {{ application.status }}</span>
                 </div>
 
                 <div class="workspace-access-card__actions">
-                  <a routerLink="/contact" class="workspace-access-button workspace-access-button--primary">
+                  <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="startWorkspaceSetup()">
+                    Submit a new request
+                  </button>
+                  <a routerLink="/contact" class="workspace-access-button">
                     Contact Support
                   </a>
-                  <a routerLink="/app/workspace-access" class="workspace-access-button">
-                    Back to Workspace Access
+                  <button type="button" class="workspace-access-button" (click)="logout()">
+                    Logout
+                  </button>
+                </div>
+              </article>
+            </section>
+
+            <section *ngSwitchCase="'application-approved'" class="workspace-access-page__stack">
+              <article class="workspace-access-card workspace-access-card--primary" *ngIf="vm.pendingApplication as application">
+                <div class="workspace-access-card__top">
+                  <div>
+                    <p class="workspace-access-card__eyebrow">Request</p>
+                    <h3>Organization access request approved</h3>
+                  </div>
+                  <span class="workspace-access-chip">Approved</span>
+                </div>
+
+                <p class="workspace-access-card__copy">
+                  Your organization access request has been approved. Refresh access to open the organization when membership is active.
+                </p>
+
+                <div class="workspace-access-card__meta">
+                  <span>Organization: {{ application.companyName || 'Unknown organization' }}</span>
+                  <span *ngIf="application.submittedAt">Submitted: {{ application.submittedAt | date : 'mediumDate' }}</span>
+                  <span>Status: {{ application.status }}</span>
+                </div>
+
+                <div class="workspace-access-card__actions">
+                  <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="retry()">
+                    Continue to my organization
+                  </button>
+                  <a routerLink="/contact" class="workspace-access-button">
+                    Contact Support
+                  </a>
+                  <button type="button" class="workspace-access-button" (click)="logout()">
+                    Logout
+                  </button>
+                </div>
+              </article>
+            </section>
+
+            <section *ngSwitchCase="'application-closed'" class="workspace-access-page__stack">
+              <article class="workspace-access-card workspace-access-card--invite" *ngIf="vm.pendingApplication as application">
+                <div class="workspace-access-card__top">
+                  <div>
+                    <p class="workspace-access-card__eyebrow">Request</p>
+                    <h3>Organization access request closed</h3>
+                  </div>
+                  <span class="workspace-access-chip">Closed</span>
+                </div>
+
+                <p class="workspace-access-card__copy">
+                  This organization access request is closed. Contact the Wellar team to reopen it, or submit a new request.
+                </p>
+
+                <div class="workspace-access-card__meta">
+                  <span>Organization: {{ application.companyName || 'Unknown organization' }}</span>
+                  <span *ngIf="application.submittedAt">Submitted: {{ application.submittedAt | date : 'mediumDate' }}</span>
+                  <span>Status: {{ application.status }}</span>
+                </div>
+
+                <div class="workspace-access-card__actions">
+                  <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="startWorkspaceSetup()">
+                    Submit a new request
+                  </button>
+                  <a routerLink="/contact" class="workspace-access-button">
+                    Contact Support
                   </a>
                   <button type="button" class="workspace-access-button" (click)="logout()">
                     Logout
@@ -271,7 +438,7 @@
                 </div>
 
                 <p class="workspace-access-card__copy">
-                  You have an invitation to join this workspace as {{ invite.memberRole }}.
+                  You have an invitation to join this organization with {{ accessLevelLabel(invite.memberRole) }} access.
                 </p>
 
                 <div class="workspace-access-card__meta">
@@ -285,7 +452,7 @@
                     class="workspace-access-button workspace-access-button--primary"
                     [disabled]="submittingInviteId === invite.id"
                     (click)="acceptInvite(invite)">
-                    {{ submittingInviteId === invite.id ? 'Accepting...' : 'Accept Invite' }}
+                    {{ submittingInviteId === invite.id ? 'Accepting...' : 'Accept invitation' }}
                   </button>
                   <button
                     type="button"
@@ -300,27 +467,26 @@
                 </div>
 
                 <div class="workspace-access-card__details" *ngIf="inviteDetailsOpen">
-                  <span>Workspace: {{ invite.companyName }}</span>
-                  <span>Role: {{ invite.memberRole }}</span>
-                  <span>Scope: {{ inviteScopeLabel(invite) }}</span>
-                  <span *ngIf="invite.token">Invite token available</span>
+                  <span>Organization: {{ invite.companyName }}</span>
+                  <span>Access Level: {{ accessLevelLabel(invite.memberRole) }}</span>
+                  <span>Department: {{ inviteScopeLabel(invite) }}</span>
                 </div>
               </article>
 
               <div class="workspace-access-page__stack workspace-access-page__stack--compact">
                 <article class="workspace-access-card">
-                  <h3>Join with Invite</h3>
-                  <p>Use an invite link or invite code from your company.</p>
+                  <h3>Join with an invitation</h3>
+                  <p>Use the invitation link or code from your organization to accept the pending invite.</p>
                   <button type="button" class="workspace-access-button" (click)="openInviteLink()">
-                    Enter Invite Code
+                    Enter invitation code
                   </button>
                 </article>
 
                 <article class="workspace-access-card">
-                  <h3>Request Enterprise Workspace</h3>
-                  <p>Submit a workspace request if your company is not yet active.</p>
+                  <h3>Request organization access</h3>
+                  <p>Not part of this team? Request organization setup instead. The Wellar team reviews each request before activation.</p>
                   <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="startWorkspaceSetup()">
-                    Request Enterprise Workspace
+                    Request organization access
                   </button>
                 </article>
               </div>
@@ -333,15 +499,16 @@
                   class="workspace-access-card workspace-access-card--workspace">
                   <div class="workspace-access-card__top">
                     <div>
-                      <p class="workspace-access-card__eyebrow">Workspace</p>
+                      <p class="workspace-access-card__eyebrow">Organization</p>
                       <h3>{{ workspace.companyName }}</h3>
                     </div>
-                    <span class="workspace-access-chip">{{ workspace.memberRole }}</span>
+                    <span class="workspace-access-chip">{{ accessLevelLabel(workspace.memberRole) }}</span>
                   </div>
 
                   <div class="workspace-access-card__meta">
-                    <span>Scope: {{ workspaceScopeLabel(workspace) }}</span>
-                    <span>Status: {{ workspace.status }}</span>
+                    <span>Department: {{ workspaceScopeLabel(workspace) }}</span>
+                    <span>Access Level: {{ accessLevelLabel(workspace.memberRole) }}</span>
+                    <span>State: {{ organizationStateLabel(workspace) }}</span>
                   </div>
 
                   <button
@@ -349,13 +516,13 @@
                     class="workspace-access-button workspace-access-button--primary"
                     [disabled]="switchingWorkspaceId === workspace.id"
                     (click)="openWorkspace(workspace)">
-                    {{ switchingWorkspaceId === workspace.id ? 'Opening...' : 'Open Workspace' }}
+                    {{ switchingWorkspaceId === workspace.id ? 'Opening...' : 'Open Organization' }}
                   </button>
                 </article>
               </div>
 
               <p class="workspace-access-page__footer-note">
-                Select the company workspace you want to manage.
+                Select the organization you want to access.
               </p>
             </section>
 
@@ -364,10 +531,7 @@
                 <h3>Employee Access</h3>
                 <p>Your account is active, but the operational dashboard is reserved for owners, HR, and managers.</p>
                 <div class="workspace-access-card__actions">
-                  <a routerLink="/app/my-readiness" class="workspace-access-button workspace-access-button--primary">
-                    Continue to My Readiness
-                  </a>
-                  <button type="button" class="workspace-access-button" (click)="openMobileApp()">
+                  <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="openMobileApp()">
                     Open Mobile App
                   </button>
                 </div>
@@ -376,8 +540,8 @@
 
             <section *ngSwitchCase="'restricted'" class="workspace-access-page__stack">
               <article class="workspace-access-card workspace-access-card--restricted">
-                <h3>Workspace Access Restricted</h3>
-                <p>Your access to this workspace is inactive. Contact your company owner or HR team.</p>
+                <h3>Organization Access Restricted</h3>
+                <p>Your organization access is inactive. Contact your organization owner or HR team.</p>
                 <div class="workspace-access-card__actions">
                   <button type="button" class="workspace-access-button" (click)="retry()">Retry</button>
                   <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="logout()">Logout</button>

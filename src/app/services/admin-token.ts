@@ -17,6 +17,7 @@ export class AdminTokenService {
   private readonly errorCooldownMs = 2 * 60 * 1000;
   private readonly requestTimeoutMs = 5000;
   private inflight?: Observable<string | null>;
+  private browserAdminEndpointWarned = false;
 
   constructor(private http: HttpClient) {}
 
@@ -26,9 +27,20 @@ export class AdminTokenService {
       return of(null);
     }
 
+    // SECURITY: a privileged admin token must never be fetched into the browser in a
+    // production build. Even if ADMIN_TOKEN_ENDPOINT is (mis)configured to a reachable
+    // non-localhost URL, hard-disable the path here so callers fall back to the
+    // signed-in user's own token instead of exposing a tenant-bypassing admin token.
+    if (environment.production) {
+      this.warnBrowserAdminEndpointOnce(endpoint);
+      return of(null);
+    }
+
     if (endpoint.includes('127.0.0.1:3001') || endpoint.includes('localhost:3001')) {
       return of(null);
     }
+
+    this.warnBrowserAdminEndpointOnce(endpoint);
 
     if (Date.now() < this.blockedUntilTs) {
       return of(null);
@@ -75,6 +87,22 @@ export class AdminTokenService {
     );
 
     return this.inflight;
+  }
+
+  private warnBrowserAdminEndpointOnce(endpoint: string): void {
+    if (this.browserAdminEndpointWarned) {
+      return;
+    }
+    this.browserAdminEndpointWarned = true;
+
+    console.warn(
+      '[AdminTokenService] SECURITY: ADMIN_TOKEN_ENDPOINT is configured as a ' +
+        'browser-accessible, non-localhost URL (' + endpoint + '). A privileged ' +
+        'admin token delivered to the browser can BYPASS Directus tenant (row-level) ' +
+        'permissions and expose cross-tenant data. This endpoint must require ' +
+        'server-side authorization and may only mint a limited Operations-role token — ' +
+        'never a full admin token.'
+    );
   }
 
   private getTokenExp(token: string | null): number {

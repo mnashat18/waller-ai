@@ -101,7 +101,8 @@ export class App implements OnDestroy {
     }
 
     try {
-      window.localStorage.setItem('pending_invite_token', inviteToken);
+      window.sessionStorage.setItem('pending_invite_token', inviteToken);
+      window.localStorage.removeItem('pending_invite_token');
     } catch {
       // ignore storage errors
     }
