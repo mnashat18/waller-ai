@@ -34,6 +34,7 @@ export type WorkflowMemberOption = {
   user_id: string | null;
   label: string;
   email: string | null;
+  member_role: string | null;
   department_id: string | null;
   department_name: string | null;
   status: string | null;
@@ -116,6 +117,18 @@ export type RequestActionResult = {
 
 export type CreateScanRequestResponse = {
   request: RequestRow;
+};
+
+export type ScanRequestQueueSummary = {
+  total: number;
+  pending: number;
+  completed: number;
+  overdue: number;
+};
+
+export type ScanRequestQueueResponse = {
+  rows: ScanRequestRecord[];
+  summary: ScanRequestQueueSummary;
 };
 
 export type ScanRequestApiErrorCode =
@@ -494,11 +507,11 @@ export class OperationsWorkflowsService {
         console.log('[ScanRequests] active context ready');
       }),
       switchMap((context) =>
-        this.loadScanRequestsForPage(context).pipe(
+        this.fetchScanRequestQueue(context).pipe(
           tap((requests) => {
-            console.log('[ScanRequests] scan requests result', Array.isArray(requests) ? requests.length : 0);
+            console.log('[ScanRequests] scan requests result', Array.isArray(requests.rows) ? requests.rows.length : 0);
           }),
-          switchMap((requests) =>
+          switchMap((queue) =>
             forkJoin({
               departments: this.loadDepartmentsForRequests(context).pipe(
                 timeout(12000),
@@ -549,7 +562,7 @@ export class OperationsWorkflowsService {
                 const pageData = this.buildRequestsPageData(
                   departments,
                   members,
-                  requests,
+                  queue.rows,
                   scans,
                   notifications
                 );
@@ -597,7 +610,8 @@ export class OperationsWorkflowsService {
     let requests: ScanRequestRecord[] = [];
     let warning: string | undefined;
     try {
-      requests = await firstValueFrom(this.loadScanRequestsForPage(context).pipe(take(1), timeout(8000)));
+      const queue = await firstValueFrom(this.fetchScanRequestQueue(context).pipe(take(1), timeout(8000)));
+      requests = queue.rows ?? [];
       console.log('[ScanRequests] scan requests result', Array.isArray(requests) ? requests.length : 0);
     } catch (error) {
       console.error('[OperationsWorkflows] requests failed', error);
@@ -690,6 +704,7 @@ export class OperationsWorkflowsService {
                 user_id: this.normalizeId(member.user),
                 label: formatMember(member, 'Unknown member'),
                 email: sanitizeDisplayValue(this.objectRecord(member.user)?.['email'], ''),
+                member_role: this.normalizeMemberRole(member.member_role),
                 department_id: this.normalizeId(member.department),
                 department_name: formatDepartment(member.department, 'Unassigned'),
                 status: member.status ?? null
@@ -1115,179 +1130,50 @@ export class OperationsWorkflowsService {
     );
   }
 
-  private loadScanRequestsForPage(context: ScopedContext): Observable<ScanRequestRecord[]> {
+  loadScanRequestQueue(): Observable<ScanRequestQueueResponse> {
+    return this.ensureScopedContext(true).pipe(
+      switchMap((context) => this.fetchScanRequestQueue(context))
+    );
+  }
+
+  private fetchScanRequestQueue(context: ScopedContext): Observable<ScanRequestQueueResponse> {
     this.assertManagerDepartmentScope(context);
-    const filterVariants: Array<Array<{ path: string[]; operator: string; value: string }>> = [
-      context.activeRole === 'manager'
-        ? [
-            { path: ['business_profile'], operator: '_eq', value: context.businessProfileId },
-            { path: ['department'], operator: '_eq', value: context.activeDepartmentId as string }
-          ]
-        : [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
-      ...(context.activeRole === 'manager'
-        ? []
-        : [[{ path: ['business_profile', 'id'], operator: '_eq', value: context.businessProfileId }]])
-    ];
-    const sortVariants = ['-requested_at', '-id'];
-    const expandedFields = [
-      'id',
-      'business_profile',
-      'department',
-      'requested_by_user',
-      'target_member',
-      'completed_scan',
-      'status',
-      'cancelled',
-      'request_type',
-      'requested_at',
-      'due_at',
-      'completed_at'
-    ];
-    const baseFields = [
-      'id',
-      'business_profile',
-      'target_member',
-      'requested_by_user',
-      'status',
-      'request_type',
-      'requested_at'
-    ];
-    const managerFields = ['id', 'department', 'status', 'request_type', 'requested_at', 'due_at'];
-    const fieldVariants: string[][] = context.activeRole === 'manager'
-      ? [managerFields]
-      : [baseFields, expandedFields];
-    let failureLogged = false;
 
-    const buildQueryUrl = (
-      fields: string[],
-      sort: string,
-      filters: Array<{ path: string[]; operator: string; value: string }>
-    ): string => {
-      const params = new URLSearchParams({
-        fields: fields.join(','),
-        sort,
-        limit: '1000'
-      });
-      for (const filter of filters) {
-        this.setFilter(params, filter.path, filter.operator, filter.value);
-      }
-      return `${this.api}/items/scan_requests?${params.toString()}`;
-    };
-
-    const run = (
-      fields: string[],
-      sort: string,
-      filters: Array<{ path: string[]; operator: string; value: string }>
-    ): Observable<ScanRequestRecord[]> => {
-      const url = buildQueryUrl(fields, sort, filters);
-      return this.http.get<{ data?: ScanRequestRecord[] }>(
-        url,
-        { headers: this.headers(context.token), withCredentials: true }
-      ).pipe(
-        timeout(25000),
-        map((response) => (response.data ?? []).map((row) => this.normalizeRequestRecord(row))),
-        catchError((error) => {
-          const status = (error as { status?: number } | null)?.status ?? 0;
-          if ((status === 403 || status === 400) && !failureLogged) {
-            failureLogged = true;
-            console.error('[OperationsWorkflows] requests failing request', {
-              url,
-              fields,
-              filters,
-              sort,
-              status,
-              message:
-                (error as { error?: { errors?: Array<{ message?: string; extensions?: { reason?: string } }>; message?: string }; message?: string } | null)?.error?.errors?.[0]?.extensions?.reason ??
-                (error as { error?: { errors?: Array<{ message?: string }>; message?: string }; message?: string } | null)?.error?.errors?.[0]?.message ??
-                (error as { error?: { message?: string }; message?: string } | null)?.error?.message ??
-                (error as { message?: string } | null)?.message ??
-                'unknown'
-            });
+    const url = `${this.api}/wellar/scan-requests`;
+    return this.http.get<{ data?: ScanRequestQueueResponse }>(
+      url,
+      { headers: this.headers(context.token), withCredentials: true }
+    ).pipe(
+      timeout(25000),
+      map((response) => {
+        const queue = response.data ?? { rows: [], summary: { total: 0, pending: 0, completed: 0, overdue: 0 } };
+        return {
+          rows: (queue.rows ?? []).map((row) => this.normalizeRequestRecord(row)),
+          summary: {
+            total: this.toNumber(queue.summary?.total) ?? 0,
+            pending: this.toNumber(queue.summary?.pending) ?? 0,
+            completed: this.toNumber(queue.summary?.completed) ?? 0,
+            overdue: this.toNumber(queue.summary?.overdue) ?? 0
           }
-          return throwError(() => error);
-        })
-      );
-    };
-
-    const trySorts = (
-      fields: string[],
-      filters: Array<{ path: string[]; operator: string; value: string }>,
-      sortIndex = 0
-    ): Observable<ScanRequestRecord[]> => {
-      if (sortIndex >= sortVariants.length) {
-        return throwError(() => new Error('Scan requests could not be loaded.'));
-      }
-      return run(fields, sortVariants[sortIndex], filters).pipe(
-        catchError((error) => {
-          if (!this.isFieldCompatibilityError(error)) {
-            return throwError(() => error);
-          }
-          return trySorts(fields, filters, sortIndex + 1);
-        })
-      );
-    };
-
-    const tryFields = (
-      filters: Array<{ path: string[]; operator: string; value: string }>,
-      fieldIndex = 0
-    ): Observable<ScanRequestRecord[]> => {
-      if (fieldIndex >= fieldVariants.length) {
-        return throwError(() => new Error('Scan requests could not be loaded.'));
-      }
-      return trySorts(fieldVariants[fieldIndex], filters).pipe(
-        catchError((error) => {
-          if (!this.isFieldCompatibilityError(error)) {
-            return throwError(() => error);
-          }
-          return tryFields(filters, fieldIndex + 1);
-        })
-      );
-    };
-
-    const tryFilters = (index = 0): Observable<ScanRequestRecord[]> => {
-      if (index >= filterVariants.length) {
-        return throwError(() => new Error('Scan requests could not be loaded.'));
-      }
-      return tryFields(filterVariants[index]).pipe(
-        catchError((error) => {
-          if (!this.isFieldCompatibilityError(error)) {
-            return throwError(() => error);
-          }
-          return tryFilters(index + 1);
-        })
-      );
-    };
-
-    if (context.activeRole === 'employee' && context.userId) {
-      const userId = context.userId;
-      // scan_requests targets a business_profile_members row, so an employee's own
-      // requests are matched through the member -> user relation path.
-      const withTargetMemberUserFilterVariants = filterVariants.map((base) => [
-        ...base,
-        { path: ['target_member', 'user'], operator: '_eq', value: userId }
-      ]);
-      // Fallback to tenant scope only; the caller re-filters rows client-side by
-      // membership id / user id, so this stays correct if the relation filter is rejected.
-      const employeeFilterVariants = [...withTargetMemberUserFilterVariants, ...filterVariants];
-
-      const tryFilterSet = (sets: Array<Array<{ path: string[]; operator: string; value: string }>>, index = 0): Observable<ScanRequestRecord[]> => {
-        if (index >= sets.length) {
-          return throwError(() => new Error('Scan requests could not be loaded.'));
+        } satisfies ScanRequestQueueResponse;
+      }),
+      catchError((error) => {
+        const status = (error as { status?: number } | null)?.status ?? 0;
+        if (status === 403 || status === 400) {
+          console.error('[OperationsWorkflows] requests queue failed', {
+            url,
+            status,
+            message:
+              (error as { error?: { errors?: Array<{ message?: string; extensions?: { reason?: string } }>; message?: string }; message?: string } | null)?.error?.errors?.[0]?.extensions?.reason ??
+              (error as { error?: { errors?: Array<{ message?: string }>; message?: string }; message?: string } | null)?.error?.errors?.[0]?.message ??
+              (error as { error?: { message?: string }; message?: string } | null)?.error?.message ??
+              (error as { message?: string } | null)?.message ??
+              'unknown'
+          });
         }
-        return tryFields(sets[index]).pipe(
-          catchError((error) => {
-            if (!this.isFieldCompatibilityError(error)) {
-              return throwError(() => error);
-            }
-            return tryFilterSet(sets, index + 1);
-          })
-        );
-      };
-
-      return tryFilterSet(employeeFilterVariants).pipe(timeout(25000));
-    }
-
-    return tryFilters().pipe(timeout(25000));
+        return throwError(() => error);
+      })
+    );
   }
 
   private normalizeRequestRecord(raw: ScanRequestRecord): ScanRequestRecord {
@@ -1752,6 +1638,7 @@ export class OperationsWorkflowsService {
       user_id: this.normalizeId(member.user),
       label: formatMember(member, 'Unknown member'),
       email: sanitizeDisplayValue(this.objectRecord(member.user)?.['email'], ''),
+      member_role: this.normalizeMemberRole(member.member_role),
       department_id: this.normalizeId(member.department),
       department_name:
         departmentNameById.get(this.normalizeId(member.department) ?? '') ??
@@ -2550,10 +2437,10 @@ export class OperationsWorkflowsService {
       return of(members);
     }
 
-    return this.loadScanRequestsForPage(context).pipe(
-      map((requests) => {
+    return this.fetchScanRequestQueue(context).pipe(
+      map((queue) => {
         const blockedMemberIds = new Set(
-          (requests ?? [])
+          (queue.rows ?? [])
             .filter((request) => this.hasConflictingOpenRequest(request, nextDueAtTs))
             .map((request) => this.normalizeId(request.target_member))
             .filter((memberId): memberId is string => Boolean(memberId))

@@ -119,6 +119,32 @@ describe('OperationsWorkflowsService', () => {
     expect(responseId).toBe('request-1');
   });
 
+  it('loads scan request queue data through the protected workflow endpoint', () => {
+    let responseSummary = '';
+
+    service.loadScanRequestQueue().subscribe((response) => {
+      responseSummary = `${response.summary.total}:${response.rows.length}`;
+    });
+
+    const req = httpMock.expectOne('https://dash.conntinuity.com/wellar/scan-requests');
+    expect(req.request.method).toBe('GET');
+    expect(req.request.url).toBe('https://dash.conntinuity.com/wellar/scan-requests');
+    expect(req.request.urlWithParams).toBe('https://dash.conntinuity.com/wellar/scan-requests');
+    req.flush({
+      data: {
+        rows: [],
+        summary: {
+          total: 0,
+          pending: 0,
+          completed: 0,
+          overdue: 0
+        }
+      }
+    });
+
+    expect(responseSummary).toBe('0:0');
+  });
+
   it('maps forbidden request creation into a user-safe error', () => {
     let captured: ScanRequestApiError | null = null;
 

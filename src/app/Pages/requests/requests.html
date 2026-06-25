@@ -238,8 +238,8 @@
       </div>
 
       <div *ngIf="!eligibleRequestMembers.length" class="scan-requests-state-card scan-requests-state-card--warning mt-5">
-        <p class="scan-requests-state-card__title">No eligible workforce members</p>
-        <p>Only active employees with linked identities can receive a scan request.</p>
+        <p class="scan-requests-state-card__title">No eligible employees</p>
+        <p>No eligible employees are available. Complete an employee invitation or repair the employee profile before creating a scan request.</p>
       </div>
 
       <div *ngIf="eligibleRequestMembers.length" class="mt-5 grid gap-4 md:grid-cols-2">

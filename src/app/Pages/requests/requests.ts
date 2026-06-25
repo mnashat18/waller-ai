@@ -199,6 +199,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
       Boolean(member.member_id) &&
       Boolean(member.user_id) &&
       Boolean(member.email) &&
+      String(member.member_role ?? '').trim().toLowerCase() === 'employee' &&
       String(member.status ?? '').trim().toLowerCase() === 'active' &&
       String(member.member_id ?? '').trim().length > 0
     );
@@ -218,11 +219,6 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
 
   openCreateRequestModal(): void {
     if (!this.showCreateEntryPoint) {
-      return;
-    }
-
-    if (!this.eligibleRequestMembers.length) {
-      this.pushFeedback('info', 'No eligible workforce members are available for a new scan request.');
       return;
     }
 
