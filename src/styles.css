@@ -1899,6 +1899,7 @@ body::selection {
 .app-content {
   flex: 1;
   padding: 1.25rem clamp(1rem, 1.8vw, 1.5rem) 1.5rem;
+  min-width: 0;
 }
 
 .app-content-frame {
@@ -1907,6 +1908,7 @@ body::selection {
   max-width: 90rem;
   margin-inline: auto;
   width: 100%;
+  min-width: 0;
 }
 
 @keyframes orbDrift {
@@ -2176,6 +2178,7 @@ body::selection {
 .app-page-shell {
   display: grid;
   gap: 1.15rem;
+  min-width: 0;
 }
 
 .app-page-header {
