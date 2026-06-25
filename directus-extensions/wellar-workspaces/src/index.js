@@ -405,7 +405,7 @@ function publicOrganizationInvite(row) {
   };
 }
 
-function publicScanRequest(row, targetMember) {
+function publicScanRequest(row, targetMember, requestedByUser = null) {
   const department = publicDepartment({
     department_id: targetMember.department_id,
     department_name: targetMember.department_name
@@ -435,14 +435,160 @@ function publicScanRequest(row, targetMember) {
             email: targetMember.user_email ?? null,
             first_name: targetMember.first_name ?? null,
             last_name: targetMember.last_name ?? null
-          }
+        }
         : null,
       department
     },
-    requested_by_user: {
-      id: String(row.requested_by_user ?? '')
-    }
+    requested_by_user: requestedByUser
+      ? {
+          id: String(requestedByUser.id ?? row.requested_by_user ?? ''),
+          email: requestedByUser.email ?? null,
+          first_name: requestedByUser.first_name ?? null,
+          last_name: requestedByUser.last_name ?? null
+        }
+      : {
+          id: String(row.requested_by_user ?? '')
+        }
   };
+}
+
+async function loadWorkspaceScanRequests(trx, workspaceId, options = {}) {
+  const rows = await trx('scan_requests as request')
+    .innerJoin('business_profiles as profile', 'profile.id', 'request.business_profile')
+    .leftJoin('business_profile_members as target_member', 'target_member.id', 'request.target_member')
+    .leftJoin('departments as target_department', 'target_department.id', 'target_member.department')
+    .leftJoin('directus_users as target_user', 'target_user.id', 'target_member.user')
+    .leftJoin('departments as request_department', 'request_department.id', 'request.department')
+    .leftJoin('directus_users as requested_by_user', 'requested_by_user.id', 'request.requested_by_user')
+    .select(
+      'request.id',
+      'request.business_profile',
+      'request.department',
+      'request.requested_by_user',
+      'request.target_member',
+      'request.status',
+      'request.request_type',
+      'request.requested_at',
+      'request.due_at',
+      'request.completed_at',
+      'request.cancelled',
+      'profile.company_name',
+      'requested_by_user.id as requested_by_user_id',
+      'requested_by_user.email as requested_by_user_email',
+      'requested_by_user.first_name as requested_by_user_first_name',
+      'requested_by_user.last_name as requested_by_user_last_name',
+      'target_member.status as target_member_status',
+      'target_member.member_role as target_member_member_role',
+      'target_member.user as target_member_user_id',
+      'target_user.email as target_member_user_email',
+      'target_user.first_name as target_member_user_first_name',
+      'target_user.last_name as target_member_user_last_name',
+      'target_member.department as target_member_department_id',
+      'target_department.name as target_member_department_name',
+      'target_department.business_profile as target_member_department_business_profile',
+      'target_department.is_active as target_member_department_is_active',
+      'request_department.name as request_department_name'
+    )
+    .where('request.business_profile', workspaceId)
+    .modify((query) => {
+      if (options.departmentId) {
+        query.andWhere('request.department', options.departmentId);
+      }
+      if (options.memberId) {
+        query.andWhere('request.target_member', options.memberId);
+      }
+      if (options.userId) {
+        query.andWhere((builder) => {
+          builder
+            .where('request.requested_by_user', options.userId)
+            .orWhere('target_member.user', options.userId);
+        });
+      }
+    })
+    .orderBy('request.requested_at', 'desc')
+    .orderBy('request.id', 'desc');
+
+  return rows.map((row) => {
+    const targetMemberDepartmentId = row.target_member_department_id ?? row.department ?? null;
+    const targetMemberDepartment = targetMemberDepartmentId
+      ? {
+          id: String(targetMemberDepartmentId),
+          name: row.target_member_department_name ?? row.request_department_name ?? 'Department'
+        }
+      : null;
+
+    const targetMember = {
+      id: String(row.target_member ?? ''),
+      status: row.target_member_status ?? 'active',
+      member_role: normalizeRole(row.target_member_member_role) ?? 'employee',
+      user_id: row.target_member_user_id ?? null,
+      user_email: row.target_member_user_email ?? null,
+      first_name: row.target_member_user_first_name ?? null,
+      last_name: row.target_member_user_last_name ?? null,
+      department_id: targetMemberDepartmentId,
+      department_name: targetMemberDepartment?.name ?? null,
+      company_name: row.company_name ?? null
+    };
+
+    const requestedByUser = row.requested_by_user_id
+      ? {
+          id: row.requested_by_user_id,
+          email: row.requested_by_user_email ?? null,
+          first_name: row.requested_by_user_first_name ?? null,
+          last_name: row.requested_by_user_last_name ?? null
+        }
+      : null;
+
+    return publicScanRequest(row, targetMember, requestedByUser);
+  });
+}
+
+function summarizeScanRequests(rows) {
+  const summary = {
+    total: 0,
+    pending: 0,
+    completed: 0,
+    overdue: 0
+  };
+
+  const isClosed = (status) => {
+    const normalized = pickString(status)?.toLowerCase() ?? '';
+    return normalized === 'completed' || normalized === 'expired' || normalized === 'cancelled' || normalized === 'canceled';
+  };
+
+  const requestTimestamp = (row) => {
+    const value = pickString(row.requested_at ?? row.timestamp ?? null);
+    if (!value) return 0;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const isOverdue = (row) => {
+    if (!row.due_at || isClosed(row.status)) {
+      return false;
+    }
+    const dueAt = new Date(pickString(row.due_at) ?? '').getTime();
+    if (!Number.isFinite(dueAt)) {
+      return false;
+    }
+    return dueAt > 0 && dueAt < Date.now();
+  };
+
+  for (const row of rows ?? []) {
+    summary.total += 1;
+    const normalized = pickString(row.status)?.toLowerCase() ?? '';
+    if (normalized === 'completed') {
+      summary.completed += 1;
+    } else if (normalized === 'pending' || normalized === 'sent' || normalized === 'opened') {
+      summary.pending += 1;
+    } else if (!isClosed(normalized) && isOverdue(row)) {
+      summary.overdue += 1;
+    } else if (!isClosed(normalized) && !isOverdue(row) && requestTimestamp(row) > 0) {
+      summary.pending += 1;
+    }
+  }
+
+  return summary;
 }
 
 function publicOrganizationPermissions(role) {
@@ -1277,6 +1423,86 @@ export default {
 
         logger?.error?.(error, '[wellar] scan request creation failed');
         return serverError(res, 'Scan request could not be created.');
+      }
+    });
+
+    router.get('/scan-requests', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-scan-requests:user:${userId}`
+          ]);
+
+          const { active } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const role = normalizeRole(active.member_role);
+          if (role !== 'owner' && role !== 'hr' && role !== 'manager' && role !== 'employee') {
+            throw Object.assign(new Error('A verified workspace role is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const queueFilter = {};
+          if (role === 'manager') {
+            if (!active.department_id) {
+              throw Object.assign(new Error('Manager account has no active department.'), {
+                code: 'CONFLICT'
+              });
+            }
+            queueFilter.departmentId = active.department_id;
+          } else if (role === 'employee') {
+            queueFilter.userId = userId;
+            queueFilter.memberId = active.id;
+          }
+
+          const rows = await loadWorkspaceScanRequests(trx, active.workspace_id, queueFilter);
+          const visibleRows = rows.filter((row) => {
+            if (role === 'owner' || role === 'hr') {
+              return true;
+            }
+
+            const targetMemberId = String(row.target_member?.id ?? '');
+            const targetUserId = String(row.target_member?.user?.id ?? '');
+            const requestedByUserId = String(row.requested_by_user?.id ?? '');
+            if (role === 'manager') {
+              return String(row.department?.id ?? row.target_member?.department?.id ?? row.department_id ?? '') === String(active.department_id);
+            }
+
+            return targetMemberId === String(active.id) ||
+              targetUserId === String(userId) ||
+              requestedByUserId === String(userId);
+          });
+
+          return {
+            rows: visibleRows,
+            summary: summarizeScanRequests(visibleRows)
+          };
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] scan request queue failed');
+        return serverError(res, 'Scan requests could not be loaded.');
       }
     });
 
