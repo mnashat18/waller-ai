@@ -6,9 +6,11 @@ import { finalize } from 'rxjs/operators';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import {
+  type CreateScanRequestInput,
   OperationsWorkflowsService,
   type RequestRow,
-  type RequestsPageData
+  type RequestsPageData,
+  type WorkflowMemberOption
 } from '../../services/operations-workflows.service';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
 import { DashboardSectionComponent } from '../../shared/ui/dashboard-section/dashboard-section.component';
@@ -57,6 +59,20 @@ type QueueSummary = {
   completedOrClosed: number;
 };
 
+type RequestType = 'manual' | 'bulk' | 'reminder';
+
+type CreateRequestForm = {
+  targetMemberId: string;
+  requestType: RequestType;
+  dueAt: string;
+};
+
+const REQUEST_TYPE_OPTIONS: Array<{ value: RequestType; label: string }> = [
+  { value: 'manual', label: 'Manual' },
+  { value: 'bulk', label: 'Bulk' },
+  { value: 'reminder', label: 'Reminder' }
+];
+
 @Component({
   selector: 'app-requests-page',
   standalone: true,
@@ -87,6 +103,10 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   rows: QueueRow[] = [];
   visibleRows: QueueRow[] = [];
   selectedRequest: QueueRow | null = null;
+  showCreateModal = false;
+  creatingRequest = false;
+  createRequestError = '';
+  createRequestForm: CreateRequestForm = this.defaultCreateRequestForm();
   resultCountLabel = '0 of 0 shown';
   hasActiveFilters = false;
   summary: QueueSummary = {
@@ -106,6 +126,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   };
 
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingCreateTargetMemberId: string | null = null;
 
   constructor(
     private workflows: OperationsWorkflowsService,
@@ -114,6 +135,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.pendingCreateTargetMemberId = this.readPrefilledTargetMemberId();
     this.loadPage();
   }
 
@@ -170,6 +192,18 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     return this.pageData?.departments ?? [];
   }
 
+  readonly createRequestTypeOptions = REQUEST_TYPE_OPTIONS;
+
+  get eligibleRequestMembers(): WorkflowMemberOption[] {
+    return (this.pageData?.members ?? []).filter((member) =>
+      Boolean(member.member_id) &&
+      Boolean(member.user_id) &&
+      Boolean(member.email) &&
+      String(member.status ?? '').trim().toLowerCase() === 'active' &&
+      String(member.member_id ?? '').trim().length > 0
+    );
+  }
+
   get showFilteredEmpty(): boolean {
     return this.pageState === 'ready' && this.rows.length > 0 && this.visibleRows.length === 0;
   }
@@ -180,6 +214,64 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
 
   refresh(): void {
     this.loadPage();
+  }
+
+  openCreateRequestModal(): void {
+    if (!this.showCreateEntryPoint) {
+      return;
+    }
+
+    if (!this.eligibleRequestMembers.length) {
+      this.pushFeedback('info', 'No eligible workforce members are available for a new scan request.');
+      return;
+    }
+
+    this.createRequestError = '';
+    this.createRequestForm = this.defaultCreateRequestForm();
+    this.showCreateModal = true;
+    this.applyPendingTargetMember();
+  }
+
+  closeCreateRequestModal(): void {
+    this.showCreateModal = false;
+    this.createRequestError = '';
+    this.createRequestForm = this.defaultCreateRequestForm();
+  }
+
+  submitCreateRequest(): void {
+    if (!this.showCreateEntryPoint || this.creatingRequest) {
+      return;
+    }
+
+    const targetMember = this.eligibleRequestMembers.find((member) => member.member_id === this.createRequestForm.targetMemberId) ?? null;
+    if (!targetMember) {
+      this.createRequestError = 'Select an active workforce member with a real identity.';
+      return;
+    }
+
+    this.creatingRequest = true;
+    this.createRequestError = '';
+
+    const payload: CreateScanRequestInput = {
+      target_member_id: targetMember.member_id,
+      request_type: this.createRequestForm.requestType,
+      due_at: this.normalizeDateTimeInput(this.createRequestForm.dueAt)
+    };
+
+    this.workflows.createScanRequest(payload).pipe(
+      finalize(() => {
+        this.creatingRequest = false;
+      })
+    ).subscribe({
+      next: () => {
+        this.closeCreateRequestModal();
+        this.pushFeedback('success', `Scan request created for ${targetMember.label}.`);
+        this.loadPage();
+      },
+      error: (error: unknown) => {
+        this.createRequestError = this.resolveCreateRequestError(error);
+      }
+    });
   }
 
   clearFilters(): void {
@@ -220,6 +312,10 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     return item.id || String(index);
   }
 
+  trackByMember(index: number, item: WorkflowMemberOption): string {
+    return item.member_id || String(index);
+  }
+
   private loadPage(): void {
     const context = this.companyContext.snapshot().context;
     if (context.activeMemberRole === 'manager' && !context.activeDepartmentId) {
@@ -250,6 +346,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
         this.recomputeVisibleRows();
         this.syncSelectedRequestAfterLoad();
         this.pageState = 'ready';
+        this.applyPendingTargetMember();
       },
       error: (error: unknown) => {
         this.pageData = null;
@@ -260,6 +357,24 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
         this.pageState = 'error';
       }
     });
+  }
+
+  private applyPendingTargetMember(): void {
+    if (!this.pendingCreateTargetMemberId || !this.eligibleRequestMembers.length) {
+      return;
+    }
+
+    const target = this.eligibleRequestMembers.find((member) => member.member_id === this.pendingCreateTargetMemberId) ?? null;
+    if (target) {
+      this.showCreateModal = true;
+      this.createRequestForm = {
+        targetMemberId: target.member_id,
+        requestType: 'manual',
+        dueAt: ''
+      };
+    }
+
+    this.pendingCreateTargetMemberId = null;
   }
 
   private buildRows(rows: RequestRow[]): QueueRow[] {
@@ -468,6 +583,54 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   private safeText(value: string | null | undefined, fallback: string): string {
     const clean = String(value ?? '').trim();
     return clean || fallback;
+  }
+
+  private defaultCreateRequestForm(): CreateRequestForm {
+    return {
+      targetMemberId: '',
+      requestType: 'manual',
+      dueAt: ''
+    };
+  }
+
+  private normalizeDateTimeInput(value: string): string | null {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+
+    return parsed.toISOString();
+  }
+
+  private readPrefilledTargetMemberId(): string | null {
+    if (typeof history === 'undefined') {
+      return null;
+    }
+
+    const state = history.state as Record<string, unknown> | null | undefined;
+    const candidate =
+      state?.['workforceTargetMemberId'] ??
+      state?.['workforceRequestTargetId'] ??
+      state?.['targetMemberId'];
+    const normalized = String(candidate ?? '').trim();
+    return normalized || null;
+  }
+
+  private resolveCreateRequestError(error: unknown): string {
+    if (error && typeof error === 'object' && 'userMessage' in error) {
+      const userMessage = String((error as { userMessage?: unknown }).userMessage ?? '').trim();
+      if (userMessage) {
+        return userMessage;
+      }
+    }
+
+    const fallback = this.resolveLoadErrorMessage(error);
+    return fallback || 'Failed to create scan request.';
   }
 
   private pushFeedback(type: FeedbackType, text: string): void {

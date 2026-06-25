@@ -26,6 +26,22 @@
   font-weight: 700;
 }
 
+.compliance-warning-card--action {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.compliance-warning-card__title {
+  margin: 0 0 0.35rem;
+  color: #fef08a;
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .compliance-feedback-card {
   border-color: rgba(56, 189, 248, 0.36);
   background: rgba(14, 165, 233, 0.14);

@@ -405,6 +405,46 @@ function publicOrganizationInvite(row) {
   };
 }
 
+function publicScanRequest(row, targetMember) {
+  const department = publicDepartment({
+    department_id: targetMember.department_id,
+    department_name: targetMember.department_name
+  });
+
+  return {
+    id: String(row.id),
+    status: row.status ?? 'pending',
+    request_type: row.request_type ?? null,
+    requested_at: row.requested_at ?? null,
+    due_at: row.due_at ?? null,
+    completed_at: row.completed_at ?? null,
+    cancelled: row.cancelled ?? null,
+    business_profile: publicWorkspace({
+      workspace_id: row.business_profile,
+      company_name: targetMember.company_name,
+      workspace_is_active: true
+    }),
+    department,
+    target_member: {
+      id: String(targetMember.id),
+      status: targetMember.status ?? 'active',
+      member_role: normalizeRole(targetMember.member_role) ?? 'employee',
+      user: targetMember.user_id
+        ? {
+            id: String(targetMember.user_id),
+            email: targetMember.user_email ?? null,
+            first_name: targetMember.first_name ?? null,
+            last_name: targetMember.last_name ?? null
+          }
+        : null,
+      department
+    },
+    requested_by_user: {
+      id: String(row.requested_by_user ?? '')
+    }
+  };
+}
+
 function publicOrganizationPermissions(role) {
   const normalized = normalizeRole(role);
   return {
@@ -487,6 +527,45 @@ function validateDepartmentPayload(body) {
   }
 
   return { ok: true, payload: { name } };
+}
+
+function validateScanRequestPayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const allowed = new Set(['target_member_id', 'request_type', 'due_at']);
+  const keys = Object.keys(body);
+  if (!keys.length) {
+    return { ok: false, message: 'target_member_id is required.' };
+  }
+
+  if (keys.some((key) => !allowed.has(key))) {
+    return { ok: false, message: 'Request contains unsupported scan request fields.' };
+  }
+
+  const targetMemberId = pickString(body.target_member_id);
+  if (!targetMemberId) {
+    return { ok: false, message: 'target_member_id is required.' };
+  }
+
+  const requestType = pickString(body.request_type, 60)?.toLowerCase() ?? 'manual';
+  const dueAt = pickString(body.due_at, MAX_TEXT);
+  if (dueAt) {
+    const parsed = new Date(dueAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return { ok: false, message: 'due_at must be a valid ISO timestamp.' };
+    }
+  }
+
+  return {
+    ok: true,
+    payload: {
+      targetMemberId,
+      requestType,
+      dueAt: dueAt ?? null
+    }
+  };
 }
 
 async function loadOrganizationMembership(trx, userId) {
@@ -590,6 +669,53 @@ async function loadDepartmentById(trx, workspaceId, departmentId) {
       'date_updated'
     ])
     .where({ id: departmentId, business_profile: workspaceId })
+    .first();
+}
+
+async function loadScanRequestTargetMember(trx, workspaceId, memberId) {
+  return trx('business_profile_members as member')
+    .innerJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
+    .leftJoin('departments as department', 'department.id', 'member.department')
+    .leftJoin('directus_users as user', 'user.id', 'member.user')
+    .select(
+      'member.id',
+      'member.status',
+      'member.member_role',
+      'member.business_profile as workspace_id',
+      'member.department as department_id',
+      'member.joined_at',
+      'profile.company_name',
+      'profile.is_active as workspace_is_active',
+      'department.id as department_match_id',
+      'department.name as department_name',
+      'department.business_profile as department_business_profile',
+      'department.is_active as department_is_active',
+      'user.id as user_id',
+      'user.email as user_email',
+      'user.first_name',
+      'user.last_name'
+    )
+    .where('member.id', memberId)
+    .andWhere('member.business_profile', workspaceId)
+    .first();
+}
+
+async function loadOpenScanRequestForMember(trx, workspaceId, memberId) {
+  return trx('scan_requests')
+    .select([
+      'id',
+      'status',
+      'request_type',
+      'requested_at',
+      'due_at',
+      'completed_at',
+      'cancelled'
+    ])
+    .where({
+      business_profile: workspaceId,
+      target_member: memberId
+    })
+    .whereNotIn('status', ['completed', 'expired', 'cancelled', 'canceled'])
     .first();
 }
 
@@ -994,6 +1120,163 @@ export default {
 
         logger?.error?.(error, '[wellar] organization department deactivation failed');
         return serverError(res, 'Department could not be deactivated.');
+      }
+    });
+
+    router.post('/scan-requests', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const validation = validateScanRequestPayload(req.body ?? {});
+      if (!validation.ok) {
+        return badRequest(res, validation.message);
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-scan-request-create:user:${userId}:${validation.payload.targetMemberId}`
+          ]);
+
+          const { active } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const role = normalizeRole(active.member_role);
+          if (role !== 'owner' && role !== 'hr') {
+            throw Object.assign(new Error('Owner or HR access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const targetMember = await loadScanRequestTargetMember(
+            trx,
+            active.workspace_id,
+            validation.payload.targetMemberId
+          );
+          if (!targetMember) {
+            throw Object.assign(new Error('The requested workforce member was not found in the active organization.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          if (normalizeRole(targetMember.member_role) !== 'employee') {
+            throw Object.assign(new Error('Scan requests can only target active employee members.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          if ((targetMember.status ?? '').toLowerCase() !== 'active') {
+            throw Object.assign(new Error('The selected workforce member is not active.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          if (!targetMember.user_id || !targetMember.user_email) {
+            throw Object.assign(new Error('The selected workforce member needs data repair before a scan request can be created.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          if (targetMember.department_id) {
+            if (!targetMember.department_match_id) {
+              throw Object.assign(new Error('The selected workforce member department is no longer valid.'), {
+                code: 'CONFLICT'
+              });
+            }
+
+            if (pickString(targetMember.department_business_profile) !== pickString(active.workspace_id)) {
+              throw Object.assign(new Error('The selected workforce member department does not belong to the active organization.'), {
+                code: 'CONFLICT'
+              });
+            }
+
+            if (targetMember.department_is_active === false) {
+              throw Object.assign(new Error('The selected workforce member department is inactive.'), {
+                code: 'CONFLICT'
+              });
+            }
+          }
+
+          const openRequest = await loadOpenScanRequestForMember(trx, active.workspace_id, targetMember.id);
+          if (openRequest) {
+            throw Object.assign(new Error('An open scan request already exists for the selected member.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          const now = new Date().toISOString();
+          const [created] = await trx('scan_requests')
+            .insert({
+              business_profile: active.workspace_id,
+              department: targetMember.department_id ?? null,
+              requested_by_user: userId,
+              target_member: targetMember.id,
+              request_type: validation.payload.requestType,
+              status: 'pending',
+              requested_at: now,
+              due_at: validation.payload.dueAt,
+              completed_scan: null,
+              completed_at: null,
+              cancelled: null
+            })
+            .returning([
+              'id',
+              'business_profile',
+              'department',
+              'requested_by_user',
+              'target_member',
+              'request_type',
+              'status',
+              'requested_at',
+              'due_at',
+              'completed_at',
+              'cancelled'
+            ]);
+
+          if (!created?.id) {
+            throw new Error('Scan request creation did not return an id.');
+          }
+
+          await trx('activity_events').insert({
+            actor: userId,
+            target_user: userId,
+            action: 'scan_request_created',
+            entity_type: 'scan_request',
+            entity_id: String(created.id),
+            business_profile: active.workspace_id,
+            payload: JSON.stringify({
+              source: 'web_requests_page',
+              target_member_id: String(targetMember.id),
+              request_type: validation.payload.requestType,
+              due_at: validation.payload.dueAt
+            })
+          });
+
+          return {
+            request: publicScanRequest(created, targetMember)
+          };
+        });
+
+        return res.status(201).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] scan request creation failed');
+        return serverError(res, 'Scan request could not be created.');
       }
     });
 

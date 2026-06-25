@@ -11,7 +11,7 @@
       pageActions
       type="button"
       class="dashboard-action-button dashboard-action-button--primary"
-      (click)="openUnsupportedWorkflow()">
+      (click)="openCreateRequestModal()">
       New Request
     </button>
     <button
@@ -133,7 +133,7 @@
     <section *ngIf="showQueueEmpty" class="scan-requests-state-card">
       <p class="scan-requests-state-card__title">{{ isManager ? 'No department scan requests' : 'No scan requests' }}</p>
       <p>{{ isManager ? 'No scan requests were returned for the assigned department.' : 'No scan requests were returned for this organization.' }}</p>
-      <button *ngIf="showCreateEntryPoint" type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="openUnsupportedWorkflow()">
+      <button *ngIf="showCreateEntryPoint" type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="openCreateRequestModal()">
         New Request
       </button>
     </section>
@@ -221,5 +221,65 @@
         <button *ngIf="isOwnerOrHr && (row.status === 'pending' || row.status === 'overdue')" type="button" class="dashboard-action-button dashboard-action-button--danger" (click)="openUnsupportedWorkflow()">Cancel</button>
       </div>
     </div>
+  </div>
+
+  <div *ngIf="showCreateModal" class="scan-requests-modal" role="dialog" aria-modal="true" aria-labelledby="scan-request-create-title">
+    <div class="scan-requests-modal__scrim" (click)="closeCreateRequestModal()"></div>
+
+    <form class="scan-requests-modal__panel app-dashboard-panel scan-requests-modal__panel--create" (ngSubmit)="submitCreateRequest()">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="dashboard-eyebrow">New Request</p>
+          <h3 id="scan-request-create-title" class="mt-2 text-2xl font-semibold text-slate-50">Create Scan Request</h3>
+          <p class="mt-2 text-sm text-slate-300">Select an active employee with a real identity. Requests are created through the protected workflow endpoint.</p>
+        </div>
+
+        <button type="button" class="dashboard-action-button" (click)="closeCreateRequestModal()">Close</button>
+      </div>
+
+      <div *ngIf="!eligibleRequestMembers.length" class="scan-requests-state-card scan-requests-state-card--warning mt-5">
+        <p class="scan-requests-state-card__title">No eligible workforce members</p>
+        <p>Only active employees with linked identities can receive a scan request.</p>
+      </div>
+
+      <div *ngIf="eligibleRequestMembers.length" class="mt-5 grid gap-4 md:grid-cols-2">
+        <label class="grid gap-2 text-sm font-medium text-slate-200 md:col-span-2">
+          Workforce Member
+          <select [(ngModel)]="createRequestForm.targetMemberId" name="requestTargetMemberId" class="app-form-control" required>
+            <option value="">Select a member</option>
+            <option *ngFor="let member of eligibleRequestMembers; trackBy: trackByMember" [value]="member.member_id">
+              {{ member.label }}{{ member.email ? ' · ' + member.email : '' }}
+            </option>
+          </select>
+          <p class="text-xs text-slate-400">Only active employees with a linked user and email are listed.</p>
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-200">
+          Request Type
+          <select [(ngModel)]="createRequestForm.requestType" name="requestType" class="app-form-control">
+            <option *ngFor="let option of createRequestTypeOptions" [value]="option.value">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="grid gap-2 text-sm font-medium text-slate-200">
+          Due Time
+          <input [(ngModel)]="createRequestForm.dueAt" name="requestDueAt" type="datetime-local" class="app-form-control" />
+        </label>
+      </div>
+
+      <p *ngIf="createRequestError" class="mt-3 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+        {{ createRequestError }}
+      </p>
+
+      <div class="mt-6 flex flex-wrap justify-end gap-3">
+        <button type="button" class="dashboard-action-button" (click)="closeCreateRequestModal()">Cancel</button>
+        <button
+          type="submit"
+          class="dashboard-action-button dashboard-action-button--primary"
+          [disabled]="creatingRequest || !createRequestForm.targetMemberId || !eligibleRequestMembers.length">
+          {{ creatingRequest ? 'Creating...' : 'Create Request' }}
+        </button>
+      </div>
+    </form>
   </div>
 </div>

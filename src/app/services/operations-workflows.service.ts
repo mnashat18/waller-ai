@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, forkJoin, of, throwError, firstValueFrom } from 'rxjs';
 import { catchError, map, switchMap, take, tap, timeout } from 'rxjs/operators';
 
@@ -103,11 +103,8 @@ export type CreateShiftTemplateInput = {
 };
 
 export type CreateScanRequestInput = {
-  target_member?: string | null;
-  department?: string | null;
+  target_member_id: string;
   request_type?: string | null;
-  completed_scan?: string | null;
-  cancelled?: string | null;
   due_at?: string | null;
 };
 
@@ -116,6 +113,32 @@ export type RequestActionResult = {
   message: string;
   configured?: boolean;
 };
+
+export type CreateScanRequestResponse = {
+  request: RequestRow;
+};
+
+export type ScanRequestApiErrorCode =
+  | 'unauthorized'
+  | 'forbidden'
+  | 'not_found'
+  | 'conflict'
+  | 'server_error'
+  | 'network_error'
+  | 'invalid_response'
+  | 'unknown';
+
+export class ScanRequestApiError extends Error {
+  constructor(
+    public readonly code: ScanRequestApiErrorCode,
+    public readonly status: number,
+    public readonly userMessage: string,
+    public readonly details?: unknown
+  ) {
+    super(userMessage);
+    this.name = 'ScanRequestApiError';
+  }
+}
 
 export type RequestRow = {
   id: string;
@@ -796,9 +819,43 @@ export class OperationsWorkflowsService {
     );
   }
 
-  createScanRequest(input: CreateScanRequestInput): Observable<void> {
-    void input;
-    return throwError(() => new Error(this.scanRequestFlowPrerequisiteMessage()));
+  createScanRequest(input: CreateScanRequestInput): Observable<CreateScanRequestResponse> {
+    return this.ensureScopedContext().pipe(
+      switchMap((context) => {
+        this.assertManagerDepartmentScope(context);
+
+        const targetMemberId = this.normalizeId(input.target_member_id);
+        if (!targetMemberId) {
+          return throwError(() =>
+            new ScanRequestApiError('invalid_response', 0, 'Select an active workforce member.')
+          );
+        }
+
+        const requestType = this.pickString(input.request_type)?.toLowerCase() ?? 'manual';
+        const body: Record<string, unknown> = {
+          target_member_id: targetMemberId,
+          request_type: requestType
+        };
+
+        const dueAt = this.pickString(input.due_at);
+        if (dueAt) {
+          body['due_at'] = dueAt;
+        }
+
+        return this.http.post<unknown>(
+          `${this.api}/wellar/scan-requests`,
+          body,
+          {
+            headers: this.headers(context.token),
+            withCredentials: true
+          }
+        ).pipe(
+          timeout(15000),
+          map((response) => this.parseCreateScanRequestResponse(response)),
+          catchError((error) => this.handleCreateScanRequestError(error))
+        );
+      })
+    );
   }
 
   createDepartmentScanRequests(input: CreateScanRequestInput): Observable<number> {
@@ -837,11 +894,10 @@ export class OperationsWorkflowsService {
 
   duplicateRequest(row: RequestRow): Observable<void> {
     return this.createScanRequest({
-      target_member: row.target_member_id,
-      department: row.department_id,
+      target_member_id: row.target_member_id ?? '',
       request_type: row.request_type,
       due_at: row.due_at
-    });
+    }).pipe(map(() => void 0));
   }
 
   requestAllMissing(rows: ComplianceWorkerRow[], departmentId: string | null, shiftTemplateId: string | null): Observable<void> {
@@ -864,6 +920,110 @@ export class OperationsWorkflowsService {
 
   private scanRequestFlowPrerequisiteMessage(): string {
     return 'This action requires an approved server-side workflow.';
+  }
+
+  private parseCreateScanRequestResponse(response: unknown): CreateScanRequestResponse {
+    const root = this.objectRecord(response);
+    const data = this.objectRecord(root?.['data']);
+    if (!data) {
+      throw new ScanRequestApiError('invalid_response', 0, 'Scan request response was invalid.');
+    }
+
+    const request = this.parseScanRequestRow(data['request'] ?? data);
+    if (!request) {
+      throw new ScanRequestApiError('invalid_response', 0, 'Scan request response was incomplete.');
+    }
+
+    return { request };
+  }
+
+  private parseScanRequestRow(value: unknown): RequestRow | null {
+    const record = this.objectRecord(value);
+    if (!record) {
+      return null;
+    }
+
+    const id = this.pickString(record['id']);
+    if (!id) {
+      return null;
+    }
+
+    const targetMember = this.objectRecord(record['target_member']);
+    const targetUser = this.objectRecord(targetMember?.['user']);
+    const requestedBy = this.objectRecord(record['requested_by_user']);
+    const department = this.objectRecord(record['department']) ?? this.objectRecord(targetMember?.['department']);
+    const businessProfile = this.objectRecord(record['business_profile']);
+
+    return {
+      id,
+      status: this.pickString(record['status']) ?? 'pending',
+      request_type: this.pickString(record['request_type']) ?? null,
+      requested_at: this.pickString(record['requested_at']) ?? null,
+      due_at: this.pickString(record['due_at']) ?? null,
+      completed_at: this.pickString(record['completed_at']) ?? null,
+      cancelled_note: this.pickString(record['cancelled']) ?? null,
+      target_member_id: this.normalizeId(targetMember?.['id'] ?? record['target_member']),
+      target_member_name: this.firstReadableLabel([
+        this.pickString(targetMember?.['name']),
+        this.pickString(targetUser?.['first_name']),
+        this.pickString(targetUser?.['last_name']),
+        this.pickString(targetUser?.['email'])
+      ], 'Unknown member'),
+      target_member_email: this.pickString(targetUser?.['email']),
+      requested_by_user_id: this.normalizeId(requestedBy?.['id'] ?? record['requested_by_user']),
+      requested_by_user_name: this.firstReadableLabel([
+        this.pickString(requestedBy?.['first_name']),
+        this.pickString(requestedBy?.['last_name']),
+        this.pickString(requestedBy?.['email'])
+      ], 'System'),
+      business_profile_id: this.normalizeId(businessProfile?.['id'] ?? record['business_profile']),
+      business_profile_name: this.firstReadableLabel([
+        this.pickString(businessProfile?.['company_name']),
+        this.pickString(record['business_profile_name'])
+      ], 'Unknown workspace'),
+      department_id: this.normalizeId(department?.['id'] ?? record['department']),
+      department_name: this.firstReadableLabel([
+        this.pickString(department?.['name']),
+        this.pickString(record['department_name'])
+      ], 'Unassigned'),
+      completed_scan_id: this.normalizeId(record['completed_scan']),
+      completed_scan_at: this.pickString(record['completed_scan_at']) ?? null,
+      notification_count: 0
+    };
+  }
+
+  private handleCreateScanRequestError(error: unknown): Observable<never> {
+    if (error instanceof ScanRequestApiError) {
+      return throwError(() => error);
+    }
+
+    const httpError = error as HttpErrorResponse;
+    const status = Number(httpError?.status ?? 0);
+    const body = this.objectRecord(httpError?.error);
+    const directusError = this.objectRecord(body?.['error']);
+    const backendCode = this.pickString(directusError?.['code'])?.toUpperCase() ?? '';
+    const backendMessage = this.pickString(directusError?.['message']);
+
+    if (status === 0) {
+      return throwError(() => new ScanRequestApiError('network_error', status, 'Scan request creation could not reach the server.', error));
+    }
+    if (status === 401 || backendCode === 'UNAUTHORIZED') {
+      return throwError(() => new ScanRequestApiError('unauthorized', 401, 'Session expired. Please sign in again.', error));
+    }
+    if (status === 403 || backendCode === 'FORBIDDEN') {
+      return throwError(() => new ScanRequestApiError('forbidden', 403, backendMessage ?? 'You do not have permission to create scan requests.', error));
+    }
+    if (status === 404 || backendCode === 'NOT_FOUND') {
+      return throwError(() => new ScanRequestApiError('not_found', 404, backendMessage ?? 'The selected workforce member was not found.', error));
+    }
+    if (status === 409 || backendCode === 'CONFLICT') {
+      return throwError(() => new ScanRequestApiError('conflict', 409, backendMessage ?? 'A conflicting scan request already exists.', error));
+    }
+    if (status >= 500 || backendCode === 'SERVER_ERROR') {
+      return throwError(() => new ScanRequestApiError('server_error', status || 500, backendMessage ?? 'Scan request creation failed.', error));
+    }
+
+    return throwError(() => new ScanRequestApiError('unknown', status, backendMessage ?? 'Scan request creation failed.', error));
   }
 
   alertReviewFlowPrerequisiteMessage(): string {

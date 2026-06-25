@@ -159,6 +159,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.applyNavigationState();
     this.loadPage();
   }
 
@@ -887,9 +888,18 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   memberName(row: WorkforceRosterRow): string {
-    if (row.type === 'invite' || row.identity_state === 'pending_onboarding') {
-      return 'Pending onboarding';
+    if (row.type === 'invite') {
+      return 'Invitation pending';
     }
+
+    if (!row.user_id && !row.linked_invite_email && !row.identity?.displayName) {
+      return 'Needs data repair';
+    }
+
+    if (row.identity_state === 'identity_unavailable') {
+      return row.identity?.displayName || row.name || 'Needs data repair';
+    }
+
     return row.identity?.displayName || row.name || 'Identity unavailable';
   }
 
@@ -906,18 +916,26 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
 
   memberSecondaryLabel(row: WorkforceRosterRow): string {
     if (row.type === 'invite') {
-      return this.rowTypeLabel(row);
+      return row.email || row.invite_phone || 'Invitation pending';
+    }
+
+    if (!row.user_id && !row.linked_invite_email) {
+      return 'Needs data repair';
     }
 
     if (row.identity?.email?.trim()) {
       return row.identity.email.trim();
     }
 
+    if (row.linked_invite_email?.trim()) {
+      return row.linked_invite_email.trim();
+    }
+
     return '';
   }
 
   inviteContact(row: WorkforceRosterRow): string {
-    return row.email || row.invite_phone || 'Pending onboarding';
+    return row.email || row.invite_phone || 'Invitation pending';
   }
 
   detailsTitle(row: WorkforceRosterRow | null): string {
@@ -980,6 +998,18 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
 
   trackByScanRequest(index: number, row: WorkforceScanRequestRow): string {
     return row.id || String(index);
+  }
+
+  private applyNavigationState(): void {
+    if (typeof history === 'undefined') {
+      return;
+    }
+
+    const state = history.state as Record<string, unknown> | null | undefined;
+    const departmentId = String(state?.['workforceDepartmentId'] ?? '').trim();
+    if (departmentId) {
+      this.filters.department = departmentId;
+    }
   }
 
   requestStatusLabel(status: string): string {

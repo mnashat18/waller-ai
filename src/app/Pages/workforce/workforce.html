@@ -185,7 +185,7 @@
                   <div class="workforce-member-cell">
                       <div class="workforce-avatar">{{ memberInitials(row) }}</div>
                       <div class="min-w-0 workforce-identity-copy">
-                        <p class="workforce-identity-name">{{ row.type === 'invite' ? inviteContact(row) : memberName(row) }}</p>
+                        <p class="workforce-identity-name">{{ memberName(row) }}</p>
                       <p
                         *ngIf="memberSecondaryLabel(row)"
                         class="workforce-identity-email"
@@ -261,7 +261,7 @@
         <div>
           <p class="dashboard-eyebrow">{{ selectedMember.type === 'invite' ? 'Invitation' : 'Member' }}</p>
           <h3 id="workforce-detail-title" class="mt-2 text-2xl font-semibold text-slate-50">
-            {{ selectedMember.type === 'invite' ? inviteContact(selectedMember) : memberName(selectedMember) }}
+            {{ memberName(selectedMember) }}
           </h3>
           <p class="mt-2 text-sm text-slate-300">
             {{ selectedMember.type === 'invite' ? 'Onboarding record returned by the existing invitation flow.' : scopeLabel }}
@@ -271,7 +271,7 @@
       </div>
 
       <div class="mt-5 workforce-detail-grid">
-        <div class="workforce-fact"><span>Name</span><strong>{{ selectedMember.type === 'invite' ? inviteContact(selectedMember) : memberName(selectedMember) }}</strong></div>
+        <div class="workforce-fact"><span>Name</span><strong>{{ memberName(selectedMember) }}</strong></div>
         <div *ngIf="selectedMember.type === 'invite' || hasActualEmail(selectedMember)" class="workforce-fact"><span>Email</span><strong>{{ selectedMember.type === 'invite' ? inviteContact(selectedMember) : memberEmail(selectedMember) }}</strong></div>
         <div class="workforce-fact"><span>Role</span><strong>{{ roleLabel(selectedMember.member_role) }}</strong></div>
         <div class="workforce-fact"><span>Department</span><strong>{{ departmentLabel(selectedMember) }}</strong></div>
