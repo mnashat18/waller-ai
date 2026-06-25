@@ -773,6 +773,8 @@
   display: grid;
   place-items: center;
   padding: 1.2rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   isolation: isolate;
 }
 
@@ -789,9 +791,11 @@
   z-index: 2;
   box-sizing: border-box;
   width: min(92vw, 500px);
-  max-height: none;
+  max-height: calc(100vh - 2.4rem);
   overflow-x: hidden;
-  overflow-y: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   border-radius: 1.55rem;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background:

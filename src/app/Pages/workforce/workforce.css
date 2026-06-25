@@ -1,6 +1,8 @@
 .workforce-page {
   --workforce-border: rgba(148, 163, 184, 0.24);
   --workforce-panel: rgba(9, 14, 28, 0.9);
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .workforce-feedback {
@@ -31,6 +33,7 @@
 
 .workforce-summary-grid {
   align-items: stretch;
+  min-width: 0;
 }
 
 .workforce-summary-grid .app-kpi-card {
@@ -50,6 +53,7 @@
   background: rgba(15, 23, 42, 0.45);
   padding: 1.25rem;
   color: rgb(203 213 225);
+  min-width: 0;
 }
 
 .workforce-state-card--warning {
@@ -65,12 +69,23 @@
 
 .workforce-table-header {
   width: 100%;
+  min-width: 0;
+}
+
+.workforce-page app-table-shell,
+.workforce-page .app-table-shell,
+.workforce-page .app-table-shell__scroller,
+.workforce-page .app-dashboard-section,
+.workforce-page .app-page-header {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .workforce-table {
   border-collapse: collapse;
   color: rgb(203 213 225);
   font-size: 0.86rem;
+  width: 100%;
 }
 
 .workforce-table thead {
@@ -158,6 +173,7 @@
 .workforce-operations-list {
   display: grid;
   gap: 0.65rem;
+  min-width: 0;
 }
 
 .workforce-operation-row {
@@ -171,6 +187,7 @@
   padding: 0.78rem 0.9rem;
   color: rgb(203 213 225);
   font-size: 0.82rem;
+  min-width: 0;
 }
 
 .workforce-badge {
@@ -323,6 +340,7 @@
   display: grid;
   gap: 0.6rem;
   grid-template-columns: repeat(1, minmax(0, 1fr));
+  min-width: 0;
 }
 
 @media (min-width: 620px) {

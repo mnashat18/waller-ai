@@ -89,6 +89,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
+    this.applyRouteAuthMode();
     this.authQuerySub = this.route.queryParamMap.subscribe(() => {
       this.applyRouteAuthMode();
     });
@@ -141,6 +142,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.authMode = mode;
     this.feedback = '';
     this.resolvingOrganizationAccess = false;
+    this.cdr.detectChanges();
     this.focusFirstField();
   }
 
@@ -217,6 +219,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.feedback = '';
     this.submitting = false;
     this.resolvingOrganizationAccess = false;
+    this.cdr.detectChanges();
     if (navigateHome && this.isAuthRoute()) {
       void this.router.navigate([], {
         relativeTo: this.route,
@@ -231,6 +234,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.authMode = mode;
     this.feedback = '';
     this.resolvingOrganizationAccess = false;
+    this.cdr.detectChanges();
     this.focusFirstField();
   }
 
