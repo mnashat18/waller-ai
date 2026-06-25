@@ -1814,19 +1814,7 @@ export class OperationsAdminService {
         : 'Presence unavailable';
       const firstName = this.pickString(user?.['first_name']) ?? this.pickString(directoryUser?.first_name);
       const lastName = this.pickString(user?.['last_name']) ?? this.pickString(directoryUser?.last_name);
-      const identity = formatWorkforceIdentity(
-        { id: userId, first_name: firstName, last_name: lastName },
-        email,
-        userId ? 'Identity unavailable' : 'Pending onboarding'
-      );
-      const identityState: WorkforceRosterRow['identity_state'] = identity.hasApprovedDisplayName
-        ? 'identified'
-        : userId
-          ? 'identity_unavailable'
-          : 'pending_onboarding';
-      const profileIncomplete = identityState !== 'identified';
       const departmentId = this.normalizeId(member.department);
-
       const invitedByName = null;
       const linkedInvite = candidateInvites.find((invite) => {
         const inviteRole = this.normalizeMemberRole(invite.member_role);
@@ -1839,10 +1827,30 @@ export class OperationsAdminService {
         const memberBusinessProfileId = this.normalizeId(member.business_profile);
         return inviteBusinessProfileId && memberBusinessProfileId && inviteBusinessProfileId === memberBusinessProfileId;
       }) ?? null;
+      const linkedInviteEmail = this.pickString(linkedInvite?.email);
+      const identity = formatWorkforceIdentity(
+        { id: userId, first_name: firstName, last_name: lastName },
+        email,
+        userId ? 'Identity unavailable' : linkedInviteEmail ? 'Invitation pending' : 'Needs data repair'
+      );
+      const identityState: WorkforceRosterRow['identity_state'] = identity.hasApprovedDisplayName
+        ? 'identified'
+        : userId
+          ? 'identity_unavailable'
+          : linkedInviteEmail
+            ? 'pending_onboarding'
+            : 'identity_unavailable';
+      const identityDisplayName = identity.hasApprovedDisplayName
+        ? identity.displayName
+        : userId
+          ? 'Identity unavailable'
+          : linkedInviteEmail
+            ? 'Invitation pending'
+            : 'Needs data repair';
+      const profileIncomplete = identityState !== 'identified';
       const linkedInviteRequesterId = this.normalizeId(linkedInvite?.requested_by_user);
       const linkedInviteRequesterUser = linkedInviteRequesterId ? usersById.get(linkedInviteRequesterId) ?? null : null;
       const linkedInviteRequestedBy = formatUserName(linkedInviteRequesterUser ?? linkedInvite?.requested_by_user, '') || null;
-      const linkedInviteEmail = this.pickString(linkedInvite?.email);
       const resolvedEmail = identity.email ?? linkedInviteEmail ?? null;
       const departmentName = resolveDepartmentName(
         departmentId,
@@ -1877,7 +1885,7 @@ export class OperationsAdminService {
         user_id: userId,
         identity,
         identity_state: identityState,
-        name: identity.displayName,
+        name: identityDisplayName,
         email: resolvedEmail,
         member_role: this.normalizeMemberRole(member.member_role),
         department_id: departmentId,
@@ -1928,13 +1936,12 @@ export class OperationsAdminService {
         invite_id: inviteId,
         user_id: null,
         identity: {
-          displayName: email || phone || 'Pending onboarding',
+          displayName: 'Invitation pending',
           email,
-          hasApprovedDisplayName: Boolean(email || phone),
+          hasApprovedDisplayName: false,
           dataQualityIssue: email || phone ? null : 'Invite contact unavailable'
         },
         identity_state: 'pending_onboarding',
-        name: email || phone || 'Invite contact unavailable',
         email,
         member_role: role,
         department_id: departmentId,
@@ -1960,7 +1967,8 @@ export class OperationsAdminService {
         linked_invite_status: null,
         linked_invite_requested_by: null,
         business_profile_id: this.normalizeId(invite.business_profile),
-        business_profile_name: this.pickString((invite.business_profile as Record<string, unknown> | null)?.['company_name']) ?? null
+        business_profile_name: this.pickString((invite.business_profile as Record<string, unknown> | null)?.['company_name']) ?? null,
+        name: 'Invitation pending'
       } satisfies WorkforceRosterRow;
     });
 

@@ -155,4 +155,97 @@ describe('WorkforcePageComponent', () => {
     expect(table?.className).toContain('w-full');
     expect(scroller).toBeTruthy();
   });
+
+  it('renders linked users, pending invitations, and broken memberships with honest identity labels', async () => {
+    rosterResponse$ = of({
+      summary: {
+        activeMembers: 3,
+        scanEligible: 2,
+        scanRequested: 0,
+        scannedToday: 1,
+        missingScans: 1,
+        pendingInvites: 1,
+        ownerCount: 1,
+        hrCount: 0,
+        managerCount: 0,
+        employeeCount: 2,
+        needsReviewCount: 1
+      },
+      rows: [
+        {
+          type: 'member',
+          key: 'member-1',
+          member_id: 'member-1',
+          user_id: 'user-1',
+          member_role: 'employee',
+          status: 'active',
+          identity: {
+            displayName: 'Alex Parker',
+            email: 'alex@example.com'
+          },
+          identity_state: 'identified',
+          name: 'Alex Parker',
+          email: 'alex@example.com',
+          department_name: 'Operations',
+          scan_status: 'completed',
+          readiness_label: 'Ready',
+          last_scan_at: '2026-06-25T10:00:00.000Z'
+        },
+        {
+          type: 'invite',
+          key: 'invite-1',
+          invite_id: 'invite-1',
+          member_role: 'employee',
+          status: 'pending',
+          identity: {
+            displayName: 'Invitation pending',
+            email: 'invitee@example.com'
+          },
+          identity_state: 'pending_onboarding',
+          name: 'Invitation pending',
+          email: 'invitee@example.com',
+          invite_phone: null,
+          department_name: 'Operations',
+          scan_status: 'not_applicable',
+          readiness_label: 'No scan',
+          last_scan_at: null
+        },
+        {
+          type: 'member',
+          key: 'member-2',
+          member_id: 'member-2',
+          user_id: null,
+          linked_invite_email: null,
+          member_role: 'employee',
+          status: 'active',
+          identity: {
+            displayName: 'Needs data repair',
+            email: null
+          },
+          identity_state: 'identity_unavailable',
+          name: 'Needs data repair',
+          email: null,
+          department_name: 'Operations',
+          scan_status: 'missing',
+          readiness_label: 'No scan',
+          last_scan_at: null
+        }
+      ],
+      departments: [{ id: 'dept-1', name: 'Operations' }],
+      scanRequestRows: [],
+      relationWarning: null
+    });
+
+    component.refresh();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const text = fixture.nativeElement.textContent as string;
+    expect(text).toContain('Alex Parker');
+    expect(text).toContain('alex@example.com');
+    expect(text).toContain('Invitation pending');
+    expect(text).toContain('invitee@example.com');
+    expect(text).toContain('Needs data repair');
+  });
 });

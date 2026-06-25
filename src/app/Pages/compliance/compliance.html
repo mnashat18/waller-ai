@@ -30,6 +30,18 @@
     <section class="compliance-warning-card">{{ overview?.departmentGroupingWarning }}</section>
   }
 
+  @if (hasDepartmentDataQualityWarning) {
+    <section class="compliance-warning-card compliance-warning-card--action">
+      <div>
+        <p class="compliance-warning-card__title">Department data quality issue</p>
+        <p>{{ departmentDataQualityCount }} active member{{ departmentDataQualityCount === 1 ? '' : 's' }} are attached to broken or unreadable department metadata. Valid Unassigned members are not counted here.</p>
+      </div>
+      <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="reviewAffectedMembers()">
+        Review affected members
+      </button>
+    </section>
+  }
+
   @if (feedback) {
     <section class="compliance-feedback-card" [class.compliance-feedback-card--error]="feedback.type === 'error'">
       {{ feedback.text }}

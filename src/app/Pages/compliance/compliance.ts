@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import {
@@ -69,6 +69,7 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
   constructor(
     private complianceService: ComplianceService,
     private companyContext: CompanyContextService,
+    private router: Router,
     private cdr: ChangeDetectorRef
   ) {}
 
@@ -142,6 +143,18 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
     return this.overview?.activityRows ?? [];
   }
 
+  get departmentDataQualityRows(): DepartmentComplianceRow[] {
+    return this.departmentRows.filter((row) => row.departmentName === 'Department unavailable' || row.departmentName === 'Unknown department');
+  }
+
+  get departmentDataQualityCount(): number {
+    return this.departmentDataQualityRows.reduce((total, row) => total + Math.max(row.activeMembers ?? 0, 0), 0);
+  }
+
+  get hasDepartmentDataQualityWarning(): boolean {
+    return this.departmentDataQualityCount > 0;
+  }
+
   get showCoverageSummary(): boolean {
     return Boolean(this.overview?.summary) && this.overview?.hasAnyData === true;
   }
@@ -203,6 +216,16 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
 
   refresh(): void {
     void this.loadCompliance(true);
+  }
+
+  reviewAffectedMembers(): void {
+    const reviewDepartmentId = this.departmentDataQualityRows.find((row) => row.departmentId)?.departmentId ?? '';
+    void this.router.navigate(['/app/workforce'], {
+      state: {
+        workforceDepartmentId: reviewDepartmentId,
+        workforceReviewReason: 'department-data-quality'
+      }
+    });
   }
 
   applyFilters(): void {
