@@ -22,10 +22,13 @@ export type PageBreadcrumb = {
       </nav>
 
       <div class="app-page-header__layout">
-        <div>
+        <div class="app-page-header__intro">
           <p *ngIf="eyebrow" class="app-page-header__eyebrow">{{ eyebrow }}</p>
-          <h1>{{ title }}</h1>
-          <p *ngIf="description" class="app-page-header__description">{{ description }}</p>
+
+          <div class="app-page-header__title-block">
+            <h1>{{ title }}</h1>
+            <p *ngIf="description" class="app-page-header__description">{{ description }}</p>
+          </div>
         </div>
 
         <div class="app-page-header__actions">
