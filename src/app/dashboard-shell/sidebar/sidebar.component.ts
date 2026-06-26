@@ -26,8 +26,9 @@ type SidebarVm = {
   role: ActiveMemberRole | null;
   companyName: string | null;
   companyInitial: string;
-  scopeLabel: string;
-  scopeDetail: string | null;
+  scopeValue: string;
+  departmentValue: string;
+  roleLabel: string;
   groups: SidebarNavGroupVm[];
   emptyStateTitle: string;
   emptyStateDescription: string;
@@ -55,13 +56,11 @@ export class SidebarComponent {
     map(({ state, activeMembership, activeBusinessProfile, currentUrl }) => {
       const role = normalizeActiveMemberRole(activeMembership?.member_role ?? state.context.activeMemberRole);
       const companyName = activeBusinessProfile?.company_name ?? state.context.activeBusinessProfileName ?? null;
-      const department = activeMembership?.department;
-      const departmentName =
-        typeof department === 'string'
-          ? state.context.activeDepartmentName
-          : department && typeof department === 'object'
-            ? department.name ?? state.context.activeDepartmentName
-            : state.context.activeDepartmentName;
+      const departmentName = this.resolveDepartmentName(
+        activeMembership?.department,
+        state.context.activeDepartmentName,
+        role
+      );
       const navGroups = getSidebarNavForRole(role).map((group) => ({
         group: group.group,
         items: group.items.map((item) => ({
@@ -76,8 +75,12 @@ export class SidebarComponent {
         role,
         companyName,
         companyInitial: this.companyInitial(companyName),
-        scopeLabel: departmentName ? 'Department' : 'Organization-wide',
-        scopeDetail: departmentName ?? null,
+        scopeValue:
+          role === 'manager' || role === 'employee'
+            ? (departmentName ? 'Department' : 'Organization')
+            : 'Organization',
+        departmentValue: departmentName ?? 'All departments',
+        roleLabel: this.roleLabel(role),
         groups: navGroups,
         emptyStateTitle: isEmployee ? 'Employee access' : 'Organization unavailable',
         emptyStateDescription: isEmployee
@@ -107,5 +110,64 @@ export class SidebarComponent {
   private companyInitial(name: string | null): string {
     const value = (name ?? '').trim();
     return value ? value.slice(0, 1).toUpperCase() : 'W';
+  }
+
+  private resolveDepartmentName(
+    department: unknown,
+    contextDepartmentName: string | null | undefined,
+    role: ActiveMemberRole | null
+  ): string | null {
+    const membershipDepartmentName =
+      department && typeof department === 'object'
+        ? this.sanitizeDepartmentName((department as { name?: unknown }).name)
+        : null;
+
+    if (membershipDepartmentName) {
+      return membershipDepartmentName;
+    }
+
+    if (role !== 'manager' && role !== 'employee') {
+      return null;
+    }
+
+    return this.sanitizeDepartmentName(contextDepartmentName);
+  }
+
+  private sanitizeDepartmentName(value: unknown): string | null {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      return null;
+    }
+
+    const normalized = String(value).trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const lower = normalized.toLowerCase();
+    if (
+      lower === 'owner' ||
+      lower === 'hr' ||
+      lower === 'manager' ||
+      lower === 'employee' ||
+      lower === 'organization' ||
+      lower === 'organization-wide' ||
+      lower === 'all departments' ||
+      normalized.includes('@') ||
+      /^member[-_\s]/i.test(normalized) ||
+      /^user[-_\s]/i.test(normalized) ||
+      /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(normalized)
+    ) {
+      return null;
+    }
+
+    return normalized;
+  }
+
+  private roleLabel(role: ActiveMemberRole | null): string {
+    if (role === 'owner') return 'Owner';
+    if (role === 'hr') return 'HR';
+    if (role === 'manager') return 'Manager';
+    if (role === 'employee') return 'Employee';
+    return 'No access';
   }
 }
