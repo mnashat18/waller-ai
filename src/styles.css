@@ -5335,3 +5335,110 @@ body::selection {
     display: none !important;
   }
 }
+
+/* =========================
+   Desktop Shell Overflow Fix
+========================= */
+@media (min-width: 901px) {
+  .app-shell {
+    overflow-x: clip !important;
+  }
+
+  .app-shell .app-shell__grid {
+    display: grid !important;
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) !important;
+    align-items: stretch !important;
+    min-height: 100vh !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: clip !important;
+  }
+
+  .app-shell .app-sidebar {
+    position: sticky !important;
+    inset: auto !important;
+    top: 0 !important;
+    width: var(--sidebar-width) !important;
+    min-width: var(--sidebar-width) !important;
+    max-width: var(--sidebar-width) !important;
+    height: 100vh !important;
+    align-self: start !important;
+  }
+
+  .app-shell .app-main {
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .app-shell .app-content,
+  .app-shell .app-content-frame,
+  .app-page-shell,
+  .app-dashboard-section,
+  .app-page-header,
+  .app-page-header__layout,
+  .app-page-header__intro,
+  .app-page-header__title-block,
+  .app-page-header__actions,
+  .scan-requests-summary-grid,
+  .scan-requests-summary-grid > *,
+  .compliance-summary-grid,
+  .compliance-summary-grid > * {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .app-shell .app-content,
+  .app-shell .app-content-frame,
+  .app-page-shell {
+    width: 100% !important;
+  }
+
+  .app-page-header__layout {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: start !important;
+  }
+
+  .app-page-header__actions {
+    justify-content: flex-end !important;
+    align-self: start !important;
+    width: auto !important;
+  }
+
+  .app-shell .app-sidebar__company {
+    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    align-items: start !important;
+    gap: 0.9rem !important;
+  }
+
+  .app-shell .app-sidebar__company-copy {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .app-shell .app-sidebar__company-copy h3,
+  .app-shell .app-sidebar__company-context dd {
+    overflow-wrap: break-word !important;
+    word-break: normal !important;
+    white-space: normal !important;
+  }
+
+  .app-shell .app-sidebar__company-context {
+    gap: 0.42rem !important;
+  }
+
+  .app-shell .app-sidebar__company-context-row {
+    grid-template-columns: minmax(72px, auto) minmax(0, 1fr) !important;
+    gap: 0.65rem !important;
+    align-items: start !important;
+  }
+
+  .app-shell .app-sidebar__company .app-role-badge {
+    justify-self: end !important;
+    align-self: start !important;
+    min-width: max-content !important;
+    max-width: none !important;
+    margin-top: 0 !important;
+  }
+}
