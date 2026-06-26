@@ -14,16 +14,18 @@
   <ng-container *ngIf="vm$ | async as vm">
     <ng-container *ngIf="!vm.loading; else sidebarLoading">
       <section class="app-sidebar__company">
-        <div class="app-sidebar__company-avatar" aria-hidden="true">
-          {{ vm.companyInitial }}
-        </div>
+        <div class="app-sidebar__company-identity">
+          <div class="app-sidebar__company-avatar" aria-hidden="true">
+            {{ vm.companyInitial }}
+          </div>
 
-        <div class="app-sidebar__company-copy">
-          <p class="app-sidebar__eyebrow">Active Organization</p>
-          <h3>{{ vm.companyName || 'Loading organization...' }}</h3>
-        </div>
+          <div class="app-sidebar__company-copy">
+            <h3>{{ vm.companyName || 'Loading organization...' }}</h3>
+            <p class="app-sidebar__eyebrow">Active organization</p>
+          </div>
 
-        <app-role-badge *ngIf="vm.role" [role]="vm.role"></app-role-badge>
+          <app-role-badge *ngIf="vm.role" [role]="vm.role"></app-role-badge>
+        </div>
 
         <dl class="app-sidebar__company-context">
           <div class="app-sidebar__company-context-row">
@@ -34,11 +36,6 @@
           <div class="app-sidebar__company-context-row">
             <dt>Department</dt>
             <dd>{{ vm.departmentValue }}</dd>
-          </div>
-
-          <div class="app-sidebar__company-context-row">
-            <dt>Role</dt>
-            <dd>{{ vm.roleLabel }}</dd>
           </div>
         </dl>
       </section>

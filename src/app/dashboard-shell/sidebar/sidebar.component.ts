@@ -38,7 +38,8 @@ type SidebarVm = {
   selector: 'app-dashboard-sidebar',
   standalone: true,
   imports: [CommonModule, RouterLink, RoleBadgeComponent],
-  templateUrl: './sidebar.component.html'
+  templateUrl: './sidebar.component.html',
+  styleUrl: './sidebar.component.css'
 })
 export class SidebarComponent {
   private readonly companyContext = inject(CompanyContextService);

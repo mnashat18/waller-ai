@@ -11,6 +11,29 @@ export type PageBreadcrumb = {
   selector: 'app-page-header',
   standalone: true,
   imports: [CommonModule, RouterLink],
+  styles: [`
+    .app-page-header__layout {
+      align-items: center;
+    }
+
+    .app-page-header__actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    @media (max-width: 1199px) {
+      .app-page-header__layout {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+      }
+
+      .app-page-header__actions {
+        justify-content: flex-start;
+      }
+    }
+  `],
   template: `
     <section class="app-page-header app-dashboard-panel">
       <nav *ngIf="breadcrumbs.length" class="app-page-header__breadcrumbs">
