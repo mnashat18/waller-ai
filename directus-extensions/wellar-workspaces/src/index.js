@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 const MAX_TEXT = 255;
 const MAX_COMPANY_NAME = 120;
 
@@ -982,6 +984,7 @@ function conflictError(message) {
 
 function buildScanRequestInsertPayload(activeWorkspaceId, targetMember, requestedByUserId, validationPayload, requestedAt) {
   const payload = {
+    id: randomUUID(),
     business_profile: activeWorkspaceId,
     department: targetMember.department_id ?? null,
     requested_by_user: requestedByUserId,
@@ -1046,7 +1049,7 @@ function classifyScanRequestCreateError(error) {
     };
   }
 
-  if (error.code === '23502' || error.code === '22P02') {
+  if (error.code === '22P02') {
     return {
       code: 'BAD_REQUEST',
       message: 'Scan request payload is invalid.'

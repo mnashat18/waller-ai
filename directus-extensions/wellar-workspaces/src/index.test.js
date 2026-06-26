@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 
 import extension from './index.js';
 
+const UUID_V4_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function createRouter() {
   const routes = new Map();
   return {
@@ -68,7 +70,7 @@ function createQueryExecutor(state, tableName) {
           state.insertPayloads.push(query.insertPayload);
           return Promise.resolve([
             {
-              id: 'scan-request-1',
+              id: query.insertPayload.id,
               business_profile: state.workspaceId,
               department: state.targetMember?.department_id ?? null,
               requested_by_user: state.actorUserId,
@@ -260,12 +262,14 @@ async function testCreatesScanRequestWithCanonicalInsertPayload() {
   assert.deepEqual(Object.keys(state.insertPayloads[0]).sort(), [
     'business_profile',
     'department',
+    'id',
     'request_type',
     'requested_at',
     'requested_by_user',
     'status',
     'target_member'
   ]);
+  assert.match(state.insertPayloads[0].id, UUID_V4_RX);
   assert.equal(state.insertPayloads[0].target_member, state.targetMember.id);
   assert.equal('due_at' in state.insertPayloads[0], false);
   assert.equal('completed_scan' in state.insertPayloads[0], false);
