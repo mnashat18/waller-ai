@@ -12,12 +12,13 @@ describe('RequestsPageComponent', () => {
   let createScanRequestImpl: any;
   let createScanRequestCalls: unknown[];
   let getRequestsPageDataCalls: number;
+  let getRequestModalOptionsCalls: number;
 
   const baseMembers = [
     {
       member_id: 'member-owner',
       user_id: 'user-owner',
-      label: 'Demo Owner',
+      label: 'demo owner',
       email: 'owner@example.com',
       member_role: 'owner',
       department_id: 'dept-1',
@@ -27,8 +28,8 @@ describe('RequestsPageComponent', () => {
     {
       member_id: 'member-hr',
       user_id: 'user-hr',
-      label: 'Demo HR',
-      email: 'hr@example.com',
+      label: 'demo hr',
+      email: 'demo-hr@example.com',
       member_role: 'hr',
       department_id: 'dept-1',
       department_name: 'Operations',
@@ -37,8 +38,8 @@ describe('RequestsPageComponent', () => {
     {
       member_id: 'member-manager',
       user_id: 'user-manager',
-      label: 'Demo Manager',
-      email: 'manager@example.com',
+      label: 'demo manager',
+      email: 'demo-manager@example.com',
       member_role: 'manager',
       department_id: 'dept-1',
       department_name: 'Operations',
@@ -47,8 +48,8 @@ describe('RequestsPageComponent', () => {
     {
       member_id: 'member-employee',
       user_id: 'user-employee',
-      label: 'Alex Parker',
-      email: 'alex@example.com',
+      label: 'demo employee',
+      email: 'demo-employee@example.com',
       member_role: 'employee',
       department_id: 'dept-1',
       department_name: 'Operations',
@@ -79,15 +80,23 @@ describe('RequestsPageComponent', () => {
   const pageData = {
     rows: [],
     departments: [],
-    members: baseMembers,
+    members: [],
     requestTypeOptions: ['manual'],
     statusOptions: ['pending'],
     summary: { total: 0, pending: 0, completed: 0, overdue: 0 }
   };
 
+  const requestModalOptions = {
+    departments: [{ id: 'dept-1', name: 'Operations' }],
+    members: baseMembers
+      .filter((member) => ['hr', 'manager', 'employee'].includes(member.member_role) && member.status === 'active' && Boolean(member.email))
+      .map((member) => ({ ...member }))
+  };
+
   beforeEach(async () => {
     createScanRequestCalls = [];
     getRequestsPageDataCalls = 0;
+    getRequestModalOptionsCalls = 0;
     createScanRequestImpl = () =>
       of({
         request: {
@@ -99,8 +108,8 @@ describe('RequestsPageComponent', () => {
           completed_at: null,
           cancelled_note: null,
           target_member_id: 'member-employee',
-          target_member_name: 'Alex Parker',
-          target_member_email: 'alex@example.com',
+          target_member_name: 'demo employee',
+          target_member_email: 'demo-employee@example.com',
           requested_by_user_id: 'user-owner',
           requested_by_user_name: 'Demo Owner',
           business_profile_id: 'profile-1',
@@ -163,6 +172,10 @@ describe('RequestsPageComponent', () => {
               getRequestsPageDataCalls += 1;
               return of(pageData);
             },
+            getRequestModalOptions: () => {
+              getRequestModalOptionsCalls += 1;
+              return of(requestModalOptions);
+            },
             createScanRequest: (input: unknown) => {
               createScanRequestCalls.push(input);
               return createScanRequestImpl(input);
@@ -179,16 +192,14 @@ describe('RequestsPageComponent', () => {
     fixture.detectChanges();
   });
 
-  it('filters request targets to active linked employees only', () => {
-    expect(component.eligibleRequestMembers.map((member) => member.member_id)).toEqual(['member-hr', 'member-manager', 'member-employee']);
-    expect(component.eligibleRequestMembers.map((member) => member.member_role)).toEqual(['hr', 'manager', 'employee']);
-    expect(component.eligibleRequestMembers.some((member) => member.member_role === 'owner')).toBe(false);
-  });
-
   it('opens the modal and submits scan requests through the protected workflow service', async () => {
-    component.showCreateModal = true;
+    component.openCreateRequestModal();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
 
     expect(component.showCreateModal).toBe(true);
+    expect(getRequestModalOptionsCalls).toBe(1);
 
     component.createRequestForm.targetMemberId = 'member-employee';
     component.createRequestForm.requestType = 'manual';
@@ -209,7 +220,11 @@ describe('RequestsPageComponent', () => {
   it('preserves the entered request values when creation fails', async () => {
     createScanRequestImpl = () => throwError(() => ({ userMessage: 'A pending request already exists.' }));
 
-    component.showCreateModal = true;
+    component.openCreateRequestModal();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
     component.createRequestForm.targetMemberId = 'member-employee';
     component.createRequestForm.requestType = 'bulk';
     component.createRequestForm.dueAt = '';
@@ -221,25 +236,34 @@ describe('RequestsPageComponent', () => {
     expect(component.createRequestError).toBe('A pending request already exists.');
   });
 
+  it('renders employee, manager, and hr roster targets in New Request and excludes owner', async () => {
+    component.openCreateRequestModal();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const optionTexts = Array.from(
+      fixture.nativeElement.querySelectorAll('select[name="requestTargetMemberId"] option') as NodeListOf<HTMLOptionElement>
+    ).map((option) => option.textContent?.trim() ?? '');
+
+    expect(optionTexts).toContain('demo employee — demo-employee@example.com · Employee');
+    expect(optionTexts).toContain('demo manager — demo-manager@example.com · Manager');
+    expect(optionTexts).toContain('demo hr — demo-hr@example.com · HR');
+    expect(optionTexts.some((text) => text.includes('Owner'))).toBe(false);
+    expect(fixture.nativeElement.textContent).not.toContain('No eligible members');
+  });
+
   it('renders the no-eligible-employees state when the modal has no valid targets', async () => {
-    const originalMembers = pageData.members;
+    const originalOptions = requestModalOptions.members;
     try {
-      pageData.members = [
-        {
-          member_id: 'member-owner',
-          user_id: 'user-owner',
-          label: 'Demo Owner',
-          email: 'owner@example.com',
-          member_role: 'owner',
-          department_id: 'dept-1',
-          department_name: 'Operations',
-          status: 'active'
-        }
-      ];
+      requestModalOptions.members = [];
 
       const localFixture = TestBed.createComponent(RequestsPageComponent);
       const localComponent = localFixture.componentInstance;
-      localComponent.showCreateModal = true;
+      localFixture.detectChanges();
+      await localFixture.whenStable();
+      localFixture.detectChanges();
+      localComponent.openCreateRequestModal();
       localFixture.detectChanges();
       await localFixture.whenStable();
       localFixture.detectChanges();
@@ -251,7 +275,7 @@ describe('RequestsPageComponent', () => {
       );
       expect(localFixture.nativeElement.querySelectorAll('.scan-requests-row-actions button').length).toBe(0);
     } finally {
-      pageData.members = originalMembers;
+      requestModalOptions.members = originalOptions;
     }
   });
 });

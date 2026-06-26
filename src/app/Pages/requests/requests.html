@@ -236,7 +236,12 @@
         <button type="button" class="dashboard-action-button" (click)="closeCreateRequestModal()">Close</button>
       </div>
 
-      <div *ngIf="!eligibleRequestMembers.length" class="scan-requests-state-card scan-requests-state-card--warning mt-5">
+      <div *ngIf="loadingRequestModalOptions" class="scan-requests-state-card mt-5">
+        <p class="scan-requests-state-card__title">Loading eligible members</p>
+        <p>Synchronizing the verified workforce roster for this request.</p>
+      </div>
+
+      <div *ngIf="!loadingRequestModalOptions && !eligibleRequestMembers.length" class="scan-requests-state-card scan-requests-state-card--warning mt-5">
         <p class="scan-requests-state-card__title">No eligible members</p>
         <p>No eligible members are available. Complete an HR, manager, or employee invitation or repair the member profile before creating a scan request.</p>
         <div class="mt-4 flex flex-wrap gap-3">
@@ -249,13 +254,13 @@
         </div>
       </div>
 
-      <div *ngIf="eligibleRequestMembers.length" class="mt-5 grid gap-4 md:grid-cols-2">
+      <div *ngIf="!loadingRequestModalOptions && eligibleRequestMembers.length" class="mt-5 grid gap-4 md:grid-cols-2">
         <label class="grid gap-2 text-sm font-medium text-slate-200 md:col-span-2">
           Workforce Member
           <select [(ngModel)]="createRequestForm.targetMemberId" name="requestTargetMemberId" class="app-form-control" required>
             <option value="">Select a member</option>
             <option *ngFor="let member of eligibleRequestMembers; trackBy: trackByMember" [value]="member.member_id">
-              {{ member.label }}{{ member.email ? ' - ' + member.email : '' }}
+              {{ formatRequestMemberOption(member) }}
             </option>
           </select>
           <p class="text-xs text-slate-400">Only active HR, manager, and employee members with a linked user and email are listed.</p>
@@ -283,7 +288,7 @@
         <button
           type="submit"
           class="dashboard-action-button dashboard-action-button--primary"
-          [disabled]="creatingRequest || !createRequestForm.targetMemberId || !eligibleRequestMembers.length">
+          [disabled]="loadingRequestModalOptions || creatingRequest || !createRequestForm.targetMemberId || !eligibleRequestMembers.length">
           {{ creatingRequest ? 'Creating...' : 'Create Request' }}
         </button>
       </div>

@@ -701,7 +701,7 @@ export class OperationsWorkflowsService {
                 department_name: target.department_name,
                 status: target.status
               }))
-              .filter((item) => Boolean(item.member_id && item.user_id && item.email))
+              .filter((item) => Boolean(item.member_id && item.label && item.email))
           }))
         )
       )
