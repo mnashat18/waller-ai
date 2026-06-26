@@ -1009,36 +1009,48 @@ function logScanRequestCreateFailure(logger, error, context = {}) {
   );
 }
 
+function isDatabaseSqlStateError(error) {
+  return ['23502', '22P02', '23503', '23505'].includes(error?.code ?? '');
+}
+
 function classifyScanRequestCreateError(error) {
   if (!error) {
     return null;
   }
 
   if (error.code === 'BAD_REQUEST' || error.code === 'FORBIDDEN' || error.code === 'CONFLICT') {
-    return error;
+    return {
+      code: error.code,
+      message: error.message
+    };
   }
 
   if (error.code === 'NOT_FOUND') {
-    error.code = 'BAD_REQUEST';
-    return error;
+    return {
+      code: 'BAD_REQUEST',
+      message: error.message
+    };
   }
 
   if (error.code === '23505') {
-    error.code = 'CONFLICT';
-    error.message = 'An open scan request already exists for the selected member.';
-    return error;
+    return {
+      code: 'CONFLICT',
+      message: 'An open scan request already exists for the selected member.'
+    };
   }
 
   if (error.code === '23503') {
-    error.code = 'BAD_REQUEST';
-    error.message = 'The selected workforce member is no longer valid for scan requests.';
-    return error;
+    return {
+      code: 'BAD_REQUEST',
+      message: 'The selected workforce member is no longer valid for scan requests.'
+    };
   }
 
   if (error.code === '23502' || error.code === '22P02') {
-    error.code = 'BAD_REQUEST';
-    error.message = 'Scan request payload is invalid.';
-    return error;
+    return {
+      code: 'BAD_REQUEST',
+      message: 'Scan request payload is invalid.'
+    };
   }
 
   return null;
@@ -1640,15 +1652,38 @@ export default {
 
         return res.status(201).json({ data: result });
       } catch (error) {
+        const originalDatabaseError = {
+          code: error?.code ?? null,
+          message: error?.message ?? null,
+          detail: error?.detail ?? null,
+          column: error?.column ?? null,
+          constraint: error?.constraint ?? null,
+          table: error?.table ?? null
+        };
+
+        if (isDatabaseSqlStateError(error)) {
+          logScanRequestCreateFailure(
+            logger,
+            {
+              ...error,
+              ...originalDatabaseError
+            },
+            {
+              ...failureContext,
+              original_database_error: originalDatabaseError
+            }
+          );
+        }
+
         const classifiedError = classifyScanRequestCreateError(error);
         if (classifiedError?.code === 'BAD_REQUEST') {
           return badRequest(res, classifiedError.message);
         }
-        if (error?.code === 'FORBIDDEN') {
-          return forbidden(res, error.message);
+        if (classifiedError?.code === 'FORBIDDEN') {
+          return forbidden(res, classifiedError.message);
         }
-        if (error?.code === 'CONFLICT') {
-          return conflict(res, error.message);
+        if (classifiedError?.code === 'CONFLICT') {
+          return conflict(res, classifiedError.message);
         }
 
         logScanRequestCreateFailure(logger, error, failureContext);
