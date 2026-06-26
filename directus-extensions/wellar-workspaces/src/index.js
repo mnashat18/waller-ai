@@ -972,6 +972,78 @@ async function loadWorkforceRoster(trx, workspaceId, role, departmentId = null, 
   };
 }
 
+function badRequestError(message) {
+  return Object.assign(new Error(message), { code: 'BAD_REQUEST' });
+}
+
+function conflictError(message) {
+  return Object.assign(new Error(message), { code: 'CONFLICT' });
+}
+
+function buildScanRequestInsertPayload(activeWorkspaceId, targetMember, requestedByUserId, validationPayload, requestedAt) {
+  const payload = {
+    business_profile: activeWorkspaceId,
+    department: targetMember.department_id ?? null,
+    requested_by_user: requestedByUserId,
+    target_member: targetMember.id,
+    request_type: validationPayload.requestType,
+    status: 'pending',
+    requested_at: requestedAt
+  };
+
+  if (validationPayload.dueAt) {
+    payload.due_at = validationPayload.dueAt;
+  }
+
+  return payload;
+}
+
+function logScanRequestCreateFailure(logger, error, context = {}) {
+  logger?.error?.(
+    {
+      message: error?.message ?? 'Unknown error',
+      code: error?.code ?? error?.errno ?? error?.name ?? 'UNKNOWN',
+      context
+    },
+    '[wellar] scan request create failed'
+  );
+}
+
+function classifyScanRequestCreateError(error) {
+  if (!error) {
+    return null;
+  }
+
+  if (error.code === 'BAD_REQUEST' || error.code === 'FORBIDDEN' || error.code === 'CONFLICT') {
+    return error;
+  }
+
+  if (error.code === 'NOT_FOUND') {
+    error.code = 'BAD_REQUEST';
+    return error;
+  }
+
+  if (error.code === '23505') {
+    error.code = 'CONFLICT';
+    error.message = 'An open scan request already exists for the selected member.';
+    return error;
+  }
+
+  if (error.code === '23503') {
+    error.code = 'BAD_REQUEST';
+    error.message = 'The selected workforce member is no longer valid for scan requests.';
+    return error;
+  }
+
+  if (error.code === '23502' || error.code === '22P02') {
+    error.code = 'BAD_REQUEST';
+    error.message = 'Scan request payload is invalid.';
+    return error;
+  }
+
+  return null;
+}
+
 async function loadDepartmentById(trx, workspaceId, departmentId) {
   return trx('departments')
     .select([
@@ -1449,6 +1521,13 @@ export default {
         return badRequest(res, validation.message);
       }
 
+      const failureContext = {
+        actor_user_id: String(userId),
+        active_workspace_id: null,
+        target_member_id: String(validation.payload.targetMemberId),
+        request_type: validation.payload.requestType
+      };
+
       try {
         const result = await database.transaction(async (trx) => {
           await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
@@ -1461,6 +1540,8 @@ export default {
               code: 'NOT_FOUND'
             });
           }
+
+          failureContext.active_workspace_id = String(active.workspace_id);
 
           const role = normalizeRole(active.member_role);
           if (role !== 'owner' && role !== 'hr') {
@@ -1475,71 +1556,50 @@ export default {
             validation.payload.targetMemberId
           );
           if (!targetMember) {
-            throw Object.assign(new Error('The requested workforce member was not found in the active organization.'), {
-              code: 'NOT_FOUND'
-            });
+            throw badRequestError('The requested workforce member was not found in the active organization.');
           }
 
           if (!['hr', 'manager', 'employee'].includes(normalizeRole(targetMember.member_role))) {
-            throw Object.assign(new Error('Scan requests can only target active HR, manager, or employee members.'), {
-              code: 'CONFLICT'
-            });
+            throw badRequestError('Scan requests can only target active HR, manager, or employee members.');
           }
 
           if ((targetMember.status ?? '').toLowerCase() !== 'active') {
-            throw Object.assign(new Error('The selected workforce member is not active.'), {
-              code: 'CONFLICT'
-            });
+            throw conflictError('The selected workforce member is not active.');
           }
 
           if (!targetMember.user_id || !targetMember.user_email) {
-            throw Object.assign(new Error('The selected workforce member needs data repair before a scan request can be created.'), {
-              code: 'CONFLICT'
-            });
+            throw badRequestError('The selected workforce member needs data repair before a scan request can be created.');
           }
 
           if (targetMember.department_id) {
             if (!targetMember.department_match_id) {
-              throw Object.assign(new Error('The selected workforce member department is no longer valid.'), {
-                code: 'CONFLICT'
-              });
+              throw badRequestError('The selected workforce member department is no longer valid.');
             }
 
             if (pickString(targetMember.department_business_profile) !== pickString(active.workspace_id)) {
-              throw Object.assign(new Error('The selected workforce member department does not belong to the active organization.'), {
-                code: 'CONFLICT'
-              });
+              throw badRequestError('The selected workforce member department does not belong to the active organization.');
             }
 
             if (targetMember.department_is_active === false) {
-              throw Object.assign(new Error('The selected workforce member department is inactive.'), {
-                code: 'CONFLICT'
-              });
+              throw conflictError('The selected workforce member department is inactive.');
             }
           }
 
           const openRequest = await loadOpenScanRequestForMember(trx, active.workspace_id, targetMember.id);
           if (openRequest) {
-            throw Object.assign(new Error('An open scan request already exists for the selected member.'), {
-              code: 'CONFLICT'
-            });
+            throw conflictError('An open scan request already exists for the selected member.');
           }
 
           const now = new Date().toISOString();
+          const insertPayload = buildScanRequestInsertPayload(
+            active.workspace_id,
+            targetMember,
+            userId,
+            validation.payload,
+            now
+          );
           const [created] = await trx('scan_requests')
-            .insert({
-              business_profile: active.workspace_id,
-              department: targetMember.department_id ?? null,
-              requested_by_user: userId,
-              target_member: targetMember.id,
-              request_type: validation.payload.requestType,
-              status: 'pending',
-              requested_at: now,
-              due_at: validation.payload.dueAt,
-              completed_scan: null,
-              completed_at: null,
-              cancelled: null
-            })
+            .insert(insertPayload)
             .returning([
               'id',
               'business_profile',
@@ -1580,17 +1640,18 @@ export default {
 
         return res.status(201).json({ data: result });
       } catch (error) {
+        const classifiedError = classifyScanRequestCreateError(error);
+        if (classifiedError?.code === 'BAD_REQUEST') {
+          return badRequest(res, classifiedError.message);
+        }
         if (error?.code === 'FORBIDDEN') {
           return forbidden(res, error.message);
-        }
-        if (error?.code === 'NOT_FOUND') {
-          return notFound(res, error.message);
         }
         if (error?.code === 'CONFLICT') {
           return conflict(res, error.message);
         }
 
-        logger?.error?.(error, '[wellar] scan request creation failed');
+        logScanRequestCreateFailure(logger, error, failureContext);
         return serverError(res, 'Scan request could not be created.');
       }
     });
