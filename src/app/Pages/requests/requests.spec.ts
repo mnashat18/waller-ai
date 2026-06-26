@@ -212,13 +212,14 @@ describe('RequestsPageComponent', () => {
       request_type: 'manual',
       due_at: null
     });
+    expect(component.creatingRequest).toBe(false);
     expect(component.showCreateModal).toBe(false);
     expect(component.createRequestError).toBe('');
     expect(getRequestsPageDataCalls).toBe(2);
   });
 
-  it('preserves the entered request values when creation fails', async () => {
-    createScanRequestImpl = () => throwError(() => ({ userMessage: 'A pending request already exists.' }));
+  it('preserves the entered request values when creation fails with a safe server error', async () => {
+    createScanRequestImpl = () => throwError(() => ({ userMessage: 'Scan request could not be created.' }));
 
     component.openCreateRequestModal();
     fixture.detectChanges();
@@ -231,9 +232,29 @@ describe('RequestsPageComponent', () => {
 
     component.submitCreateRequest();
 
+    expect(component.creatingRequest).toBe(false);
     expect(component.showCreateModal).toBe(true);
     expect(component.createRequestForm.targetMemberId).toBe('member-employee');
-    expect(component.createRequestError).toBe('A pending request already exists.');
+    expect(component.createRequestForm.requestType).toBe('bulk');
+    expect(component.createRequestError).toBe('Scan request could not be created.');
+  });
+
+  it('exits Creating state and shows the safe 400 error when create fails', async () => {
+    createScanRequestImpl = () => throwError(() => ({ userMessage: 'target_member_id is required.' }));
+
+    component.openCreateRequestModal();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    component.createRequestForm.targetMemberId = 'member-employee';
+    component.createRequestForm.requestType = 'manual';
+    component.submitCreateRequest();
+
+    expect(component.creatingRequest).toBe(false);
+    expect(component.showCreateModal).toBe(true);
+    expect(component.createRequestForm.targetMemberId).toBe('member-employee');
+    expect(component.createRequestError).toBe('target_member_id is required.');
   });
 
   it('renders employee, manager, and hr roster targets in New Request and excludes owner', async () => {

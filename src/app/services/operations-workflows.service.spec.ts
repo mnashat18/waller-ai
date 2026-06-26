@@ -106,6 +106,7 @@ describe('OperationsWorkflowsService', () => {
       target_member_id: 'member-1',
       request_type: 'manual'
     });
+    httpMock.expectNone((request) => request.method === 'POST' && request.url.includes('/items/scan_requests'));
     expect(req.request.headers.get('Authorization')).toBe('Bearer token');
 
     req.flush({
@@ -181,6 +182,39 @@ describe('OperationsWorkflowsService', () => {
     expect(responseSummary).toBe('0:0');
   });
 
+  it('maps bad request creation errors into a user-safe error', () => {
+    let captured: ScanRequestApiError | null = null;
+
+    service.createScanRequest({
+      target_member_id: 'member-1',
+      request_type: 'manual'
+    }).subscribe({
+      next: () => {
+        throw new Error('expected createScanRequest to reject');
+      },
+      error: (error: ScanRequestApiError) => {
+        captured = error;
+      }
+    });
+
+    const req = httpMock.expectOne('https://dash.conntinuity.com/wellar/scan-requests');
+    req.flush(
+      {
+        error: {
+          code: 'BAD_REQUEST',
+          message: 'target_member_id is required.'
+        }
+      },
+      { status: 400, statusText: 'Bad Request' }
+    );
+
+    expect(captured).toBeTruthy();
+    const error = captured as unknown as ScanRequestApiError;
+    expect(error.code).toBe('unknown');
+    expect(error.status).toBe(400);
+    expect(error.userMessage).toBe('target_member_id is required.');
+  });
+
   it('maps forbidden request creation into a user-safe error', () => {
     let captured: ScanRequestApiError | null = null;
 
@@ -212,5 +246,38 @@ describe('OperationsWorkflowsService', () => {
     expect(error.code).toBe('forbidden');
     expect(error.status).toBe(403);
     expect(error.userMessage).toBe('Workspace access denied');
+  });
+
+  it('maps server request creation failures into a user-safe error', () => {
+    let captured: ScanRequestApiError | null = null;
+
+    service.createScanRequest({
+      target_member_id: 'member-1',
+      request_type: 'manual'
+    }).subscribe({
+      next: () => {
+        throw new Error('expected createScanRequest to reject');
+      },
+      error: (error: ScanRequestApiError) => {
+        captured = error;
+      }
+    });
+
+    const req = httpMock.expectOne('https://dash.conntinuity.com/wellar/scan-requests');
+    req.flush(
+      {
+        error: {
+          code: 'SERVER_ERROR',
+          message: 'Scan request could not be created.'
+        }
+      },
+      { status: 500, statusText: 'Server Error' }
+    );
+
+    expect(captured).toBeTruthy();
+    const error = captured as unknown as ScanRequestApiError;
+    expect(error.code).toBe('server_error');
+    expect(error.status).toBe(500);
+    expect(error.userMessage).toBe('Scan request could not be created.');
   });
 });
