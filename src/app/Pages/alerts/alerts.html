@@ -216,7 +216,7 @@
                     <div class="alerts-row-actions">
                       <button type="button" class="alerts-row-action" (click)="viewAlert(row)">View</button>
                       @if (isOwnerOrHr) {
-                        <button type="button" class="alerts-row-action" (click)="openUnsupportedWorkflow()">Workflow</button>
+                        <span class="alerts-row-action-note">Workflow follow-up is not available in this release.</span>
                       }
                     </div>
                   </td>
@@ -266,7 +266,7 @@
 
       <footer class="alerts-drawer__footer">
         @if (isOwnerOrHr) {
-          <button type="button" class="alerts-row-action" (click)="openUnsupportedWorkflow()">Workflow</button>
+          <span class="alerts-row-action-note">Workflow follow-up is not available in this release.</span>
         }
         <button type="button" class="alerts-row-action alerts-row-action--primary" (click)="closeAlertDetails()">Close</button>
       </footer>

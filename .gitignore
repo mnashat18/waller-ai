@@ -48,3 +48,5 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+directus-extensions/wellar-workspaces/node_modules/

@@ -267,7 +267,7 @@
                       <div class="compliance-row-actions">
                         <button type="button" class="compliance-row-action" (click)="openExceptionDetails(row)">View</button>
                         @if (isOwnerOrHr) {
-                          <button type="button" class="compliance-row-action" (click)="openUnsupportedWorkflow()">Follow up</button>
+                          <span class="compliance-row-action-note">Follow-up workflow is not available in this release.</span>
                         }
                       </div>
                     </td>
@@ -346,7 +346,7 @@
 
       <div class="compliance-modal__footer">
         @if (isOwnerOrHr) {
-          <button type="button" class="dashboard-action-button" (click)="openUnsupportedWorkflow()">Follow up</button>
+          <span class="compliance-row-action-note">Follow-up workflow is not available in this release.</span>
         }
         <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="closeExceptionDetails()">Close</button>
       </div>

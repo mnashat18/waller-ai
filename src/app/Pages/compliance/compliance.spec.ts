@@ -144,6 +144,7 @@ describe('CompliancePageComponent', () => {
     await fixture.whenStable();
 
     expect(navigateCalls[0]?.commands).toEqual(['/app/workforce']);
+    expect(fixture.nativeElement.textContent).not.toContain('Follow up');
   });
 
   it('keeps the warning hidden when only valid unassigned members exist', async () => {

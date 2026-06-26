@@ -153,6 +153,10 @@
   line-height: 1.45;
 }
 
+.dashboard-setup-callout__action {
+  margin-top: 0.55rem;
+}
+
 .dashboard-section-error {
   display: flex;
   align-items: flex-start;

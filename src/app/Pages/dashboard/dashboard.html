@@ -74,6 +74,9 @@
           <div>
             <p class="dashboard-setup-callout__label">{{ step.label }}</p>
             <p class="dashboard-setup-callout__description">{{ step.description }}</p>
+            <button type="button" class="dashboard-chip-button dashboard-chip-button--primary dashboard-setup-callout__action" (click)="openOnboardingStep(step)">
+              {{ step.cta }}
+            </button>
           </div>
         </li>
       </ol>

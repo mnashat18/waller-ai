@@ -47,8 +47,6 @@ type FeedbackMessage = {
   styleUrls: ['./reports.css']
 })
 export class ReportsPageComponent implements OnInit, OnDestroy {
-  readonly unsupportedWorkflowMessage = 'This action requires an approved server-side workflow.';
-
   viewState: ReportsViewState = 'loading';
   loading = true;
   errorMessage = '';
@@ -160,10 +158,6 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     this.filters = this.defaultFilters();
     this.enforceScopeSafeFilters();
     void this.loadReports(false);
-  }
-
-  openUnsupportedWorkflow(): void {
-    this.pushFeedback('info', this.unsupportedWorkflowMessage);
   }
 
   trackByDepartment(index: number, row: DepartmentPerformanceRow): string {

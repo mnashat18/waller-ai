@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ActivatedRoute } from '@angular/router';
 import { of, throwError } from 'rxjs';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
@@ -146,6 +147,16 @@ describe('RequestsPageComponent', () => {
           }
         },
         {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: {
+              queryParamMap: {
+                get: () => null
+              }
+            }
+          }
+        },
+        {
           provide: OperationsWorkflowsService,
           useValue: {
             getRequestsPageData: () => {
@@ -169,7 +180,9 @@ describe('RequestsPageComponent', () => {
   });
 
   it('filters request targets to active linked employees only', () => {
-    expect(component.eligibleRequestMembers.map((member) => member.member_id)).toEqual(['member-employee']);
+    expect(component.eligibleRequestMembers.map((member) => member.member_id)).toEqual(['member-hr', 'member-manager', 'member-employee']);
+    expect(component.eligibleRequestMembers.map((member) => member.member_role)).toEqual(['hr', 'manager', 'employee']);
+    expect(component.eligibleRequestMembers.some((member) => member.member_role === 'owner')).toBe(false);
   });
 
   it('opens the modal and submits scan requests through the protected workflow service', async () => {
@@ -234,8 +247,9 @@ describe('RequestsPageComponent', () => {
       expect(localComponent.showCreateModal).toBe(true);
       expect(localComponent.eligibleRequestMembers.length).toBe(0);
       expect(localFixture.nativeElement.textContent).toContain(
-        'No eligible employees are available. Complete an employee invitation or repair the employee profile before creating a scan request.'
+        'No eligible members are available. Complete an HR, manager, or employee invitation or repair the member profile before creating a scan request.'
       );
+      expect(localFixture.nativeElement.querySelectorAll('.scan-requests-row-actions button').length).toBe(0);
     } finally {
       pageData.members = originalMembers;
     }

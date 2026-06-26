@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { Router, UrlTree, provideRouter } from '@angular/router';
-import { firstValueFrom, throwError } from 'rxjs';
+import { throwError } from 'rxjs';
 
 import { CompanyContextService } from './core/context/company-context.service';
 import { InviteService } from './services/invites';
@@ -27,7 +27,7 @@ describe('route guard recovery', () => {
         {
           provide: CompanyContextService,
           useValue: {
-            ensureLoaded: () => throwError(() => new Error('timeout')),
+            ensureVerifiedWorkspaceContext: () => Promise.resolve(null),
             snapshot: () => ({
               context: {
                 activeBusinessProfileId: null,
@@ -60,6 +60,18 @@ describe('route guard recovery', () => {
       providers: [
         provideRouter([]),
         {
+          provide: CompanyContextService,
+          useValue: {
+            ensureVerifiedWorkspaceContext: () => Promise.resolve(null),
+            snapshot: () => ({
+              context: {
+                activeBusinessProfileId: null,
+                activeMemberRole: 'owner'
+              }
+            })
+          }
+        },
+        {
           provide: SubscriptionService,
           useValue: {
             isBusinessOnboardingComplete: () => throwError(() => new Error('network'))
@@ -69,15 +81,51 @@ describe('route guard recovery', () => {
     }).compileComponents();
 
     const router = TestBed.inject(Router);
-    const result = await firstValueFrom(
-      TestBed.runInInjectionContext(() =>
-        businessOnboardingGuard({} as never, { url: '/app/dashboard' } as never)
-      ) as any
+    const result = await TestBed.runInInjectionContext(() =>
+      businessOnboardingGuard({} as never, { url: '/app/dashboard' } as never)
     );
 
     expect(typeof result).toBe('object');
     expect(router.serializeUrl(result as UrlTree)).toBe(
       '/app/workspace-access?returnUrl=%2Fapp%2Fdashboard'
+    );
+  });
+
+  it('does not grant operational access from tampered stored role values', async () => {
+    localStorage.setItem('active_member_role', 'owner');
+    localStorage.setItem('active_business_profile', 'profile-1');
+
+    TestBed.resetTestingModule();
+    await TestBed.configureTestingModule({
+      providers: [
+        provideRouter([]),
+        {
+          provide: CompanyContextService,
+          useValue: {
+            ensureVerifiedWorkspaceContext: () => Promise.resolve(null),
+            snapshot: () => ({
+              context: {
+                activeBusinessProfileId: null,
+                activeMemberRole: 'owner'
+              }
+            })
+          }
+        },
+        {
+          provide: InviteService,
+          useValue: inviteServiceMock
+        }
+      ]
+    }).compileComponents();
+
+    const router = TestBed.inject(Router);
+    const result = await TestBed.runInInjectionContext(() =>
+      dashboardWorkspaceGuard({} as never, { url: '/app/workforce' } as never)
+    );
+
+    expect(typeof result).toBe('object');
+    expect(router.serializeUrl(result as UrlTree)).toBe(
+      '/app/workspace-access?returnUrl=%2Fapp%2Fworkforce'
     );
   });
 });

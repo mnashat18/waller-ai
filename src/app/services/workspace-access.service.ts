@@ -1,9 +1,7 @@
-import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable, forkJoin, from, of } from 'rxjs';
+import { Observable, from, of } from 'rxjs';
 import { catchError, map, switchMap, timeout } from 'rxjs/operators';
 
-import { environment } from '../../environments/environment';
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { AuthService } from './auth';
 import { CompanyContextService } from '../core/context/company-context.service';
@@ -12,6 +10,11 @@ import {
   type WorkspaceApplicationRecord,
   WorkspaceApplicationsService
 } from './workspace-applications.service';
+import {
+  WorkspaceContextApiService,
+  type WorkspaceContextInvitation,
+  type WorkspaceContextMembership
+} from './workspace-context-api.service';
 
 export type WorkspaceAccessUser = {
   id: string;
@@ -90,12 +93,6 @@ type DirectusUserResponse = {
   last_name?: string | null;
 };
 
-type WorkspaceLookupResult<T> = {
-  items: T;
-  error: string | null;
-  status: number | null;
-};
-
 type WorkspaceMembershipRow = {
   id?: string | number | null;
   member_role?: string | null;
@@ -146,15 +143,14 @@ type WorkspaceInviteRow = {
 
 @Injectable({ providedIn: 'root' })
 export class WorkspaceAccessService {
-  private readonly api = environment.API_URL;
   private readonly requestTimeoutMs = 15000;
 
   constructor(
-    private http: HttpClient,
     private auth: AuthService,
     private companyContext: CompanyContextService,
     private invites: InviteService,
-    private workspaceApplications: WorkspaceApplicationsService
+    private workspaceApplications: WorkspaceApplicationsService,
+    private workspaceContextApi: WorkspaceContextApiService
   ) {}
 
   loadWorkspaceAccess(forceRefresh = false): Observable<WorkspaceAccessState> {
@@ -179,15 +175,11 @@ export class WorkspaceAccessService {
           email
         };
 
-        return this.queryMemberships(userId, token, forceRefresh).pipe(
-          switchMap((membershipResult) => {
-
-            if (membershipResult.error) {
-              return of(this.buildErrorState(membershipResult.error));
-            }
-
-            const memberships = membershipResult.items;
-            const initialState = this.buildState(baseUser, memberships, [], []);
+        return this.workspaceContextApi.getContext().pipe(
+          switchMap((workspaceContext) => {
+            const memberships = this.mapWorkspaceMemberships(workspaceContext.memberships);
+            const invites = this.mapWorkspaceInvitations(workspaceContext.invitations, email);
+            const initialState = this.buildState(baseUser, memberships, invites, []);
 
             if (initialState.activeWorkspaces.length > 0) {
               return of(initialState);
@@ -195,11 +187,8 @@ export class WorkspaceAccessService {
 
             this.companyContext.clearActiveWorkspaceContext();
 
-            return forkJoin({
-              invites: this.queryInvites(userId, email, token, forceRefresh),
-              applications: from(this.workspaceApplications.getMyApplications(userId, token))
-            }).pipe(
-              map(({ invites, applications }) => this.buildState(baseUser, memberships, invites, applications))
+            return from(this.workspaceApplications.getMyApplications(userId, token)).pipe(
+              map((applications) => this.buildState(baseUser, memberships, invites, applications))
             );
           }),
           catchError((error) =>
@@ -272,61 +261,38 @@ export class WorkspaceAccessService {
   }
 
   refreshWorkspaceContext(): Observable<void> {
-    return this.companyContext.ensureLoaded(true).pipe(map(() => void 0));
+    return from(this.companyContext.ensureVerifiedWorkspaceContext(true)).pipe(map(() => void 0));
   }
 
-  private queryMemberships(userId: string, token: string, forceRefresh: boolean): Observable<WorkspaceLookupResult<WorkspaceMembershipRow[]>> {
-    const params = new URLSearchParams({
-      limit: '100',
-      sort: '-id',
-      fields: [
-        'id',
-        'member_role',
-        'status',
-        'joined_at',
-        'business_profile.id',
-        'business_profile.company_name',
-        'business_profile.is_active',
-        'business_profile.plan_code',
-        'business_profile.billing_status',
-        'department'
-      ].join(',')
-    });
-    params.set('filter[user][_eq]', userId);
-
-    return this.http.get<{ data?: WorkspaceMembershipRow[] }>(
-      `${this.api}/items/business_profile_members?${params.toString()}&_ts=${Date.now()}`,
-      {
-        headers: this.auth.getAuthHeaders(token),
-        withCredentials: true
-      }
-    ).pipe(
-      map((response) => ({
-        items: response.data ?? [],
-        error: null,
-        status: null
-      })),
-      catchError((error) =>
-        of({
-          items: [] as WorkspaceMembershipRow[],
-          error: this.toFriendlyError(error, 'We could not verify your workspace memberships.'),
-          status: typeof error?.status === 'number' ? error.status : null
-        })
-      )
-    );
+  private mapWorkspaceMemberships(memberships: WorkspaceContextMembership[]): WorkspaceMembershipRow[] {
+    return (memberships ?? []).map((membership) => ({
+      id: membership.id,
+      member_role: membership.memberRole,
+      status: membership.status,
+      joined_at: null,
+      business_profile: {
+        id: membership.workspace.id,
+        company_name: membership.workspace.companyName,
+        is_active: membership.workspace.isActive
+      },
+      department: membership.department
+    }));
   }
 
-  private queryInvites(
-    userId: string,
-    email: string | null,
-    token: string,
-    forceRefresh: boolean
-  ): Observable<WorkspaceInviteRow[]> {
-    void userId;
+  private mapWorkspaceInvitations(
+    invitations: WorkspaceContextInvitation[],
+    email: string | null
+  ): WorkspaceInviteRow[] {
     void email;
-    void token;
-    void forceRefresh;
-    return of([]);
+    return (invitations ?? []).map((invite) => ({
+      id: invite.id,
+      email: invite.email,
+      business_profile: null,
+      member_role: invite.memberRole,
+      department: invite.department,
+      status: invite.status,
+      expires_at: null
+    }));
   }
 
   private buildState(

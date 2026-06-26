@@ -68,8 +68,6 @@ type DistributionRow = {
   styleUrls: ['./alerts.css']
 })
 export class AlertsPageComponent implements OnInit, OnDestroy {
-  readonly unsupportedWorkflowMessage = 'This action requires an approved server-side workflow.';
-
   pageState: AlertsPageState = 'loading';
   alerts: AlertViewModel[] = [];
   filteredAlerts: AlertViewModel[] = [];
@@ -202,10 +200,6 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
   closeAlertDetails(): void {
     this.selectedAlert = null;
     this.setBodyScrollLocked(false);
-  }
-
-  openUnsupportedWorkflow(): void {
-    this.feedbackMessage = this.unsupportedWorkflowMessage;
   }
 
   trackByAlert(index: number, row: AlertViewModel): string {

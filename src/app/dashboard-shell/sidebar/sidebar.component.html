@@ -21,8 +21,16 @@
         <div class="app-sidebar__company-copy">
           <p class="app-sidebar__eyebrow">Active Organization</p>
           <h3>{{ vm.companyName || 'Loading organization...' }}</h3>
-          <span>{{ vm.scopeLabel }}</span>
-          <small *ngIf="vm.scopeDetail">{{ vm.scopeDetail }}</small>
+          <div class="app-sidebar__company-meta">
+            <div class="app-sidebar__company-meta-item">
+              <span>Scope</span>
+              <strong>{{ vm.scopeLabel }}</strong>
+            </div>
+            <div *ngIf="vm.scopeDetail" class="app-sidebar__company-meta-item">
+              <span>Department</span>
+              <strong>{{ vm.scopeDetail }}</strong>
+            </div>
+          </div>
         </div>
 
         <app-role-badge *ngIf="vm.role" [role]="vm.role"></app-role-badge>

@@ -1,13 +1,19 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, firstValueFrom, forkJoin, of } from 'rxjs';
+import { BehaviorSubject, Observable, firstValueFrom, forkJoin, from, of } from 'rxjs';
 import { catchError, finalize, map, shareReplay, switchMap, tap, timeout } from 'rxjs/operators';
 
 import { environment } from '../../../environments/environment';
 
 import { type ActiveMemberRole } from '../../ia/wellar-ia';
 import { AuthService } from '../../services/auth';
-import { WorkspaceContextApiService } from '../../services/workspace-context-api.service';
+import {
+  WorkspaceContextApiError,
+  WorkspaceContextApiService,
+  type WorkspaceContextDepartment,
+  type WorkspaceContextPayload,
+  type WorkspaceContextWorkspace
+} from '../../services/workspace-context-api.service';
 
 export type CompanyOption = {
   id: string;
@@ -149,6 +155,13 @@ const INITIAL_STATE: CompanyContextState = {
 const ACTIVE_MEMBERSHIP_STORAGE_KEY = 'active_workspace_membership_v1';
 type RefreshOptions = { force?: boolean; failOnError?: boolean };
 
+type VerifiedWorkspaceContext = {
+  activeMembership: ActiveMembershipContext;
+  activeBusinessProfile: BusinessProfileRecord;
+  activeDepartment: WorkspaceContextDepartment | null;
+  activeMemberRole: ActiveMemberRole;
+};
+
 @Injectable({ providedIn: 'root' })
 export class CompanyContextService {
   private readonly api = environment.API_URL;
@@ -159,6 +172,8 @@ export class CompanyContextService {
     this.normalizeUiRole(this.readStoredValue('active_member_role'))
   );
   private inFlight$: Observable<CompanyContextState> | null = null;
+  private verifiedWorkspaceContext: VerifiedWorkspaceContext | null = null;
+  private verifiedWorkspaceContextInFlight: Promise<VerifiedWorkspaceContext | null> | null = null;
 
   readonly state$ = this.stateSubject.asObservable();
   readonly context$ = this.state$.pipe(map((state) => state.context));
@@ -195,7 +210,74 @@ export class CompanyContextService {
 
   async refreshWorkspaceContext(options: RefreshOptions = {}): Promise<void> {
     const forceRefresh = options.force ?? true;
-    await this.initializeWorkspaceContext(forceRefresh);
+    await this.ensureVerifiedWorkspaceContext(forceRefresh, options.failOnError ?? false);
+  }
+
+  async ensureVerifiedWorkspaceContext(forceRefresh = false, failOnError = false): Promise<VerifiedWorkspaceContext | null> {
+    const current = this.verifiedWorkspaceContext;
+    if (!forceRefresh && current) {
+      return current;
+    }
+
+    if (!forceRefresh && this.verifiedWorkspaceContextInFlight) {
+      return this.verifiedWorkspaceContextInFlight;
+    }
+
+    const run = async (): Promise<VerifiedWorkspaceContext | null> => {
+      const token = this.auth.getStoredAccessToken() ?? '';
+      if (!token) {
+        this.verifiedWorkspaceContext = null;
+        this.clearActiveWorkspaceContext();
+        return null;
+      }
+
+      try {
+        const response = await firstValueFrom(this.workspaceContextApi.getContext().pipe(timeout(10000)));
+        const active = response.active;
+        if (!active?.workspace?.id || !active?.membership?.id || !active.membership.memberRole) {
+          this.verifiedWorkspaceContext = null;
+          this.clearActiveWorkspaceContext();
+          return null;
+        }
+
+        const workspace = this.normalizeBusinessProfileFromWorkspace(active.workspace);
+        const membership = this.normalizeVerifiedMembership(active, workspace);
+        this.applyVerifiedWorkspaceContext(membership, workspace, active.department ?? null);
+        return this.verifiedWorkspaceContext;
+      } catch (error) {
+        if (error instanceof WorkspaceContextApiError) {
+          if (error.code === 'unauthorized') {
+            this.auth.clearAuthState();
+            this.clearActiveWorkspaceContext();
+            this.stateSubject.next(this.buildSignedOutState(true, true));
+            return null;
+          }
+          if (error.code === 'forbidden' || error.code === 'not_found' || error.code === 'conflict') {
+            this.verifiedWorkspaceContext = null;
+            this.clearActiveWorkspaceContext();
+            if (failOnError) {
+              throw error;
+            }
+            return null;
+          }
+        }
+
+        if (failOnError) {
+          throw error;
+        }
+
+        this.verifiedWorkspaceContext = null;
+        this.clearActiveWorkspaceContext();
+        return null;
+      }
+    };
+
+    const promise = run().finally(() => {
+      this.verifiedWorkspaceContextInFlight = null;
+    });
+
+    this.verifiedWorkspaceContextInFlight = promise;
+    return promise;
   }
 
   async refreshMemberships(options: RefreshOptions = {}): Promise<ActiveMembershipContext[]> {
@@ -264,6 +346,7 @@ export class CompanyContextService {
     await firstValueFrom(this.workspaceContextApi.switchMembership(String(claimedMembership.id)));
     await this.activateFromMembership(claimedMembership as ActiveMembershipInput);
     await firstValueFrom(this.ensureLoaded(true));
+    await this.ensureVerifiedWorkspaceContext(true, true);
 
     const activeMembership = this.activeMembershipSubject.value;
     if (
@@ -449,6 +532,7 @@ export class CompanyContextService {
     this.activeMembershipSubject.next(null);
     this.activeBusinessProfileSubject.next(null);
     this.activeMemberRoleSubject.next(null);
+    this.verifiedWorkspaceContext = null;
     this.stateSubject.next({
       loading: false,
       error: null,
@@ -797,6 +881,8 @@ export class CompanyContextService {
 
     return this.workspaceContextApi.switchMembership(company.membershipId).pipe(
       switchMap(() => this.ensureLoaded(true)),
+      switchMap(() => from(this.ensureVerifiedWorkspaceContext(true, true))),
+      map(() => this.snapshot()),
       catchError((error) => this.handleMutationError(error, 'Failed to switch company context.'))
     );
   }
@@ -822,6 +908,8 @@ export class CompanyContextService {
 
     return this.workspaceContextApi.switchMembership(matchingCompany.membershipId).pipe(
       switchMap(() => this.ensureLoaded(true)),
+      switchMap(() => from(this.ensureVerifiedWorkspaceContext(true, true))),
+      map(() => this.snapshot()),
       catchError((error) => this.handleMutationError(error, 'Failed to update workspace context.'))
     );
   }
@@ -1296,6 +1384,68 @@ export class CompanyContextService {
       timezone: this.pickString(record['timezone']),
       default_language: this.pickString(record['default_language'])
     };
+  }
+
+  private normalizeBusinessProfileFromWorkspace(workspace: WorkspaceContextWorkspace): BusinessProfileRecord {
+    return {
+      id: workspace.id,
+      company_name: workspace.companyName,
+      is_active: workspace.isActive,
+      plan_code: workspace.planCode,
+      billing_status: workspace.billingStatus,
+      timezone: null,
+      default_language: null
+    };
+  }
+
+  private normalizeVerifiedMembership(
+    active: WorkspaceContextPayload['active'],
+    workspace: BusinessProfileRecord
+  ): ActiveMembershipContext {
+    const currentMembership = this.activeMembershipSubject.value ?? this.readStoredMembership();
+    const membershipId = active?.membership?.id ?? currentMembership?.id ?? '';
+    const activeMembership: ActiveMembershipContext = {
+      id: membershipId,
+      status: active?.membership?.status ?? currentMembership?.status ?? 'active',
+      member_role: active?.membership?.memberRole ?? currentMembership?.member_role ?? '',
+      user: currentMembership?.user ?? null,
+      business_profile: workspace,
+      department: active?.department ?? currentMembership?.department ?? null,
+      joined_at: currentMembership?.joined_at ?? null
+    };
+
+    return activeMembership;
+  }
+
+  private applyVerifiedWorkspaceContext(
+    membership: ActiveMembershipContext,
+    profile: BusinessProfileRecord,
+    department: WorkspaceContextDepartment | null
+  ): void {
+    this.verifiedWorkspaceContext = {
+      activeMembership: membership,
+      activeBusinessProfile: profile,
+      activeDepartment: department,
+      activeMemberRole: this.normalizeUiRole(membership.member_role) ?? 'employee'
+    };
+
+    this.activeMembershipSubject.next(membership);
+    this.activeBusinessProfileSubject.next(profile);
+    this.activeMemberRoleSubject.next(this.normalizeUiRole(membership.member_role));
+
+    this.persistStoredMembership(membership);
+    this.persistStoredValue('active_member_id', membership.id);
+    this.persistStoredValue('active_member_role', membership.member_role);
+    this.persistStoredValue('active_business_profile_id', profile.id);
+    this.persistStoredValue('active_business_profile', profile.id);
+    this.persistStoredValue('active_business_profile_name', profile.company_name ?? null);
+    this.persistStoredValue('active_company', profile.company_name ?? null);
+    this.persistStoredValue('active_workspace', profile.id);
+    this.persistStoredValue('active_workspace_membership_user_id', this.normalizeId(membership.user));
+    this.persistStoredValue('active_department', department?.id ?? null);
+    this.persistStoredValue('active_department_name', department?.name ?? null);
+
+    this.syncActiveContextState();
   }
 
   private objectRecord(value: unknown): Record<string, unknown> | null {

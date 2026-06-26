@@ -191,6 +191,7 @@ export class Dashboard implements OnInit {
     description: string;
     route: string;
     queryParams: Record<string, string> | null;
+    state: Record<string, unknown> | null;
     cta: string;
     done: boolean;
   }> {
@@ -208,33 +209,37 @@ export class Dashboard implements OnInit {
       {
         label: 'Complete company profile',
         description: 'Confirm organization details before relying on readiness reporting.',
-        route: '',
+        route: '/app/company',
         queryParams: null,
-        cta: '',
+        state: null,
+        cta: 'Open Company',
         done: Boolean(vm?.company.companyName)
       },
       {
         label: 'Add departments',
         description: 'Create workforce groups for team-level scans and compliance coverage.',
-        route: '',
-        queryParams: null,
-        cta: '',
+        route: '/app/company',
+        queryParams: { tab: 'departments' },
+        state: null,
+        cta: 'Open Departments',
         done: hasDepartments
       },
       {
         label: 'Invite employees',
         description: 'Bring your team into the workspace.',
         route: '/app/workforce',
-        queryParams: null,
-        cta: 'Invite team',
+        queryParams: { invite: '1' },
+        state: null,
+        cta: 'Invite Team',
         done: hasMembers
       },
       {
         label: 'Connect employees to the mobile app',
         description: 'Employees complete readiness scans on mobile.',
-        route: '/download-app',
+        route: '/app/workforce',
         queryParams: null,
-        cta: 'Get the app',
+        state: { workforceGuide: 'mobile-app' },
+        cta: 'Open Workforce',
         done: hasScans
       },
       {
@@ -242,7 +247,8 @@ export class Dashboard implements OnInit {
         description: 'Send a readiness scan to a person or a team.',
         route: '/app/scan-requests',
         queryParams: null,
-        cta: 'Send request',
+        state: { openCreateRequest: true },
+        cta: 'Send Request',
         done: hasRequests
       }
     ];
@@ -263,6 +269,21 @@ export class Dashboard implements OnInit {
     } catch {
       // ignore storage errors
     }
+  }
+
+  openOnboardingStep(step: {
+    route: string;
+    queryParams: Record<string, string> | null;
+    state: Record<string, unknown> | null;
+  }): void {
+    if (!step.route) {
+      return;
+    }
+
+    void this.router.navigate([step.route], {
+      queryParams: step.queryParams ?? undefined,
+      state: step.state ?? undefined
+    });
   }
 
   private readOnboardingDismissed(): boolean {
@@ -374,7 +395,7 @@ export class Dashboard implements OnInit {
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const context = await Promise.race([
-        this.workspaceContext.ensureActiveContext(),
+        this.workspaceContext.ensureVerifiedWorkspaceContext(attempt > 0),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
       ]);
 

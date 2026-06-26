@@ -17,6 +17,7 @@ import {
   type AlertRow,
   type RequestRow
 } from './operations-workflows.service';
+import { WorkforceRosterApiService } from './workforce-roster-api.service';
 
 export type ComplianceDateRange = 'today' | 'last7' | 'last30';
 
@@ -230,7 +231,8 @@ export class ComplianceService {
     private http: HttpClient,
     private auth: AuthService,
     private operationsAdmin: OperationsAdminService,
-    private workflows: OperationsWorkflowsService
+    private workflows: OperationsWorkflowsService,
+    private workforceRosterApi: WorkforceRosterApiService
   ) {}
 
   async loadComplianceOverview(
@@ -340,7 +342,7 @@ export class ComplianceService {
           workspaceId
         });
       }
-      const memberRiskRows = this.resolveSettled('business_profile_members', memberRiskSettled, warnings, () => { forbiddenSources += 1; });
+      const memberRiskRows = this.resolveSettled('workforce_roster', memberRiskSettled, warnings, () => { forbiddenSources += 1; });
       memberLastRiskById = this.buildMemberLastRiskMap(memberRiskRows);
 
       this.cache = {
@@ -1218,57 +1220,30 @@ export class ComplianceService {
     businessProfileId: string,
     activeDepartmentId: string | null
   ): Promise<MemberRiskRecord[]> {
-    const filters: Array<{ path: string[]; operator: string; value: string }> = [
-      { path: ['business_profile'], operator: '_eq', value: businessProfileId },
-      { path: ['status'], operator: '_eq', value: 'active' }
-    ];
-
-    if (activeDepartmentId) {
-      filters.push({ path: ['department'], operator: '_eq', value: activeDepartmentId });
-    }
-
-    return this.queryWithFieldFallback<MemberRiskRecord>(
-      'business_profile_members',
-      [
-        [
-          'id',
-          'status',
-          'user',
-          'business_profile',
-          'member_role',
-          'department',
-          'shift_template',
-          'employee_code',
-          'job_title',
-          'joined_at',
-          'deactivated_at',
-          'last_scan_at',
-          'last_readiness_score',
-          'last_risk_level',
-          'date_created',
-          'date_updated'
-        ],
-        [
-          'id',
-          'status',
-          'user',
-          'business_profile',
-          'member_role',
-          'department',
-          'last_scan_at',
-          'last_risk_level',
-          'date_created',
-          'date_updated'
-        ],
-        ['id', 'status', 'department', 'last_scan_at', 'last_risk_level']
-      ],
-      token,
-      {
-        filters,
-        sort: '-date_updated',
-        limit: 1200
-      }
-    );
+    void token;
+    void businessProfileId;
+    void activeDepartmentId;
+    const roster = await firstValueFrom(this.workforceRosterApi.getWorkforceRoster());
+    return (roster.rows ?? [])
+      .map((row) => {
+        const id = row.member_id ?? null;
+        if (!id) {
+          return null;
+        }
+        return {
+          id,
+          status: row.status,
+          business_profile: roster.active?.workspace.id ? { id: roster.active.workspace.id } : null,
+          member_role: row.member_role,
+          department: row.department_id ? { id: row.department_id } : null,
+          last_scan_at: row.last_scan_at,
+          last_risk_level: row.last_risk_level,
+          date_created: row.joined_at ?? null,
+          date_updated: row.last_scan_at ?? row.joined_at ?? null,
+          user: row.user_id ? { id: row.user_id } : null
+        };
+      })
+      .filter(Boolean) as MemberRiskRecord[];
   }
 
   private async queryWithFieldFallback<T>(
