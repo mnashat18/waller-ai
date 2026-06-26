@@ -8,6 +8,7 @@ import { CompanyContextService } from '../../core/context/company-context.servic
 import {
   type CreateScanRequestInput,
   OperationsWorkflowsService,
+  type RequestModalOptions,
   type RequestRow,
   type RequestsPageData,
   type WorkflowMemberOption
@@ -105,6 +106,11 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   creatingRequest = false;
   createRequestError = '';
   createRequestForm: CreateRequestForm = this.defaultCreateRequestForm();
+  requestModalOptions: RequestModalOptions = {
+    members: [],
+    departments: []
+  };
+  loadingRequestModalOptions = false;
   resultCountLabel = '0 of 0 shown';
   hasActiveFilters = false;
   summary: QueueSummary = {
@@ -195,14 +201,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   readonly createRequestTypeOptions = REQUEST_TYPE_OPTIONS;
 
   get eligibleRequestMembers(): WorkflowMemberOption[] {
-    return (this.pageData?.members ?? []).filter((member) =>
-      Boolean(member.member_id) &&
-      Boolean(member.user_id) &&
-      Boolean(member.email) &&
-      ['hr', 'manager', 'employee'].includes(String(member.member_role ?? '').trim().toLowerCase()) &&
-      String(member.status ?? '').trim().toLowerCase() === 'active' &&
-      String(member.member_id ?? '').trim().length > 0
-    );
+    return this.requestModalOptions.members ?? [];
   }
 
   get showFilteredEmpty(): boolean {
@@ -225,13 +224,14 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     this.createRequestError = '';
     this.createRequestForm = this.defaultCreateRequestForm();
     this.showCreateModal = true;
-    this.applyPendingTargetMember();
+    this.loadRequestModalOptions();
   }
 
   closeCreateRequestModal(): void {
     this.showCreateModal = false;
     this.createRequestError = '';
     this.createRequestForm = this.defaultCreateRequestForm();
+    this.loadingRequestModalOptions = false;
   }
 
   submitCreateRequest(): void {
@@ -338,7 +338,6 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
         this.recomputeVisibleRows();
         this.syncSelectedRequestAfterLoad();
         this.pageState = 'ready';
-        this.applyPendingTargetMember();
         if (this.openCreateRequestOnLoad) {
           this.openCreateRequestOnLoad = false;
           this.openCreateRequestModal();
@@ -351,6 +350,36 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
         this.summary = { pending: 0, overdue: 0, dueToday: 0, completedOrClosed: 0 };
         this.errorMessage = this.resolveLoadErrorMessage(error);
         this.pageState = 'error';
+      }
+    });
+  }
+
+  private loadRequestModalOptions(): void {
+    this.loadingRequestModalOptions = true;
+    this.requestModalOptions = {
+      members: [],
+      departments: this.pageData?.departments ?? []
+    };
+
+    this.workflows.getRequestModalOptions().pipe(
+      finalize(() => {
+        this.loadingRequestModalOptions = false;
+        this.cdr.detectChanges();
+      })
+    ).subscribe({
+      next: (options) => {
+        this.requestModalOptions = {
+          departments: options.departments ?? [],
+          members: options.members ?? []
+        };
+        this.applyPendingTargetMember();
+      },
+      error: (error: unknown) => {
+        this.requestModalOptions = {
+          members: [],
+          departments: this.pageData?.departments ?? []
+        };
+        this.createRequestError = this.resolveLoadErrorMessage(error);
       }
     });
   }
@@ -574,6 +603,12 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
       .filter(Boolean)
       .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
       .join(' ');
+  }
+
+  formatRequestMemberOption(member: WorkflowMemberOption): string {
+    const normalizedRole = this.safeText(member.member_role, '').toLowerCase();
+    const roleLabel = normalizedRole === 'hr' ? 'HR' : this.toDisplayLabel(member.member_role, '');
+    return `${member.label}${member.email ? ` — ${member.email}` : ''}${roleLabel ? ` · ${roleLabel}` : ''}`;
   }
 
   private safeText(value: string | null | undefined, fallback: string): string {
