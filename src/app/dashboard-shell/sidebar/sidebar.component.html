@@ -21,26 +21,26 @@
         <div class="app-sidebar__company-copy">
           <p class="app-sidebar__eyebrow">Active Organization</p>
           <h3>{{ vm.companyName || 'Loading organization...' }}</h3>
-
-          <dl class="app-sidebar__company-context">
-            <div class="app-sidebar__company-context-row">
-              <dt>Scope</dt>
-              <dd>{{ vm.scopeValue }}</dd>
-            </div>
-
-            <div class="app-sidebar__company-context-row">
-              <dt>Department</dt>
-              <dd>{{ vm.departmentValue }}</dd>
-            </div>
-
-            <div class="app-sidebar__company-context-row">
-              <dt>Role</dt>
-              <dd>{{ vm.roleLabel }}</dd>
-            </div>
-          </dl>
         </div>
 
         <app-role-badge *ngIf="vm.role" [role]="vm.role"></app-role-badge>
+
+        <dl class="app-sidebar__company-context">
+          <div class="app-sidebar__company-context-row">
+            <dt>Scope</dt>
+            <dd>{{ vm.scopeValue }}</dd>
+          </div>
+
+          <div class="app-sidebar__company-context-row">
+            <dt>Department</dt>
+            <dd>{{ vm.departmentValue }}</dd>
+          </div>
+
+          <div class="app-sidebar__company-context-row">
+            <dt>Role</dt>
+            <dd>{{ vm.roleLabel }}</dd>
+          </div>
+        </dl>
       </section>
 
       <ng-container *ngIf="vm.groups.length">
