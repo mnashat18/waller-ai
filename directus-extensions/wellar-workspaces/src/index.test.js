@@ -35,6 +35,11 @@ function createResponse() {
   };
 }
 
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function createQueryExecutor(state, tableName) {
   return function execute(query) {
     switch (tableName) {
@@ -231,7 +236,16 @@ function createState(overrides = {}) {
 function createHandler(stateOverrides = {}) {
   const state = createState(stateOverrides);
   const router = createRouter();
-  const logger = { errorCalls: [], error(payload, message) { this.errorCalls.push({ payload, message }); } };
+  const logger = {
+    errorCalls: [],
+    warnCalls: [],
+    error(payload, message) {
+      this.errorCalls.push({ payload, message });
+    },
+    warn(payload, message) {
+      this.warnCalls.push({ payload, message });
+    }
+  };
   extension.handler(router, {
     database: createDatabase(state),
     logger
@@ -245,6 +259,17 @@ function createHandler(stateOverrides = {}) {
 }
 
 async function testCreatesScanRequestWithCanonicalInsertPayload() {
+  const originalFetch = globalThis.fetch;
+  const originalWebhookUrl = process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  const originalDirectusSecret = process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+  const fetchCalls = [];
+  globalThis.fetch = async (...args) => {
+    fetchCalls.push(args);
+    return { ok: true, status: 202 };
+  };
+  process.env.PUSH_NOTIFICATION_WEBHOOK_URL = 'https://push.example.test/webhook';
+  process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET = 'super-secret';
+
   const { handler, state } = createHandler();
   const req = {
     accountability: { user: state.actorUserId },
@@ -256,6 +281,7 @@ async function testCreatesScanRequestWithCanonicalInsertPayload() {
   const res = createResponse();
 
   await handler(req, res);
+  await flushMicrotasks();
 
   assert.equal(res.statusCode, 201);
   assert.equal(state.insertPayloads.length, 1);
@@ -275,6 +301,28 @@ async function testCreatesScanRequestWithCanonicalInsertPayload() {
   assert.equal('completed_scan' in state.insertPayloads[0], false);
   assert.equal(state.activityEvents.length, 1);
   assert.match(state.activityEvents[0].id, UUID_V4_RX);
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0][0], 'https://push.example.test/webhook');
+  assert.equal(fetchCalls[0][1].headers['X-Directus-Secret'], 'super-secret');
+  assert.equal(fetchCalls[0][1].body, JSON.stringify({
+    scan_request_id: state.insertPayloads[0].id,
+    event: 'scan_request_created',
+    target_member: state.targetMember.id,
+    business_profile: state.workspaceId,
+    requested_by_user: state.actorUserId
+  }));
+
+  globalThis.fetch = originalFetch;
+  if (originalWebhookUrl === undefined) {
+    delete process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  } else {
+    process.env.PUSH_NOTIFICATION_WEBHOOK_URL = originalWebhookUrl;
+  }
+  if (originalDirectusSecret === undefined) {
+    delete process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+  } else {
+    process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET = originalDirectusSecret;
+  }
 }
 
 async function testRejectsInvalidTargetMemberAsBadRequest() {
@@ -298,9 +346,103 @@ async function testRejectsInvalidTargetMemberAsBadRequest() {
   assert.equal(state.insertPayloads.length, 0);
 }
 
+async function testWebhookFailureDoesNotChangeSuccessfulResponse() {
+  const originalFetch = globalThis.fetch;
+  const originalWebhookUrl = process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  const originalDirectusSecret = process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+  globalThis.fetch = async () => {
+    throw new Error('push endpoint unavailable');
+  };
+  process.env.PUSH_NOTIFICATION_WEBHOOK_URL = 'https://push.example.test/webhook';
+  process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET = 'runtime-secret';
+
+  const { handler, state, logger } = createHandler();
+  const req = {
+    accountability: { user: state.actorUserId },
+    body: {
+      target_member_id: state.targetMember.id,
+      request_type: 'manual'
+    }
+  };
+  const res = createResponse();
+
+  await handler(req, res);
+  await flushMicrotasks();
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(state.insertPayloads.length, 1);
+  assert.equal(state.activityEvents.length, 1);
+  assert.equal(logger.warnCalls.length, 1);
+  assert.equal(logger.warnCalls[0].message, '[wellar] scan request push dispatch failed');
+  assert.equal(logger.warnCalls[0].payload.error_message, 'push endpoint unavailable');
+  assert.equal(logger.warnCalls[0].payload.directus_secret, undefined);
+
+  globalThis.fetch = originalFetch;
+  if (originalWebhookUrl === undefined) {
+    delete process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  } else {
+    process.env.PUSH_NOTIFICATION_WEBHOOK_URL = originalWebhookUrl;
+  }
+  if (originalDirectusSecret === undefined) {
+    delete process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+  } else {
+    process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET = originalDirectusSecret;
+  }
+}
+
+async function testMissingWebhookConfigurationSkipsDispatchAndNeverHardcodesSecret() {
+  const originalFetch = globalThis.fetch;
+  const originalWebhookUrl = process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  const originalDirectusSecret = process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+  let fetchCalled = false;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    return { ok: true, status: 202 };
+  };
+  delete process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  delete process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+
+  const { handler, state, logger } = createHandler();
+  const req = {
+    accountability: { user: state.actorUserId },
+    body: {
+      target_member_id: state.targetMember.id,
+      request_type: 'manual'
+    }
+  };
+  const res = createResponse();
+
+  await handler(req, res);
+  await flushMicrotasks();
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(fetchCalled, false);
+  assert.equal(logger.warnCalls.length, 1);
+  assert.equal(
+    logger.warnCalls[0].message,
+    '[wellar] scan request push dispatch skipped: missing webhook configuration'
+  );
+  assert.equal(logger.warnCalls[0].payload.missing_webhook_url, true);
+  assert.equal(logger.warnCalls[0].payload.missing_directus_secret, true);
+
+  globalThis.fetch = originalFetch;
+  if (originalWebhookUrl === undefined) {
+    delete process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  } else {
+    process.env.PUSH_NOTIFICATION_WEBHOOK_URL = originalWebhookUrl;
+  }
+  if (originalDirectusSecret === undefined) {
+    delete process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+  } else {
+    process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET = originalDirectusSecret;
+  }
+}
+
 async function run() {
   await testCreatesScanRequestWithCanonicalInsertPayload();
   await testRejectsInvalidTargetMemberAsBadRequest();
+  await testWebhookFailureDoesNotChangeSuccessfulResponse();
+  await testMissingWebhookConfigurationSkipsDispatchAndNeverHardcodesSecret();
   process.stdout.write('directus scan request route tests passed\n');
 }
 

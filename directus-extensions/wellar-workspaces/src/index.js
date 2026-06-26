@@ -1012,6 +1012,67 @@ function logScanRequestCreateFailure(logger, error, context = {}) {
   );
 }
 
+function logPushDispatchWarning(logger, message, context = {}) {
+  logger?.warn?.(context, message);
+}
+
+async function dispatchScanRequestPushNotification(logger, request) {
+  const webhookUrl = process.env.PUSH_NOTIFICATION_WEBHOOK_URL;
+  const directusSecret = process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET;
+  const safeContext = {
+    scan_request_id: String(request.scan_request_id),
+    event: request.event,
+    target_member: String(request.target_member),
+    business_profile: String(request.business_profile),
+    requested_by_user: String(request.requested_by_user)
+  };
+
+  if (!webhookUrl || !directusSecret) {
+    logPushDispatchWarning(
+      logger,
+      '[wellar] scan request push dispatch skipped: missing webhook configuration',
+      {
+        ...safeContext,
+        missing_webhook_url: !webhookUrl,
+        missing_directus_secret: !directusSecret
+      }
+    );
+    return;
+  }
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Directus-Secret': directusSecret
+      },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!response.ok) {
+      logPushDispatchWarning(
+        logger,
+        '[wellar] scan request push dispatch failed',
+        {
+          ...safeContext,
+          status: response.status
+        }
+      );
+    }
+  } catch (error) {
+    logPushDispatchWarning(
+      logger,
+      '[wellar] scan request push dispatch failed',
+      {
+        ...safeContext,
+        error_message: error?.message ?? 'Unknown error'
+      }
+    );
+  }
+}
+
 function isDatabaseSqlStateError(error) {
   return ['23502', '22P02', '23503', '23505'].includes(error?.code ?? '');
 }
@@ -1650,11 +1711,20 @@ export default {
           });
 
           return {
-            request: publicScanRequest(created, targetMember)
+            request: publicScanRequest(created, targetMember),
+            pushDispatch: {
+              scan_request_id: String(created.id),
+              event: 'scan_request_created',
+              target_member: String(created.target_member),
+              business_profile: String(created.business_profile),
+              requested_by_user: String(created.requested_by_user)
+            }
           };
         });
 
-        return res.status(201).json({ data: result });
+        const { pushDispatch, ...responseBody } = result;
+        void dispatchScanRequestPushNotification(logger, pushDispatch);
+        return res.status(201).json({ data: responseBody });
       } catch (error) {
         const originalDatabaseError = {
           code: error?.code ?? null,
