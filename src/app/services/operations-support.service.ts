@@ -15,6 +15,7 @@ import {
 import { CompanyContextService, type CompanyContext } from '../core/context/company-context.service';
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { AuthService } from './auth';
+import { WorkforceRosterApiService } from './workforce-roster-api.service';
 
 export type SupportDepartmentOption = {
   id: string;
@@ -210,7 +211,8 @@ export class OperationsSupportService {
   constructor(
     private http: HttpClient,
     private auth: AuthService,
-    private companyContext: CompanyContextService
+    private companyContext: CompanyContextService,
+    private workforceRosterApi: WorkforceRosterApiService
   ) {}
 
   getActivityPageData(): Observable<ActivityPageData> {
@@ -308,14 +310,8 @@ export class OperationsSupportService {
             context.token,
             { limit: 500 }
           ),
-          requests: this.queryItems<ScanRequestRecord>(
-            'scan_requests',
-            ['id'],
-            context.token,
-            {
-              filters: this.scopeFilters(context, ['business_profile'], ['department']),
-              limit: 500
-            }
+          requests: this.workforceRosterApi.getWorkforceRoster().pipe(
+            map((payload) => (payload.scan_requests?.rows ?? []).slice(0, 500).map((row) => ({ id: row.id } as ScanRequestRecord)))
           ),
           departments: this.queryItems<DepartmentRecord>(
             'departments',
@@ -399,14 +395,12 @@ export class OperationsSupportService {
               limit: 300
             }
           ),
-          members: this.queryItems<MemberRecord>(
-            'business_profile_members',
-            ['id', 'member_role'],
-            context.token,
-            {
-              filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }],
-              limit: 400
-            }
+          members: this.workforceRosterApi.getWorkforceRoster().pipe(
+            map((payload) =>
+              (payload.rows ?? [])
+                .slice(0, 400)
+                .map((row) => ({ id: row.member_id, member_role: row.member_role } as MemberRecord))
+            )
           )
         }).pipe(
           map(({ profiles, departments, shifts, pushSubscriptions, members }) => {

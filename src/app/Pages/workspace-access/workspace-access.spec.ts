@@ -107,6 +107,7 @@ describe('WorkspaceAccessPageComponent recovery routing', () => {
           provide: WorkspaceAccessService,
           useValue: {
             loadWorkspaceAccess: () => of(workspaceState),
+            openWorkspace: () => of({ ok: true, message: 'Workspace opened.' }),
             claimInviteByToken: () => of({ ok: false, message: 'n/a' }),
             declineInvite: () => of({ ok: false, message: 'n/a' }),
             getPendingInviteToken: () => null,

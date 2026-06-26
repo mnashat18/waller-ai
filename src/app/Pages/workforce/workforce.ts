@@ -1,5 +1,6 @@
 ﻿import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { finalize, take } from 'rxjs/operators';
@@ -80,6 +81,7 @@ type DestructiveAction = {
 })
 export class WorkforcePageComponent implements OnInit, OnDestroy {
   @ViewChild('detailsCloseButton') private detailsCloseButton?: ElementRef<HTMLButtonElement>;
+  @ViewChild('detailsDrawerPanel') private detailsDrawerPanel?: ElementRef<HTMLElement>;
 
   viewState: ViewState = 'loading';
   feedback: FeedbackMessage | null = null;
@@ -155,11 +157,15 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
     private companyContext: CompanyContextService,
     private auth: AuthService,
     private router: Router,
+    private route: ActivatedRoute,
     private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
     this.applyNavigationState();
+    if (this.route.snapshot.queryParamMap.get('invite') === '1') {
+      this.openInviteModal();
+    }
     this.loadPage();
   }
 
@@ -171,6 +177,44 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   onEscape(): void {
     if (this.showDetailsModal) {
       this.closeMemberView();
+    }
+  }
+
+  trapDetailsFocus(event: Event): void {
+    const keyboardEvent = event as KeyboardEvent;
+    if (!this.showDetailsModal || keyboardEvent.key !== 'Tab') {
+      return;
+    }
+
+    const panel = this.detailsDrawerPanel?.nativeElement;
+    if (!panel) {
+      return;
+    }
+
+    const focusable = Array.from(
+      panel.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((item) => item.offsetParent !== null);
+
+    if (!focusable.length) {
+      keyboardEvent.preventDefault();
+      panel.focus();
+      return;
+    }
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (keyboardEvent.shiftKey && active === first) {
+      keyboardEvent.preventDefault();
+      last.focus();
+      return;
+    }
+
+    if (!keyboardEvent.shiftKey && active === last) {
+      keyboardEvent.preventDefault();
+      first.focus();
     }
   }
 
@@ -464,7 +508,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   openMemberView(row: WorkforceRosterRow): void {
-    if (row.type === 'invite' && !this.canShowInvitations) {
+    if (row.state === 'pending_invitation' && !this.canShowInvitations) {
       return;
     }
 
@@ -484,19 +528,18 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   canSendScanRequest(row: WorkforceRosterRow): boolean {
-    if (row.type !== 'member') {
-      return false;
-    }
-    const role = this.currentRole;
-    return (
-      (role === 'owner' || role === 'hr') &&
-      this.normalizeStatus(row.status) === 'active'
-    );
+    return row.state === 'verified_member' && ['hr', 'manager', 'employee'].includes(row.member_role) && Boolean(row.email) && (this.currentRole === 'owner' || this.currentRole === 'hr');
   }
 
   sendScanRequest(row: WorkforceRosterRow): void {
+    if (!this.canSendScanRequest(row) || !row.member_id) {
+      return;
+    }
+
     this.router.navigate(['/app/scan-requests'], {
       state: {
+        openCreateRequest: true,
+        workforceTargetMemberId: row.member_id,
         workforceTargetName: this.memberName(row),
         workforceTargetEmail: this.memberSecondaryLabel(row)
       }
@@ -504,7 +547,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   canEditRole(row: WorkforceRosterRow | null): boolean {
-    if (!row || row.type !== 'member' || !row.member_id) {
+    if (!row || row.state !== 'verified_member' || !row.member_id) {
       return false;
     }
 
@@ -569,7 +612,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   canAssignDepartment(row: WorkforceRosterRow | null): boolean {
-    if (!row || row.type !== 'member' || !row.member_id) {
+    if (!row || row.state !== 'verified_member' || !row.member_id) {
       return false;
     }
     return this.currentRole === 'owner' || this.currentRole === 'hr';
@@ -617,7 +660,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   canDeactivate(row: WorkforceRosterRow | null): boolean {
-    if (!row || row.type !== 'member' || !row.member_id) {
+    if (!row || row.state !== 'verified_member' || !row.member_id) {
       return false;
     }
     return this.currentRole === 'owner' || this.currentRole === 'hr';
@@ -640,7 +683,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   canResendInvite(row: WorkforceRosterRow): boolean {
-    return this.canShowInvitations && row.type === 'invite' && Boolean(row.invite_id);
+    return this.canShowInvitations && row.state === 'pending_invitation' && Boolean(row.invite_id);
   }
 
   resendInvite(row: WorkforceRosterRow): void {
@@ -684,7 +727,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   canRevokeInvite(row: WorkforceRosterRow): boolean {
-    return this.canShowInvitations && row.type === 'invite' && Boolean(row.invite_id);
+    return this.canShowInvitations && row.state === 'pending_invitation' && Boolean(row.invite_id);
   }
 
   openInScanRequests(request: WorkforceScanRequestRow): void {
@@ -789,11 +832,19 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
       if (this.isInviteExpired(row)) {
         return 'Invite Expired';
       }
-      return 'Pending Invite';
+      return 'Pending invitation';
     }
 
-    if (this.normalizeStatus(row.status) === 'active') {
-      return 'Active Member';
+    if (row.state === 'repair_required') {
+      return 'Data repair required';
+    }
+
+    if (row.state === 'inactive') {
+      return 'Inactive Member';
+    }
+
+    if (row.state === 'verified_member' && this.normalizeStatus(row.status) === 'active') {
+      return 'Verified Active Member';
     }
 
     return `${this.statusLabel(row.status)} Member`;
@@ -808,6 +859,14 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
         return 'workforce-badge workforce-badge--expired';
       }
       return 'workforce-badge workforce-badge--pending';
+    }
+
+    if (row.state === 'repair_required') {
+      return 'workforce-badge workforce-badge--neutral';
+    }
+
+    if (row.state === 'inactive') {
+      return 'workforce-badge workforce-badge--inactive';
     }
 
     if (this.normalizeStatus(row.status) === 'active') {
@@ -892,12 +951,16 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
       return 'Invitation pending';
     }
 
+    if (row.state === 'repair_required') {
+      return 'Data repair required';
+    }
+
     if (!row.user_id && !row.linked_invite_email && !row.identity?.displayName) {
-      return 'Needs data repair';
+      return 'Data repair required';
     }
 
     if (row.identity_state === 'identity_unavailable') {
-      return row.identity?.displayName || row.name || 'Needs data repair';
+      return row.identity?.displayName || row.name || 'Data repair required';
     }
 
     return row.identity?.displayName || row.name || 'Identity unavailable';
@@ -919,8 +982,16 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
       return row.email || row.invite_phone || 'Invitation pending';
     }
 
+    if (row.state === 'repair_required') {
+      return this.repairReasonLabel(row.reason);
+    }
+
+    if (row.state === 'verified_member' || row.state === 'inactive') {
+      return row.identity?.email?.trim() || 'Email unavailable';
+    }
+
     if (!row.user_id && !row.linked_invite_email) {
-      return 'Needs data repair';
+      return 'Data repair required';
     }
 
     if (row.identity?.email?.trim()) {
@@ -931,7 +1002,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
       return row.linked_invite_email.trim();
     }
 
-    return '';
+    return 'Data repair required';
   }
 
   inviteContact(row: WorkforceRosterRow): string {
@@ -940,11 +1011,19 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
 
   detailsTitle(row: WorkforceRosterRow | null): string {
     if (!row) return 'Details';
-    return row.type === 'invite' ? 'Invite Details' : 'Member Details';
+    if (row.type === 'invite') {
+      return 'Invite Details';
+    }
+
+    if (row.state === 'repair_required') {
+      return 'Data repair required';
+    }
+
+    return 'Member Details';
   }
 
   rowTypeLabel(row: WorkforceRosterRow): string {
-    return row.type === 'invite' ? 'Invitation' : 'Member';
+    return row.type === 'invite' ? 'Invitation' : 'Person';
   }
 
   departmentLabel(row: WorkforceRosterRow): string {
@@ -954,6 +1033,14 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   employmentLabel(row: WorkforceRosterRow): string {
     if (row.type === 'invite') {
       return statusLabel(row.status);
+    }
+
+    if (row.state === 'repair_required') {
+      return 'Data repair required';
+    }
+
+    if (row.state === 'inactive') {
+      return 'Inactive';
     }
 
     return statusLabel(row.status);
@@ -969,6 +1056,23 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
       if (normalized === 'accepted') return 'Accepted';
       return value?.trim() || 'Unknown';
     }
+  }
+
+  repairReasonLabel(reason: string | null | undefined): string {
+    const normalized = (reason ?? '').trim().toLowerCase();
+    if (!normalized) {
+      return 'Data repair required';
+    }
+    if (normalized.includes('missing linked user')) {
+      return 'Missing linked user';
+    }
+    if (normalized.includes('missing email')) {
+      return 'Missing email';
+    }
+    if (normalized.includes('invalid membership relationship')) {
+      return 'Invalid membership relationship';
+    }
+    return 'Data repair required';
   }
 
   detailUnavailableLabel(value: string | null | undefined, fallback = 'Unavailable'): string {

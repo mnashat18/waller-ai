@@ -8,6 +8,7 @@ import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { AdminTokenService } from './admin-token';
 import { AuthService } from './auth';
 import { CompanyContextService } from '../core/context/company-context.service';
+import { WorkforceRosterApiService, type WorkforceRosterRow } from './workforce-roster-api.service';
 import {
   formatDepartment,
   formatUserName,
@@ -250,7 +251,8 @@ export class OperationalDashboardService {
     private http: HttpClient,
     private auth: AuthService,
     private adminTokens: AdminTokenService,
-    private companyContext: CompanyContextService
+    private companyContext: CompanyContextService,
+    private workforceRosterApi: WorkforceRosterApiService
   ) {}
 
   getDashboardData(businessProfileId?: string): Observable<OperationalDashboardViewModel> {
@@ -296,31 +298,7 @@ export class OperationalDashboardService {
               map((adminToken) => adminToken ?? this.auth.getStoredAccessToken() ?? ''),
               switchMap((token) =>
                 forkJoin({
-                  members: this.querySection<MembershipRecord>({
-                    collection: 'business_profile_members',
-                    fields: [
-                      'id',
-                      'status',
-                      'member_role',
-                      'job_title',
-                      'employee_code',
-                      'last_scan_at',
-                      'last_readiness_score',
-                      'last_risk_level',
-                      'department',
-                      'user.id',
-                      'user.first_name',
-                      'user.last_name',
-                      'user.email',
-                      'joined_at'
-                    ],
-                    limit: 400,
-                    sort: 'user.first_name',
-                    businessProfileId: resolvedBusinessProfileId,
-                    businessProfileFilterPath: ['business_profile'],
-                    departmentId: resolvedDepartmentId,
-                    departmentFilterPath: ['department']
-                  }, token, 'Active members could not be loaded.'),
+                  members: this.loadRosterMembersSection(400, 'Active members could not be loaded.'),
                   departments: this.querySection<DepartmentRecord>({
                     collection: 'departments',
                     fields: ['id', 'name', 'is_active'],
@@ -378,29 +356,7 @@ export class OperationalDashboardService {
                     departmentId: resolvedDepartmentId,
                     departmentFilterPath: ['department']
                   }, token, 'Alerts could not be loaded.'),
-                  requests: this.querySection<RequestRecord>({
-                    collection: 'scan_requests',
-                    fields: [
-                      'id',
-                      'business_profile',
-                      'department',
-                      'requested_by_user',
-                      'target_member',
-                      'completed_scan',
-                      'status',
-                      'cancelled',
-                      'request_type',
-                      'requested_at',
-                      'due_at',
-                      'completed_at'
-                    ],
-                    limit: 80,
-                    sort: '-requested_at',
-                    businessProfileId: resolvedBusinessProfileId,
-                    businessProfileFilterPath: ['business_profile'],
-                    departmentId: resolvedDepartmentId,
-                    departmentFilterPath: ['department']
-                  }, token, 'Scan requests could not be loaded.')
+                  requests: this.loadRequestQueueSection(80, 'Scan requests could not be loaded.')
                 }).pipe(
                   switchMap((sources) => {
                     const scanIds = this.uniqueIds(sources.scans.items.map((scan) => this.normalizeId(scan.id)));
@@ -628,52 +584,66 @@ export class OperationalDashboardService {
   }
 
   private querySection<T>(config: QueryConfig, token: string, fallbackError: string): Observable<DashboardSectionState<T>> {
-    if (config.collection === 'scan_requests') {
-      return this.queryRequestsSection<T>(config, token, fallbackError);
-    }
     return this.querySectionSingle<T>(config, token, fallbackError);
   }
 
-  private queryRequestsSection<T>(config: QueryConfig, token: string, fallbackError: string): Observable<DashboardSectionState<T>> {
-    const layeredConfigs: QueryConfig[] = [
-      config,
-      {
-        ...config,
-        fields: [
-          'id',
-          'business_profile',
-          'department',
-          'requested_by_user',
-          'target_member',
-          'completed_scan',
-          'status',
-          'cancelled',
-          'request_type',
-          'requested_at',
-          'due_at',
-          'completed_at'
-        ]
-      },
-      {
-        ...config,
-        fields: [
-          'id',
-          'business_profile',
-          'target_member',
-          'requested_by_user',
-          'status',
-          'request_type',
-          'requested_at'
-        ]
-      }
-    ];
-
-    return this.queryWithFallback<RequestRecord>(layeredConfigs, token, fallbackError).pipe(
-      map((state) => ({
-        ...state,
-        items: (state.items ?? []).map((item) => this.normalizeRequestRecord(item)) as unknown as T[]
+  private loadRosterMembersSection(limit: number, fallbackError: string): Observable<DashboardSectionState<MembershipRecord>> {
+    return this.workforceRosterApi.getWorkforceRoster().pipe(
+      map((payload) => ({
+        items: (payload.rows ?? [])
+          .slice(0, limit)
+          .map((row) => this.mapRosterRowToMembershipRecord(row))
+          .filter((item): item is MembershipRecord => Boolean(item)),
+        error: null
+      })),
+      catchError((error) => of({
+        items: [] as MembershipRecord[],
+        error: this.describeHttpError(error, fallbackError)
       }))
     );
+  }
+
+  private loadRequestQueueSection(limit: number, fallbackError: string): Observable<DashboardSectionState<RequestRecord>> {
+    return this.workforceRosterApi.getWorkforceRoster().pipe(
+      map((payload) => ({
+        items: (payload.scan_requests?.rows ?? [])
+          .slice(0, limit)
+          .map((row) => this.normalizeRequestRecord(row as unknown as RequestRecord)),
+        error: null
+      })),
+      catchError((error) => of({
+        items: [] as RequestRecord[],
+        error: this.describeHttpError(error, fallbackError)
+      }))
+    );
+  }
+
+  private mapRosterRowToMembershipRecord(row: WorkforceRosterRow): MembershipRecord | null {
+    const id = row.member_id ?? null;
+    if (!id) {
+      return null;
+    }
+    return {
+      id,
+      status: row.status,
+      member_role: row.member_role,
+      department: row.department_id
+        ? {
+            id: row.department_id,
+            name: row.department_name
+          }
+        : null,
+      user: row.user_id
+        ? {
+            id: row.user_id,
+            first_name: row.display_name,
+            last_name: null,
+            email: row.email
+          }
+        : null,
+      joined_at: row.joined_at ?? null,
+      date_created: row.joined_at ?? null
+    };
   }
 
   private queryWithFallback<T>(configs: QueryConfig[], token: string, fallbackError: string): Observable<DashboardSectionState<T>> {

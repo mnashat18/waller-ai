@@ -93,8 +93,6 @@ const REQUEST_TYPE_OPTIONS: Array<{ value: RequestType; label: string }> = [
   styleUrls: ['./requests.css']
 })
 export class RequestsPageComponent implements OnInit, OnDestroy {
-  readonly unsupportedWorkflowMessage = 'This action requires an approved server-side workflow.';
-
   pageState: PageState = 'loading';
   loading = false;
   errorMessage = '';
@@ -127,6 +125,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
 
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingCreateTargetMemberId: string | null = null;
+  private openCreateRequestOnLoad = false;
 
   constructor(
     private workflows: OperationsWorkflowsService,
@@ -136,6 +135,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.pendingCreateTargetMemberId = this.readPrefilledTargetMemberId();
+    this.openCreateRequestOnLoad = this.readOpenCreateRequestFlag();
     this.loadPage();
   }
 
@@ -199,7 +199,7 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
       Boolean(member.member_id) &&
       Boolean(member.user_id) &&
       Boolean(member.email) &&
-      String(member.member_role ?? '').trim().toLowerCase() === 'employee' &&
+      ['hr', 'manager', 'employee'].includes(String(member.member_role ?? '').trim().toLowerCase()) &&
       String(member.status ?? '').trim().toLowerCase() === 'active' &&
       String(member.member_id ?? '').trim().length > 0
     );
@@ -286,10 +286,6 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     this.recomputeVisibleRows();
   }
 
-  openUnsupportedWorkflow(): void {
-    this.pushFeedback('info', this.unsupportedWorkflowMessage);
-  }
-
   openRequest(row: QueueRow): void {
     this.selectedRequest = row;
     this.setBodyScrollLocked(true);
@@ -343,6 +339,10 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
         this.syncSelectedRequestAfterLoad();
         this.pageState = 'ready';
         this.applyPendingTargetMember();
+        if (this.openCreateRequestOnLoad) {
+          this.openCreateRequestOnLoad = false;
+          this.openCreateRequestModal();
+        }
       },
       error: (error: unknown) => {
         this.pageData = null;
@@ -615,6 +615,15 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
       state?.['targetMemberId'];
     const normalized = String(candidate ?? '').trim();
     return normalized || null;
+  }
+
+  private readOpenCreateRequestFlag(): boolean {
+    if (typeof history === 'undefined') {
+      return false;
+    }
+
+    const state = history.state as Record<string, unknown> | null | undefined;
+    return state?.['openCreateRequest'] === true || state?.['scanRequestsOpenCreateModal'] === true;
   }
 
   private resolveCreateRequestError(error: unknown): string {

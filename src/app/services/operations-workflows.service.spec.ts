@@ -5,6 +5,7 @@ import { of, throwError } from 'rxjs';
 
 import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthService } from './auth';
+import { WorkforceRosterApiService } from './workforce-roster-api.service';
 import { OperationsWorkflowsService, ScanRequestApiError } from './operations-workflows.service';
 
 describe('OperationsWorkflowsService', () => {
@@ -41,6 +42,41 @@ describe('OperationsWorkflowsService', () => {
             ensureSessionToken: () => of(true),
             getStoredAccessToken: () => 'token',
             getAuthHeaders: (token: string) => new HttpHeaders({ Authorization: `Bearer ${token}` })
+          }
+        },
+        {
+          provide: WorkforceRosterApiService,
+          useValue: {
+            getWorkforceRoster: () =>
+              of({
+                active: {
+                  workspace: { id: 'profile-1', companyName: 'Wellar', isActive: true, planCode: null, billingStatus: null },
+                  membership: { id: 'member-1', status: 'active', memberRole: 'owner' },
+                  department: null
+                },
+                permissions: {
+                  canEditProfile: true,
+                  canManageDepartments: true,
+                  canViewMembers: true,
+                  canViewInvites: true,
+                  canUseComingSoonControls: false
+                },
+                departments: [],
+                rows: [],
+                eligible_scan_targets: [],
+                scan_requests: { rows: [], summary: { total: 0, pending: 0, completed: 0, overdue: 0 } },
+                summary: {
+                  total: 0,
+                  verified_members: 0,
+                  pending_invitations: 0,
+                  repair_required: 0,
+                  inactive: 0,
+                  eligible_scan_targets: 0,
+                  open_scan_requests: 0,
+                  completed_scan_requests: 0,
+                  overdue_scan_requests: 0
+                }
+              })
           }
         }
       ]

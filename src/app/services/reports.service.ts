@@ -12,6 +12,7 @@ import {
 
 import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthService } from './auth';
+import { WorkforceRosterApiService, type WorkforceRosterQueueRow, type WorkforceRosterRow } from './workforce-roster-api.service';
 
 export type ReportsDateRange = 'today' | 'last7' | 'last30' | 'custom';
 export type ReportsReadinessFilter = 'all' | 'Stable' | 'Low Focus' | 'Elevated Fatigue' | 'High Risk' | 'No scan';
@@ -363,7 +364,8 @@ export class ReportsService {
 
   constructor(
     private http: HttpClient,
-    private auth: AuthService
+    private auth: AuthService,
+    private workforceRosterApi: WorkforceRosterApiService
   ) {}
 
   async loadReports(
@@ -416,7 +418,7 @@ export class ReportsService {
           alertsPromise
         ]);
 
-      const membersRaw = this.resolveSettled('business_profile_members', membersSettled, warnings, () => {
+      const membersRaw = this.resolveSettled('workforce_roster', membersSettled, warnings, () => {
         forbiddenSources += 1;
       });
       const departmentsRaw = this.resolveSettled('departments', departmentsSettled, warnings, () => {
@@ -425,7 +427,7 @@ export class ReportsService {
       const scansRaw = this.resolveSettled('wellness_scans', scansSettled, warnings, () => {
         forbiddenSources += 1;
       });
-      const requestsRaw = this.resolveSettled('requests', requestsSettled, warnings, () => {
+      const requestsRaw = this.resolveSettled('workforce_scan_requests', requestsSettled, warnings, () => {
         forbiddenSources += 1;
       });
       const alertsRaw = this.resolveSettled('alerts', alertsSettled, warnings, () => {
@@ -1100,34 +1102,13 @@ export class ReportsService {
     workspaceId: string,
     activeDepartmentId: string | null
   ): Promise<BusinessMemberRecord[]> {
-    const isManager = Boolean(activeDepartmentId);
-    const filters: Array<{ path: string[]; operator: string; value: string }> = [
-      { path: ['business_profile'], operator: '_eq', value: workspaceId }
-    ];
-    if (activeDepartmentId) {
-      filters.push({ path: ['department'], operator: '_eq', value: activeDepartmentId });
-    }
-
-    return this.queryWithFieldFallback<BusinessMemberRecord>(
-      'business_profile_members',
-      isManager
-        ? [['id', 'status', 'member_role', 'department', 'employee_code', 'job_title', 'last_scan_at', 'last_risk_level', 'last_readiness_score']]
-        : [
-            [
-              'id', 'status', 'user', 'user.id', 'user.first_name', 'user.last_name', 'user.email',
-              'business_profile', 'member_role', 'department',
-              'shift_template', 'employee_code', 'job_title', 'joined_at', 'deactivated_at', 'last_scan_at',
-              'last_readiness_score', 'last_risk_level', 'date_created', 'date_updated'
-            ],
-            [
-              'id', 'status', 'user', 'business_profile', 'member_role', 'department',
-              'last_scan_at', 'last_risk_level', 'date_created', 'date_updated'
-            ],
-            ['id', 'status', 'member_role', 'department', 'last_scan_at', 'last_risk_level']
-          ],
-      token,
-      { filters, sort: '-date_updated', limit: 2000 }
-    );
+    void token;
+    void workspaceId;
+    void activeDepartmentId;
+    const roster = await firstValueFrom(this.workforceRosterApi.getWorkforceRoster());
+    return (roster.rows ?? [])
+      .map((row) => this.mapRosterRowToMemberRecord(row))
+      .filter((item): item is BusinessMemberRecord => Boolean(item));
   }
 
   private async loadDepartments(
@@ -1255,30 +1236,12 @@ export class ReportsService {
     activeDepartmentId: string | null,
     startIso: string
   ): Promise<ScanRequestRecord[]> {
-    const isManager = Boolean(activeDepartmentId);
-    const filters: Array<{ path: string[]; operator: string; value: string }> = [
-      { path: ['business_profile'], operator: '_eq', value: workspaceId },
-      { path: ['requested_at'], operator: '_gte', value: startIso }
-    ];
-    if (activeDepartmentId) {
-      filters.push({ path: ['department'], operator: '_eq', value: activeDepartmentId });
-    }
-
-    return this.queryWithFieldFallback<ScanRequestRecord>(
-      'scan_requests',
-      isManager
-        ? [['id', 'department', 'status', 'request_type', 'requested_at', 'due_at']]
-        : [
-            [
-              'id', 'business_profile', 'department', 'requested_by_user', 'target_member', 'completed_scan',
-              'status', 'cancelled', 'request_type', 'requested_at', 'due_at', 'completed_at'
-            ],
-            ['id', 'business_profile', 'target_member', 'requested_by_user', 'status', 'request_type', 'requested_at'],
-            ['id', 'status', 'requested_at', 'target_member']
-          ],
-      token,
-      { filters, sort: '-requested_at', limit: 2500 }
-    );
+    void token;
+    void workspaceId;
+    void activeDepartmentId;
+    void startIso;
+    const roster = await firstValueFrom(this.workforceRosterApi.getWorkforceRoster());
+    return (roster.scan_requests?.rows ?? []).map((row) => this.mapRosterQueueRowToRequestRecord(row));
   }
 
   private async loadAlerts(
@@ -1321,6 +1284,63 @@ export class ReportsService {
       }
       throw error;
     }
+  }
+
+  private mapRosterRowToMemberRecord(row: WorkforceRosterRow): BusinessMemberRecord | null {
+    const id = row.member_id ?? null;
+    if (!id) {
+      return null;
+    }
+    return {
+      id,
+      status: row.status,
+      member_role: row.member_role,
+      department: row.department_id
+        ? {
+            id: row.department_id,
+            name: row.department_name
+          }
+        : null,
+      user: row.user_id
+        ? {
+            id: row.user_id,
+            email: row.email,
+            first_name: row.display_name,
+            last_name: null
+          }
+        : null,
+      last_scan_at: row.last_scan_at,
+      last_risk_level: row.last_risk_level
+    };
+  }
+
+  private mapRosterQueueRowToRequestRecord(row: WorkforceRosterQueueRow): ScanRequestRecord {
+    const targetUserId = row.target_member?.user?.id ?? null;
+    const targetMemberId = row.target_member?.id ?? null;
+    const departmentId = row.department?.id ?? row.target_member?.department?.id ?? null;
+    return {
+      id: row.id,
+      business_profile: row.business_profile ? { id: row.business_profile.id } : null,
+      department: departmentId ? { id: departmentId } : null,
+      requested_by_user: row.requested_by_user ? { id: row.requested_by_user.id } : null,
+      target_member: targetMemberId ? { id: targetMemberId } : null,
+      request_type: row.request_type,
+      status: row.status,
+      cancelled: row.cancelled,
+      requested_at: row.requested_at,
+      due_at: row.due_at,
+      completed_at: row.completed_at,
+      completed_scan: null,
+      scan_id: null,
+      required_state: row.request_type,
+      response_status: row.status,
+      response_payload: null,
+      timestamp: row.requested_at,
+      requested_for_user: targetUserId ? { id: targetUserId } : null,
+      requested_for_email: row.target_member?.user?.email ?? null,
+      requested_for_phone: null,
+      Target: null
+    };
   }
 
   private normalizeMembers(rows: BusinessMemberRecord[]): NormalizedMember[] {

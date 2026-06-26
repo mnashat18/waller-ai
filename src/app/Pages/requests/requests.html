@@ -182,8 +182,6 @@
               <td>
                 <div class="scan-requests-row-actions">
                   <button type="button" class="scan-requests-row-action scan-requests-row-action--view" (click)="openRequest(row)">View</button>
-                  <button *ngIf="isOwnerOrHr && (row.status === 'pending' || row.status === 'overdue')" type="button" class="scan-requests-row-action" (click)="openUnsupportedWorkflow()">Remind</button>
-                  <button *ngIf="isOwnerOrHr && (row.status === 'pending' || row.status === 'overdue')" type="button" class="scan-requests-row-action scan-requests-row-action--danger" (click)="openUnsupportedWorkflow()">Cancel</button>
                 </div>
               </td>
             </tr>
@@ -217,8 +215,9 @@
 
       <div class="mt-6 flex flex-wrap justify-end gap-3">
         <button type="button" class="dashboard-action-button" (click)="closeRequestDetails()">Close</button>
-        <button *ngIf="isOwnerOrHr && (row.status === 'pending' || row.status === 'overdue')" type="button" class="dashboard-action-button" (click)="openUnsupportedWorkflow()">Remind</button>
-        <button *ngIf="isOwnerOrHr && (row.status === 'pending' || row.status === 'overdue')" type="button" class="dashboard-action-button dashboard-action-button--danger" (click)="openUnsupportedWorkflow()">Cancel</button>
+        <span *ngIf="isOwnerOrHr && (row.status === 'pending' || row.status === 'overdue')" class="scan-requests-support-note">
+          Remind and cancel workflows are not available in this release.
+        </span>
       </div>
     </div>
   </div>
@@ -231,15 +230,23 @@
         <div>
           <p class="dashboard-eyebrow">New Request</p>
           <h3 id="scan-request-create-title" class="mt-2 text-2xl font-semibold text-slate-50">Create Scan Request</h3>
-          <p class="mt-2 text-sm text-slate-300">Select an active employee with a real identity. Requests are created through the protected workflow endpoint.</p>
+          <p class="mt-2 text-sm text-slate-300">Select an active HR, manager, or employee with a real identity. Requests are created through the protected workflow endpoint.</p>
         </div>
 
         <button type="button" class="dashboard-action-button" (click)="closeCreateRequestModal()">Close</button>
       </div>
 
       <div *ngIf="!eligibleRequestMembers.length" class="scan-requests-state-card scan-requests-state-card--warning mt-5">
-        <p class="scan-requests-state-card__title">No eligible employees</p>
-        <p>No eligible employees are available. Complete an employee invitation or repair the employee profile before creating a scan request.</p>
+        <p class="scan-requests-state-card__title">No eligible members</p>
+        <p>No eligible members are available. Complete an HR, manager, or employee invitation or repair the member profile before creating a scan request.</p>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <a routerLink="/app/workforce" [queryParams]="{ invite: '1' }" class="dashboard-action-button dashboard-action-button--primary">
+            Invite Member
+          </a>
+          <a routerLink="/app/workforce" class="dashboard-action-button">
+            Open Workforce
+          </a>
+        </div>
       </div>
 
       <div *ngIf="eligibleRequestMembers.length" class="mt-5 grid gap-4 md:grid-cols-2">
@@ -248,10 +255,10 @@
           <select [(ngModel)]="createRequestForm.targetMemberId" name="requestTargetMemberId" class="app-form-control" required>
             <option value="">Select a member</option>
             <option *ngFor="let member of eligibleRequestMembers; trackBy: trackByMember" [value]="member.member_id">
-              {{ member.label }}{{ member.email ? ' · ' + member.email : '' }}
+              {{ member.label }}{{ member.email ? ' - ' + member.email : '' }}
             </option>
           </select>
-          <p class="text-xs text-slate-400">Only active employees with a linked user and email are listed.</p>
+          <p class="text-xs text-slate-400">Only active HR, manager, and employee members with a linked user and email are listed.</p>
         </label>
 
         <label class="grid gap-2 text-sm font-medium text-slate-200">

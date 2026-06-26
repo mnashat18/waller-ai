@@ -164,7 +164,7 @@
           <table class="workforce-table min-w-[74rem] w-full text-left">
             <thead>
               <tr>
-                <th>Member</th>
+                <th>Person / invitation</th>
                 <th>Department</th>
                 <th>Role</th>
                 <th>Employment</th>
@@ -256,15 +256,25 @@
 
   <div *ngIf="showDetailsModal && selectedMember" class="workforce-modal workforce-detail-drawer" role="dialog" aria-modal="true" [attr.aria-labelledby]="'workforce-detail-title'">
     <div class="workforce-modal__scrim" (click)="closeMemberView()"></div>
-    <div class="workforce-modal__panel workforce-detail-drawer__panel app-dashboard-panel">
+    <div
+      #detailsDrawerPanel
+      tabindex="-1"
+      class="workforce-modal__panel workforce-detail-drawer__panel app-dashboard-panel"
+      (keydown.tab)="trapDetailsFocus($event)">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <p class="dashboard-eyebrow">{{ selectedMember.type === 'invite' ? 'Invitation' : 'Member' }}</p>
+          <p class="dashboard-eyebrow">{{ selectedMember.type === 'invite' ? 'Invitation' : selectedMember.state === 'repair_required' ? 'Data repair required' : 'Member' }}</p>
           <h3 id="workforce-detail-title" class="mt-2 text-2xl font-semibold text-slate-50">
             {{ memberName(selectedMember) }}
           </h3>
           <p class="mt-2 text-sm text-slate-300">
-            {{ selectedMember.type === 'invite' ? 'Onboarding record returned by the existing invitation flow.' : scopeLabel }}
+            {{
+              selectedMember.type === 'invite'
+                ? 'Onboarding record returned by the existing invitation flow.'
+                : selectedMember.state === 'repair_required'
+                  ? 'This membership cannot be treated as a healthy workforce identity until the underlying identity data is repaired.'
+                  : scopeLabel
+            }}
           </p>
         </div>
         <button #detailsCloseButton type="button" class="dashboard-action-button" (click)="closeMemberView()" aria-label="Close member details">Close</button>
@@ -273,6 +283,7 @@
       <div class="mt-5 workforce-detail-grid">
         <div class="workforce-fact"><span>Name</span><strong>{{ memberName(selectedMember) }}</strong></div>
         <div *ngIf="selectedMember.type === 'invite' || hasActualEmail(selectedMember)" class="workforce-fact"><span>Email</span><strong>{{ selectedMember.type === 'invite' ? inviteContact(selectedMember) : memberEmail(selectedMember) }}</strong></div>
+        <div class="workforce-fact"><span>Identity State</span><strong>{{ rowBadgeLabel(selectedMember) }}</strong></div>
         <div class="workforce-fact"><span>Role</span><strong>{{ roleLabel(selectedMember.member_role) }}</strong></div>
         <div class="workforce-fact"><span>Department</span><strong>{{ departmentLabel(selectedMember) }}</strong></div>
         <div class="workforce-fact"><span>Status</span><strong>{{ statusLabel(selectedMember.status) }}</strong></div>
@@ -288,6 +299,11 @@
         <ng-container *ngIf="selectedMember.type === 'invite' && canShowInvitations">
           <div class="workforce-fact"><span>Expires</span><strong>{{ dateOrDash(selectedMember.expires_at) }}</strong></div>
           <div class="workforce-fact"><span>Requested By</span><strong>{{ detailUnavailableLabel(selectedMember.invited_by_name, 'Unavailable') }}</strong></div>
+        </ng-container>
+
+        <ng-container *ngIf="selectedMember.state === 'repair_required'">
+          <div class="workforce-fact"><span>Issue</span><strong>{{ memberSecondaryLabel(selectedMember) }}</strong></div>
+          <div class="workforce-fact"><span>Next Step</span><strong>Invite a real employee or repair the membership identity using a protected workflow.</strong></div>
         </ng-container>
       </div>
 

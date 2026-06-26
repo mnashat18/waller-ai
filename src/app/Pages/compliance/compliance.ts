@@ -47,8 +47,6 @@ type FeedbackMessage = {
   styleUrls: ['./compliance.css']
 })
 export class CompliancePageComponent implements OnInit, OnDestroy {
-  readonly unsupportedWorkflowMessage = 'This action requires an approved server-side workflow.';
-
   viewState: ComplianceViewState = 'loading';
   loading = true;
   errorMessage = '';
@@ -243,10 +241,6 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
       readiness: 'all'
     };
     void this.loadCompliance(false);
-  }
-
-  openUnsupportedWorkflow(): void {
-    this.pushFeedback('info', this.unsupportedWorkflowMessage);
   }
 
   openExceptionDetails(row: ComplianceExceptionRow): void {

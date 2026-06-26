@@ -15,6 +15,7 @@ import {
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthService } from './auth';
+import { WorkforceRosterApiService, type WorkforceRosterRow } from './workforce-roster-api.service';
 
 export type ScanResult = {
   id?: string;
@@ -376,7 +377,8 @@ export class DashboardService {
   constructor(
     private http: HttpClient,
     private auth: AuthService,
-    private companyContext: CompanyContextService
+    private companyContext: CompanyContextService,
+    private workforceRosterApi: WorkforceRosterApiService
   ) {}
 
   getDashboardSnapshot(limit = 20): Observable<DashboardSnapshot> {
@@ -484,38 +486,17 @@ export class DashboardService {
     limit: number,
     extraFilters: Array<{ path: string[]; operator: string; value: string }> = []
   ): Observable<ScopedRequestRecord[]> {
-    const isManager = activeRole === 'manager';
-    const fields = isManager
-      ? ['id', 'department', 'status', 'request_type', 'requested_at', 'due_at']
-      : [
-          'id',
-          'business_profile',
-          'department',
-          'requested_by_user',
-          'target_member',
-          'completed_scan',
-          'status',
-          'cancelled',
-          'request_type',
-          'requested_at',
-          'due_at',
-          'completed_at'
-        ];
-    return this.queryItemsStrict<ScopedRequestRecord>({
-      collection: 'scan_requests',
-      fields,
-      limit,
-      sort: '-requested_at',
-      businessProfileId,
-      businessFilterPath: ['business_profile'],
-      extraFilters: [
-        ...extraFilters,
-        ...(isManager && activeDepartmentId
-          ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
-          : [])
-      ]
-    }, token).pipe(
-      map((rows) => rows.map((row) => this.normalizeRequestRecord(row)))
+    void businessProfileId;
+    void activeRole;
+    void activeDepartmentId;
+    void token;
+    void extraFilters;
+    return this.workforceRosterApi.getWorkforceRoster().pipe(
+      map((payload) =>
+        (payload.scan_requests?.rows ?? [])
+          .slice(0, limit)
+          .map((row) => this.normalizeRequestRecord(row as unknown as ScopedRequestRecord))
+      )
     );
   }
 
@@ -846,38 +827,18 @@ export class DashboardService {
     token: string,
     limit: number
   ): Observable<BusinessProfileMemberRecord[]> {
-    const isManager = activeRole === 'manager';
-    const fields = isManager
-      ? ['id', 'status', 'member_role', 'department', 'employee_code', 'job_title', 'last_scan_at', 'last_risk_level', 'last_readiness_score']
-      : [
-          'id',
-          'status',
-          'user',
-          'business_profile',
-          'member_role',
-          'department',
-          'shift_template',
-          'employee_code',
-          'job_title',
-          'joined_at',
-          'deactivated_at',
-          'last_scan_at',
-          'last_readiness_score',
-          'last_risk_level',
-          'date_created',
-          'date_updated'
-        ];
-    return this.queryItemsStrict<BusinessProfileMemberRecord>({
-      collection: 'business_profile_members',
-      fields,
-      limit,
-      sort: isManager ? '-last_scan_at' : '-date_created',
-      businessProfileId,
-      businessFilterPath: ['business_profile'],
-      extraFilters: isManager && activeDepartmentId
-        ? [{ path: ['department'], operator: '_eq', value: activeDepartmentId }]
-        : []
-    }, token);
+    void businessProfileId;
+    void activeRole;
+    void activeDepartmentId;
+    void token;
+    return this.workforceRosterApi.getWorkforceRoster().pipe(
+      map((payload) =>
+        (payload.rows ?? [])
+          .slice(0, limit)
+          .map((row) => this.mapRosterRowToBusinessProfileMember(row))
+          .filter((item): item is BusinessProfileMemberRecord => Boolean(item))
+      )
+    );
   }
 
   private fetchDepartments(
@@ -932,6 +893,35 @@ export class DashboardService {
         return of([] as T[]);
       })
     );
+  }
+
+  private mapRosterRowToBusinessProfileMember(row: WorkforceRosterRow): BusinessProfileMemberRecord | null {
+    const id = row.member_id ?? null;
+    if (!id) {
+      return null;
+    }
+    return {
+      id,
+      status: row.status,
+      user: row.user_id
+        ? {
+            id: row.user_id,
+            first_name: row.display_name,
+            last_name: null,
+            email: row.email
+          }
+        : null,
+      member_role: row.member_role,
+      department: row.department_id
+        ? {
+            id: row.department_id,
+            name: row.department_name
+          }
+        : null,
+      joined_at: row.joined_at,
+      date_created: row.joined_at,
+      date_updated: row.last_scan_at ?? row.joined_at
+    };
   }
 
   private queryItemsStrict<T>(config: QueryConfig, token: string): Observable<T[]> {

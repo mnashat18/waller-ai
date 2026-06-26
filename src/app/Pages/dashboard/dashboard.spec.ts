@@ -11,8 +11,22 @@ import { Dashboard } from './dashboard';
 describe('Dashboard', () => {
   let component: Dashboard;
   let fixture: ComponentFixture<Dashboard>;
+  let refreshContextSpy: { (): Promise<never[]>; calls: { count(): number } };
 
   beforeEach(async () => {
+    const calls: unknown[] = [];
+    refreshContextSpy = Object.assign(
+      () => {
+        calls.push(true);
+        return Promise.resolve([] as never[]);
+      },
+      {
+        calls: {
+          count: () => calls.length
+        }
+      }
+    );
+
     await TestBed.configureTestingModule({
       imports: [Dashboard],
       providers: [
@@ -20,10 +34,20 @@ describe('Dashboard', () => {
         {
           provide: CompanyContextService,
           useValue: {
-            ensureActiveContext: () => Promise.resolve({
-              activeMembership: { id: 'member-1' },
-              activeBusinessProfile: { id: 'profile-1' },
+            ensureVerifiedWorkspaceContext: () => Promise.resolve({
+              activeMembership: { id: 'member-1', status: 'active', member_role: 'owner' },
+              activeBusinessProfile: { id: 'profile-1', company_name: 'Test Company', is_active: true },
+              activeDepartment: null,
               activeMemberRole: 'owner'
+            }),
+            snapshot: () => ({
+              context: {
+                activeBusinessProfileId: 'profile-1',
+                activeBusinessProfileName: 'Test Company',
+                activeDepartmentId: null,
+                activeDepartmentName: null,
+                activeMemberRole: 'owner'
+              }
             })
           }
         },
@@ -53,7 +77,7 @@ describe('Dashboard', () => {
         },
         {
           provide: PostLoginRoutingService,
-          useValue: { refreshAuthAndWorkspaceContext: () => Promise.resolve([]) }
+          useValue: { refreshAuthAndWorkspaceContext: refreshContextSpy }
         },
         {
           provide: InviteService,
@@ -73,5 +97,19 @@ describe('Dashboard', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+    expect(refreshContextSpy.calls.count()).toBe(0);
+  });
+
+  it('exposes actionable onboarding steps', () => {
+    expect(component.onboardingSteps.find((step) => step.label === 'Complete company profile')?.route).toBe('/app/company');
+    expect(component.onboardingSteps.find((step) => step.label === 'Add departments')?.queryParams).toEqual({ tab: 'departments' });
+    expect(component.onboardingSteps.find((step) => step.label === 'Invite employees')?.queryParams).toEqual({ invite: '1' });
+    expect(component.onboardingSteps.find((step) => step.label === 'Create your first scan request')?.state).toEqual({ openCreateRequest: true });
+  });
+
+  it('keeps verified workspace members on the dashboard without falling back to create-company state', async () => {
+    expect(component.state).toBe('ready');
+    expect(component.errorMessage).toBe('');
+    expect(component.activeMemberRole).toBe('owner');
   });
 });

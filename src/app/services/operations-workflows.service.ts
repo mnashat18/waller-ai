@@ -17,6 +17,7 @@ import { CompanyContextService, type CompanyContext } from '../core/context/comp
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { AuthService } from './auth';
 import { SecurityMessages } from '../shared/utils/security-error';
+import { WorkforceRosterApiService, type WorkforceRosterPayload } from './workforce-roster-api.service';
 
 export type WorkflowDepartmentOption = {
   id: string;
@@ -441,7 +442,8 @@ export class OperationsWorkflowsService {
   constructor(
     private http: HttpClient,
     private auth: AuthService,
-    private companyContext: CompanyContextService
+    private companyContext: CompanyContextService,
+    private workforceRosterApi: WorkforceRosterApiService
   ) {}
 
   getCompliancePageData(): Observable<CompliancePageData> {
@@ -457,12 +459,7 @@ export class OperationsWorkflowsService {
             context.token,
             { filters: this.scopeFilters(context, ['business_profile']), sort: 'name', limit: 200 }
           ),
-          requests: this.queryItems<ScanRequestRecord>(
-            'scan_requests',
-            this.managerRequestFields(context),
-            context.token,
-            { filters: this.managerDepartmentFilters(context, ['business_profile'], ['department']), sort: '-requested_at', limit: 800 }
-          ),
+          queue: this.fetchScanRequestQueue(context),
           scans: this.queryItems<WellnessScanRecord>(
             'wellness_scans',
             ['id', 'date_created'],
@@ -493,8 +490,8 @@ export class OperationsWorkflowsService {
             { filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }], sort: '-date_created', limit: 20 }
           )
         }).pipe(
-          map(({ departments, members, shiftTemplates, requests, scans, results, consents, exports }) =>
-            this.buildCompliancePageData(departments, members, shiftTemplates, requests, scans, results, consents, exports)
+          map(({ departments, members, shiftTemplates, queue, scans, results, consents, exports }) =>
+            this.buildCompliancePageData(departments, members, shiftTemplates, queue.rows, scans, results, consents, exports)
           )
         );
       })
@@ -507,94 +504,92 @@ export class OperationsWorkflowsService {
         console.log('[ScanRequests] active context ready');
       }),
       switchMap((context) =>
-        this.fetchScanRequestQueue(context).pipe(
-          tap((requests) => {
-            console.log('[ScanRequests] scan requests result', Array.isArray(requests.rows) ? requests.rows.length : 0);
-          }),
-          switchMap((queue) =>
-            forkJoin({
-              departments: this.loadDepartmentsForRequests(context).pipe(
-                timeout(12000),
-                catchError((error) => {
-                  if (context.activeRole === 'manager') {
-                    return throwError(() => error);
-                  }
-                  console.warn('[ScanRequests] optional departments failed, using []', error);
-                  return of([] as DepartmentRecord[]);
-                })
-              ),
-              members: this.loadMembersForRequests(context).pipe(
-                timeout(12000),
-                catchError((error) => {
-                  if (context.activeRole === 'manager') {
-                    return throwError(() => error);
-                  }
-                  console.warn('[ScanRequests] optional members failed, using []', error);
-                  return of([] as MemberRecord[]);
-                })
-              ),
-              scans: this.queryItems<WellnessScanRecord>(
-                'wellness_scans',
-                ['id', 'date_created'],
-                context.token,
-                { sort: '-date_created', limit: 800 }
-              ).pipe(
-                timeout(12000),
-                catchError((error) => {
-                  console.warn('[ScanRequests] optional scans failed, using []', error);
-                  return of([] as WellnessScanRecord[]);
-                })
-              ),
-              notifications: this.queryItems<NotificationRecord>(
-                'notifications',
-                ['id', 'link_type', 'link_id'],
-                context.token,
-                { filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }], sort: '-id', limit: 400 }
-              ).pipe(
-                timeout(12000),
-                catchError((error) => {
-                  console.warn('[ScanRequests] optional notifications failed, using []', error);
-                  return of([] as NotificationRecord[]);
-                })
-              )
-            }).pipe(
-              map(({ departments, members, scans, notifications }) => {
-                const pageData = this.buildRequestsPageData(
-                  departments,
-                  members,
-                  queue.rows,
-                  scans,
-                  notifications
-                );
-
-                if (context.activeRole !== 'employee' || !context.userId) {
-                  return pageData;
-                }
-
-                const userId = context.userId;
-                const employeeRows = pageData.rows.filter(
-                  (row) => row.target_member_id === context.activeMembershipId || row.target_member_id === userId || row.requested_by_user_id === userId
-                );
-
-                const filteredDepartments = pageData.departments.filter((department) =>
-                  employeeRows.some((row) => row.department_id === department.id)
-                );
-
-                return {
-                  ...pageData,
-                  rows: employeeRows,
-                  departments: filteredDepartments,
-                  members: [],
-                  summary: {
-                    total: employeeRows.length,
-                    pending: employeeRows.filter((row) => this.isPendingRequestStatus(row.status)).length,
-                    completed: employeeRows.filter((row) => this.normalizeText(row.status) === 'completed').length,
-                    overdue: employeeRows.filter((row) => this.isOverdueRequestStatus(row.status, row.due_at)).length
-                  }
-                } satisfies RequestsPageData;
-              })
-            )
+        forkJoin({
+          roster: this.workforceRosterApi.getWorkforceRoster().pipe(
+            map((payload) => payload),
+            catchError((error) => {
+              if (context.activeRole === 'manager') {
+                return throwError(() => error);
+              }
+              console.warn('[ScanRequests] workforce roster failed, using fallback scan-target list', error);
+              return of(null);
+            })
+          ),
+          queue: this.fetchScanRequestQueue(context).pipe(
+            tap((requests) => {
+              console.log('[ScanRequests] scan requests result', Array.isArray(requests.rows) ? requests.rows.length : 0);
+            })
+          ),
+          departments: this.loadDepartmentsForRequests(context).pipe(
+            timeout(12000),
+            catchError((error) => {
+              if (context.activeRole === 'manager') {
+                return throwError(() => error);
+              }
+              console.warn('[ScanRequests] optional departments failed, using []', error);
+              return of([] as DepartmentRecord[]);
+            })
+          ),
+          scans: this.queryItems<WellnessScanRecord>(
+            'wellness_scans',
+            ['id', 'date_created'],
+            context.token,
+            { sort: '-date_created', limit: 800 }
+          ).pipe(
+            timeout(12000),
+            catchError((error) => {
+              console.warn('[ScanRequests] optional scans failed, using []', error);
+              return of([] as WellnessScanRecord[]);
+            })
+          ),
+          notifications: this.queryItems<NotificationRecord>(
+            'notifications',
+            ['id', 'link_type', 'link_id'],
+            context.token,
+            { filters: [{ path: ['business_profile'], operator: '_eq', value: context.businessProfileId }], sort: '-id', limit: 400 }
+          ).pipe(
+            timeout(12000),
+            catchError((error) => {
+              console.warn('[ScanRequests] optional notifications failed, using []', error);
+              return of([] as NotificationRecord[]);
+            })
           )
+        }).pipe(
+          map(({ roster, queue, departments, scans, notifications }) => {
+            const pageData = this.buildRequestsPageData(
+              departments,
+              roster ? this.mapEligibleTargets(roster) : [],
+              queue.rows,
+              scans,
+              notifications
+            );
+
+            if (context.activeRole !== 'employee' || !context.userId) {
+              return pageData;
+            }
+
+            const userId = context.userId;
+            const employeeRows = pageData.rows.filter(
+              (row) => row.target_member_id === context.activeMembershipId || row.target_member_id === userId || row.requested_by_user_id === userId
+            );
+
+            const filteredDepartments = pageData.departments.filter((department) =>
+              employeeRows.some((row) => row.department_id === department.id)
+            );
+
+            return {
+              ...pageData,
+              rows: employeeRows,
+              departments: filteredDepartments,
+              members: [],
+              summary: {
+                total: employeeRows.length,
+                pending: employeeRows.filter((row) => this.isPendingRequestStatus(row.status)).length,
+                completed: employeeRows.filter((row) => this.normalizeText(row.status) === 'completed').length,
+                overdue: employeeRows.filter((row) => this.isOverdueRequestStatus(row.status, row.due_at)).length
+              }
+            } satisfies RequestsPageData;
+          })
         )
       )
     );
@@ -619,9 +614,9 @@ export class OperationsWorkflowsService {
       warning = 'requests_load_failed';
     }
 
-    const [departmentsResult, membersResult, scansResult, notificationsResult] = await Promise.allSettled([
+    const [rosterResult, departmentsResult, scansResult, notificationsResult] = await Promise.allSettled([
+      firstValueFrom(this.workforceRosterApi.getWorkforceRoster().pipe(take(1), timeout(4000))),
       firstValueFrom(this.loadDepartmentsForRequests(context).pipe(take(1), timeout(4000))),
-      firstValueFrom(this.loadMembersForRequests(context).pipe(take(1), timeout(4000))),
       firstValueFrom(
         this.queryItems<WellnessScanRecord>('wellness_scans', ['id', 'date_created'], context.token, { sort: '-date_created', limit: 800 })
           .pipe(take(1), timeout(4000))
@@ -636,12 +631,12 @@ export class OperationsWorkflowsService {
       )
     ]);
 
+    const roster = rosterResult.status === 'fulfilled'
+      ? rosterResult.value
+      : (console.warn('[ScanRequests] workforce roster failed, using []', rosterResult.reason), null);
     const departments = departmentsResult.status === 'fulfilled'
       ? (departmentsResult.value ?? [])
       : (console.warn('[ScanRequests] optional departments failed, using []', departmentsResult.reason), [] as DepartmentRecord[]);
-    const members = membersResult.status === 'fulfilled'
-      ? (membersResult.value ?? [])
-      : (console.warn('[ScanRequests] optional members failed, using []', membersResult.reason), [] as MemberRecord[]);
     const scans = scansResult.status === 'fulfilled'
       ? (scansResult.value ?? [])
       : (console.warn('[ScanRequests] optional scans failed, using []', scansResult.reason), [] as WellnessScanRecord[]);
@@ -649,7 +644,13 @@ export class OperationsWorkflowsService {
       ? (notificationsResult.value ?? [])
       : (console.warn('[ScanRequests] optional notifications failed, using []', notificationsResult.reason), [] as NotificationRecord[]);
 
-    const pageData = this.buildRequestsPageData(departments, members, requests, scans, notifications);
+    const pageData = this.buildRequestsPageData(
+      departments,
+      roster ? this.mapEligibleTargets(roster) : [],
+      requests,
+      scans,
+      notifications
+    );
     if (context.activeRole !== 'employee' || !context.userId) {
       return warning ? { ...pageData, warning } : pageData;
     }
@@ -681,35 +682,26 @@ export class OperationsWorkflowsService {
   getRequestModalOptions(): Observable<RequestModalOptions> {
     return this.ensureScopedContext(true).pipe(
       switchMap((context) =>
-        forkJoin({
-          departments: this.optionalList(
-            'departments',
-            this.loadDepartmentsForRequests(context)
-          ),
-          members: this.optionalList(
-            'business_profile_members',
-            this.loadMembersForRequests(context)
-          )
-        }).pipe(
-          map(({ departments, members }) => ({
-            departments: (departments ?? [])
+        this.workforceRosterApi.getWorkforceRoster().pipe(
+          map((payload) => ({
+            departments: (payload.departments ?? [])
               .map((department) => ({
-                id: this.normalizeId(department.id) ?? '',
-                name: formatDepartment(department, 'Unnamed Department')
+                id: department.id,
+                name: department.name
               }))
-              .filter((item) => item.id),
-            members: (members ?? [])
-              .map((member) => ({
-                member_id: this.normalizeId(member.id) ?? '',
-                user_id: this.normalizeId(member.user),
-                label: formatMember(member, 'Unknown member'),
-                email: sanitizeDisplayValue(this.objectRecord(member.user)?.['email'], ''),
-                member_role: this.normalizeMemberRole(member.member_role),
-                department_id: this.normalizeId(member.department),
-                department_name: formatDepartment(member.department, 'Unassigned'),
-                status: member.status ?? null
+              .filter((item) => Boolean(item.id && item.name)),
+            members: (payload.eligible_scan_targets ?? [])
+              .map((target) => ({
+                member_id: target.member_id,
+                user_id: target.user_id,
+                label: target.label,
+                email: target.email,
+                member_role: this.normalizeMemberRole(target.member_role),
+                department_id: target.department_id,
+                department_name: target.department_name,
+                status: target.status
               }))
-              .filter((item) => item.member_id)
+              .filter((item) => Boolean(item.member_id && item.user_id && item.email))
           }))
         )
       )
@@ -1083,50 +1075,32 @@ export class OperationsWorkflowsService {
   }
 
   private loadMembersForRequests(context: ScopedContext): Observable<MemberRecord[]> {
-    this.assertManagerDepartmentScope(context);
-    const richFields = context.activeRole === 'manager'
-      ? ['id', 'status', 'member_role', 'department', 'employee_code', 'job_title', 'last_scan_at', 'last_risk_level', 'last_readiness_score']
-      : [
-          'id',
-          'status',
-          'member_role',
-          'department',
-          'user.id',
-          'user.email',
-          'user.first_name',
-          'user.last_name'
-        ];
-    const fallbackFields = context.activeRole === 'manager'
-      ? richFields
-      : ['id', 'status', 'member_role', 'department', 'user'];
-
-    return this.queryItemsStrict<MemberRecord>(
-      'business_profile_members',
-      richFields,
-      context.token,
-      {
-        filters: [...this.scopeFilters(context, ['business_profile'], ['department']), { path: ['status'], operator: '_eq', value: 'active' }],
-        sort: '-id',
-        limit: 500
-      }
-    ).pipe(
-      catchError((error) => {
-        if (this.isFieldCompatibilityError(error)) {
-          console.warn('[OperationsWorkflows] members query fallback without nested user fields', error);
-          return this.queryItemsStrict<MemberRecord>(
-            'business_profile_members',
-            fallbackFields,
-            context.token,
-            {
-              filters: [...this.scopeFilters(context, ['business_profile'], ['department']), { path: ['status'], operator: '_eq', value: 'active' }],
-              sort: '-id',
-              limit: 500
+    void context;
+    return this.workforceRosterApi.getWorkforceRoster().pipe(
+      map((payload) =>
+        (payload.rows ?? [])
+          .map((row) => {
+            const id = row.member_id ?? null;
+            if (!id) {
+              return null;
             }
-          );
-        }
-        console.error('[OperationsWorkflows] members query failed', error);
-        return throwError(() => error);
-      })
+            return {
+              id,
+              status: row.status,
+              member_role: row.member_role,
+              department: row.department_id ? { id: row.department_id, name: row.department_name } : null,
+              user: row.user_id
+                ? {
+                    id: row.user_id,
+                    email: row.email,
+                    first_name: row.display_name,
+                    last_name: null
+                  }
+                : null
+            };
+          })
+          .filter(Boolean) as MemberRecord[]
+      )
     );
   }
 
@@ -1760,6 +1734,23 @@ export class OperationsWorkflowsService {
         overdue: rows.filter((row) => this.isOverdueRequestStatus(row.status, row.due_at)).length
       }
     };
+  }
+
+  private mapEligibleTargets(payload: WorkforceRosterPayload | null): WorkflowMemberOption[] {
+    if (!payload?.eligible_scan_targets?.length) {
+      return [];
+    }
+
+    return payload.eligible_scan_targets.map((target) => ({
+      member_id: target.member_id,
+      user_id: target.user_id,
+      label: target.label,
+      email: target.email,
+      member_role: target.member_role,
+      department_id: target.department_id,
+      department_name: target.department_name,
+      status: target.status
+    }));
   }
 
   private buildAlertsPageData(

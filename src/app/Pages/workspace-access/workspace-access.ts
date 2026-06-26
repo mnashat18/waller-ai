@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, NgZone, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 
 import { AuthService } from '../../services/auth';
 import { InviteService } from '../../services/invites';
@@ -357,18 +358,11 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
     this.switchingWorkspaceId = workspace.id;
     try {
-      await this.companyContext.activateFromMembership({
-        id: workspace.id,
-        status: workspace.status,
-        member_role: String(workspace.memberRole || '').toLowerCase(),
-        business_profile: {
-          id: workspace.id,
-          company_name: workspace.companyName,
-          is_active: workspace.isActive
-        },
-        department: workspace.departmentId ? { id: workspace.departmentId, name: workspace.departmentName ?? null } : null,
-        joined_at: null
-      });
+      const result = await firstValueFrom(this.workspaceAccess.openWorkspace(workspace));
+      if (!result.ok) {
+        this.errorMessage = result.message;
+        return;
+      }
 
       const nextRoute = this.resolveRecoveryReturnUrl('/app/dashboard');
       const success = await this.ngZone.run(() =>
@@ -394,18 +388,11 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
     this.switchingWorkspaceId = workspace.id;
     try {
-      await this.companyContext.activateFromMembership({
-        id: workspace.id,
-        status: workspace.status,
-        member_role: String(workspace.memberRole || '').toLowerCase(),
-        business_profile: {
-          id: workspace.id,
-          company_name: workspace.companyName,
-          is_active: workspace.isActive
-        },
-        department: workspace.departmentId ? { id: workspace.departmentId, name: workspace.departmentName ?? null } : null,
-        joined_at: null
-      });
+      const result = await firstValueFrom(this.workspaceAccess.openWorkspace(workspace));
+      if (!result.ok) {
+        this.errorMessage = result.message;
+        return;
+      }
       const nextRoute = this.resolveRecoveryReturnUrl('/employee-web-access');
       const success = await this.ngZone.run(() =>
         this.router.navigateByUrl(nextRoute, { replaceUrl: true })

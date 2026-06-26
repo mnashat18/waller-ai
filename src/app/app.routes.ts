@@ -1,6 +1,5 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, CanMatchFn, Router, Routes } from '@angular/router';
-import { catchError, firstValueFrom, map, of, timeout } from 'rxjs';
 import { environment } from '../environments/environment';
 
 import { PublicLayout } from './public.layout/public.layout';
@@ -15,7 +14,6 @@ import { AuditLogsMobileComponent } from './Pages/mobile/audit-logs-mobile.compo
 
 import { CompanyContextService } from './core/context/company-context.service';
 import { InviteService } from './services/invites';
-import { SubscriptionService } from './services/subscription.service';
 import { AppShellComponent } from './dashboard-shell/app-shell.component';
 
 const isLikelyJwt = (token: string): boolean => {
@@ -38,7 +36,6 @@ const clearStoredAuthAliases = (): void => {
 const INVITE_CLAIM_SUCCESS_PREFIX = 'invite_claim_success_';
 const INVITE_CLAIM_COMPLETED_KEY = 'invite_claim_completed';
 const INVITE_CLAIM_IN_PROGRESS_PREFIX = 'invite_claim_in_progress_';
-const ACTIVE_MEMBERSHIP_STORAGE_KEY = 'active_workspace_membership_v1';
 const WORKSPACE_RECOVERY_RETURN_URL_KEY = 'wellar_workspace_recovery_return_url';
 
 const storeWorkspaceRecoveryTarget = (requestedUrl: string): void => {
@@ -139,80 +136,8 @@ const normalizeRole = (value: unknown): string => {
   return role;
 };
 
-const hasStoredActiveWorkspaceContext = (): boolean => {
-  if (typeof localStorage === 'undefined') {
-    return false;
-  }
-
-  const activeBusinessProfileId =
-    localStorage.getItem('active_business_profile_id')?.trim() ??
-    localStorage.getItem('active_business_profile')?.trim() ??
-    '';
-  const activeRole = normalizeStoredRole();
-  if (activeBusinessProfileId && activeRole) {
-    return true;
-  }
-
-  const rawMembership = localStorage.getItem(ACTIVE_MEMBERSHIP_STORAGE_KEY);
-  if (!rawMembership) {
-    return false;
-  }
-
-  try {
-    const membership = JSON.parse(rawMembership) as {
-      status?: unknown;
-      business_profile?: unknown;
-      member_role?: unknown;
-    };
-
-    const status = String(membership?.status ?? '').trim().toLowerCase();
-    const businessProfile = membership?.business_profile;
-    const memberRole = normalizeRole(membership?.member_role);
-    const businessProfileId =
-      (typeof businessProfile === 'string' && businessProfile.trim()) ||
-      (typeof businessProfile === 'object' && businessProfile !== null
-        ? String((businessProfile as { id?: unknown }).id ?? '').trim()
-        : '');
-
-    return status === 'active' && Boolean(businessProfileId) && Boolean(memberRole);
-  } catch {
-    return false;
-  }
-};
-
-const hasStoredActiveWorkspace = (): boolean => {
-  if (typeof localStorage === 'undefined') {
-    return false;
-  }
-
-  const activeBusinessProfileId =
-    localStorage.getItem('active_business_profile_id')?.trim() ??
-    localStorage.getItem('active_business_profile')?.trim() ??
-    '';
-  const role = normalizeStoredRole();
-  if (activeBusinessProfileId && role) {
-    return true;
-  }
-
-  return hasStoredActiveWorkspaceContext();
-};
-
-const shouldBypassOnboardingForInvite = (): boolean =>
-  hasStoredActiveWorkspace() ||
-  hasInviteClaimSuccessMarker() ||
-  hasInviteClaimCompletedMarker() ||
-  hasInviteClaimInProgressMarker();
-
-const normalizeStoredRole = (): string => {
-  if (typeof localStorage === 'undefined') {
-    return '';
-  }
-
-  return normalizeRole(localStorage.getItem('active_member_role'));
-};
-
-const resolveInviteMemberLandingRoute = (): string => {
-  const role = normalizeStoredRole();
+const resolveWorkspaceLandingRoute = (roleValue: string | null | undefined): string => {
+  const role = normalizeRole(roleValue);
   if (role === 'owner' || role === 'hr' || role === 'manager') {
     return '/app/dashboard';
   }
@@ -221,11 +146,15 @@ const resolveInviteMemberLandingRoute = (): string => {
     return '/employee-web-access';
   }
 
-  if (hasStoredActiveWorkspace()) {
-    return '/app/dashboard';
-  }
-
   return '/app/workspace-access';
+};
+
+const resolveVerifiedWorkspaceContext = async (companyContext: CompanyContextService, forceRefresh = false) => {
+  try {
+    return await companyContext.ensureVerifiedWorkspaceContext(forceRefresh);
+  } catch {
+    return null;
+  }
 };
 
 const debugRouteGuard = (message: string, details?: Record<string, unknown>): void => {
@@ -302,8 +231,7 @@ const appAuthGuard: CanActivateFn = () => {
   return true;
 };
 
-const paymentAccessGuard: CanActivateFn = () => {
-  const subscriptions = inject(SubscriptionService);
+const paymentAccessGuard: CanActivateFn = async () => {
   const router = inject(Router);
   const token = getStoredToken();
   const pendingInviteToken = getPendingInviteToken();
@@ -314,29 +242,20 @@ const paymentAccessGuard: CanActivateFn = () => {
     });
   }
 
-  if (token && hasStoredActiveWorkspace()) {
-    debugRouteGuard('dashboard allowed because active workspace exists', {
-      target: '/payment'
-    });
-    return router.parseUrl(resolveInviteMemberLandingRoute());
-  }
-
-  if (token && shouldBypassOnboardingForInvite()) {
-    debugRouteGuard('skipped payment onboarding because user is invited member', {
-      target: '/payment'
-    });
-    return router.parseUrl(resolveInviteMemberLandingRoute());
-  }
-
   if (!token) {
     return true;
   }
 
-  return subscriptions.isBusinessOnboardingComplete().pipe(
-    timeout(8000),
-    map((completed) => (completed ? router.createUrlTree(['/app/dashboard']) : true)),
-    catchError(() => of(createWorkspaceRecoveryTree(router, '/payment')))
-  );
+  const companyContext = inject(CompanyContextService);
+  const context = await resolveVerifiedWorkspaceContext(companyContext, false);
+  if (context?.activeBusinessProfile?.id) {
+    debugRouteGuard('dashboard allowed because active workspace exists', {
+      target: '/payment'
+    });
+    return router.parseUrl(resolveWorkspaceLandingRoute(context.activeMemberRole));
+  }
+
+  return createWorkspaceRecoveryTree(router, '/payment');
 };
 
 export const businessOnboardingGuard: CanActivateFn = (_, state) => {
@@ -380,39 +299,19 @@ export const businessOnboardingGuard: CanActivateFn = (_, state) => {
     });
   }
 
-  if (hasStoredActiveWorkspace()) {
-    debugRouteGuard('dashboard allowed because active workspace exists', {
-      target: state.url
-    });
-    return true;
-  }
-
-  if (shouldBypassOnboardingForInvite()) {
-    debugRouteGuard('skipped payment onboarding because user is invited member', {
-      target: state.url
-    });
-    return true;
-  }
-
-  const subscriptions = inject(SubscriptionService);
   const router = inject(Router);
+  const companyContext = inject(CompanyContextService);
 
-  return subscriptions.isBusinessOnboardingComplete().pipe(
-    timeout(8000),
-    map((completed) => {
-      if (completed || hasStoredActiveWorkspace()) {
-        if (hasStoredActiveWorkspace()) {
-          debugRouteGuard('dashboard allowed because active workspace exists', {
-            target: state.url
-          });
-        }
-        return true;
-      }
+  return resolveVerifiedWorkspaceContext(companyContext, false).then((context) => {
+    if (context?.activeBusinessProfile?.id) {
+      debugRouteGuard('dashboard allowed because active workspace exists', {
+        target: state.url
+      });
+      return true;
+    }
 
-      return router.createUrlTree(['/app/workspace-access']);
-    }),
-    catchError(() => of(createWorkspaceRecoveryTree(router, state.url)))
-  );
+    return createWorkspaceRecoveryTree(router, state.url);
+  });
 };
 
 export const dashboardWorkspaceGuard: CanActivateFn = async (_, state) => {
@@ -437,7 +336,7 @@ export const dashboardWorkspaceGuard: CanActivateFn = async (_, state) => {
     hasInviteClaimInProgressMarker();
 
   try {
-    await firstValueFrom(companyContext.ensureLoaded().pipe(timeout(8000)));
+    await resolveVerifiedWorkspaceContext(companyContext, true);
   } catch {
     return createWorkspaceRecoveryTree(router, state.url);
   }
@@ -467,43 +366,54 @@ export const dashboardWorkspaceGuard: CanActivateFn = async (_, state) => {
 };
 
 const employeeWebOperationalGuard: CanActivateFn = (_, state) => {
-  const role = normalizeStoredRole();
-  if (role !== 'employee') {
-    return true;
-  }
-
   const router = inject(Router);
-  const blockedPaths = new Set([
-    '/app/dashboard',
-    '/app/workforce',
-    '/app/scan-requests',
-    '/app/compliance',
-    '/app/alerts',
-    '/app/activity',
-    '/app/reports',
-    '/app/company',
-    '/app/settings'
-  ]);
-  const targetPath = state.url.split('?')[0].toLowerCase();
+  const companyContext = inject(CompanyContextService);
 
-  if (blockedPaths.has(targetPath)) {
-    return router.createUrlTree(['/employee-web-access']);
-  }
+  return resolveVerifiedWorkspaceContext(companyContext, false).then((context) => {
+    if (!context?.activeBusinessProfile?.id) {
+      return createWorkspaceRecoveryTree(router, state.url);
+    }
 
-  return true;
+    if (normalizeRole(context.activeMemberRole) !== 'employee') {
+      return true;
+    }
+
+    const blockedPaths = new Set([
+      '/app/dashboard',
+      '/app/workforce',
+      '/app/scan-requests',
+      '/app/compliance',
+      '/app/alerts',
+      '/app/activity',
+      '/app/reports',
+      '/app/company',
+      '/app/settings'
+    ]);
+    const targetPath = state.url.split('?')[0].toLowerCase();
+
+    if (blockedPaths.has(targetPath)) {
+      return router.createUrlTree(['/employee-web-access']);
+    }
+
+    return true;
+  });
 };
 
 const activeRoleRouteGuard = (allowedRoles: string[]): CanActivateFn => (_, state) => {
-  const role = normalizeStoredRole();
-  if (!allowedRoles.includes(role)) {
-    const router = inject(Router);
-    const redirectTo = role === 'employee' ? '/employee-web-access' : '/app/dashboard';
+  const router = inject(Router);
+  const companyContext = inject(CompanyContextService);
+
+  return resolveVerifiedWorkspaceContext(companyContext, false).then((context) => {
+    const role = normalizeRole(context?.activeMemberRole);
+    if (context?.activeBusinessProfile?.id && allowedRoles.includes(role)) {
+      return true;
+    }
+
+    const redirectTo = role === 'employee' ? '/employee-web-access' : '/app/workspace-access';
     return router.createUrlTree([redirectTo], {
       queryParams: { restricted: state.url.split('?')[0].toLowerCase() }
     });
-  }
-
-  return true;
+  });
 };
 
 const ownerHrRouteGuard = activeRoleRouteGuard(['owner', 'hr']);
@@ -519,31 +429,26 @@ export const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
   const router = inject(Router);
   const targetPath = state.url.split('?')[0];
 
-  return companyContext.ensureLoaded().pipe(
-    timeout(8000),
-    map((state) => {
-      const role = (state.context.activeMemberRole ?? '').toString().trim().toLowerCase();
-      if (role === 'owner' || role === 'hr' || role === 'manager') {
-        return true;
-      }
+  return resolveVerifiedWorkspaceContext(companyContext, false).then((verifiedContext) => {
+    const role = normalizeRole(verifiedContext?.activeMemberRole);
+    if (verifiedContext?.activeBusinessProfile?.id && (role === 'owner' || role === 'hr' || role === 'manager')) {
+      return true;
+    }
 
-      if (targetPath === '/requests' || targetPath === '/app/scan-requests') {
-        // Non-owner roles can access Requests in personal scope only.
-        return true;
-      }
+    if (targetPath === '/requests' || targetPath === '/app/scan-requests') {
+      return true;
+    }
 
-      if (targetPath === '/app/company') {
-        return router.createUrlTree(['/app/dashboard'], {
-          queryParams: { restricted: 'company' }
-        });
-      }
-
+    if (targetPath === '/app/company') {
       return router.createUrlTree(['/app/dashboard'], {
-        queryParams: { restricted: 'team' }
+        queryParams: { restricted: 'company' }
       });
-    }),
-    catchError(() => of(createWorkspaceRecoveryTree(router, state.url)))
-  );
+    }
+
+    return router.createUrlTree(['/app/dashboard'], {
+      queryParams: { restricted: 'team' }
+    });
+  });
 };
 
 export const routes: Routes = [

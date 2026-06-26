@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ActivatedRoute } from '@angular/router';
 import { of, throwError } from 'rxjs';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
@@ -61,8 +62,18 @@ describe('WorkforcePageComponent', () => {
                   activeDepartmentId: null,
                   activeDepartmentName: null,
                   activeMemberRole: 'owner'
-                }
-              })
+              }
+            })
+          }
+        },
+        {
+          provide: ActivatedRoute,
+          useValue: {
+            snapshot: {
+              queryParamMap: {
+                get: () => null
+              }
+            }
           }
         },
         {
@@ -124,6 +135,7 @@ describe('WorkforcePageComponent', () => {
           type: 'member',
           key: 'member-1',
           member_id: 'member-1',
+          state: 'verified_member',
           member_role: 'employee',
           status: 'active',
           identity: {
@@ -154,6 +166,56 @@ describe('WorkforcePageComponent', () => {
     expect(table).toBeTruthy();
     expect(table?.className).toContain('w-full');
     expect(scroller).toBeTruthy();
+  });
+
+  it('allows verified hr, manager, and employee members to be scan-request targets while excluding owners', () => {
+    expect(
+      component.canSendScanRequest({
+        type: 'member',
+        key: 'member-hr',
+        member_id: 'member-hr',
+        member_role: 'hr',
+        status: 'active',
+        email: 'hr@example.com',
+        state: 'verified_member'
+      } as any)
+    ).toBe(true);
+
+    expect(
+      component.canSendScanRequest({
+        type: 'member',
+        key: 'member-manager',
+        member_id: 'member-manager',
+        member_role: 'manager',
+        status: 'active',
+        email: 'manager@example.com',
+        state: 'verified_member'
+      } as any)
+    ).toBe(true);
+
+    expect(
+      component.canSendScanRequest({
+        type: 'member',
+        key: 'member-employee',
+        member_id: 'member-employee',
+        member_role: 'employee',
+        status: 'active',
+        email: 'employee@example.com',
+        state: 'verified_member'
+      } as any)
+    ).toBe(true);
+
+    expect(
+      component.canSendScanRequest({
+        type: 'member',
+        key: 'member-owner',
+        member_id: 'member-owner',
+        member_role: 'owner',
+        status: 'active',
+        email: 'owner@example.com',
+        state: 'verified_member'
+      } as any)
+    ).toBe(false);
   });
 
   it('renders linked users, pending invitations, and broken memberships with honest identity labels', async () => {
@@ -195,6 +257,7 @@ describe('WorkforcePageComponent', () => {
           type: 'invite',
           key: 'invite-1',
           invite_id: 'invite-1',
+          state: 'pending_invitation',
           member_role: 'employee',
           status: 'pending',
           identity: {
@@ -214,17 +277,19 @@ describe('WorkforcePageComponent', () => {
           type: 'member',
           key: 'member-2',
           member_id: 'member-2',
+          state: 'repair_required',
           user_id: null,
           linked_invite_email: null,
           member_role: 'employee',
           status: 'active',
           identity: {
-            displayName: 'Needs data repair',
+            displayName: 'Data repair required',
             email: null
           },
           identity_state: 'identity_unavailable',
-          name: 'Needs data repair',
+          name: 'Data repair required',
           email: null,
+          reason: 'missing linked user',
           department_name: 'Operations',
           scan_status: 'missing',
           readiness_label: 'No scan',
@@ -246,6 +311,14 @@ describe('WorkforcePageComponent', () => {
     expect(text).toContain('alex@example.com');
     expect(text).toContain('Invitation pending');
     expect(text).toContain('invitee@example.com');
-    expect(text).toContain('Needs data repair');
+    expect(text).toContain('Data repair required');
+    expect(text).toContain('Missing linked user');
+
+    const firstRow = component.filteredRows[0];
+    component.selectedMember = firstRow;
+    component.showDetailsModal = true;
+    expect(component.showDetailsModal).toBe(true);
+    component.onEscape();
+    expect(component.showDetailsModal).toBe(false);
   });
 });

@@ -405,6 +405,93 @@ function publicOrganizationInvite(row) {
   };
 }
 
+function publicWorkforceMember(row, options = {}) {
+  const canViewEmail = options.canViewEmail === true;
+  const role = normalizeRole(row.member_role) ?? 'employee';
+  const status = pickString(row.status) ?? 'active';
+  const userId = pickString(row.user_id);
+  const rawEmail = pickString(row.user_email);
+  const email = canViewEmail ? rawEmail : null;
+  const firstName = pickString(row.first_name);
+  const lastName = pickString(row.last_name);
+  const displayName = [firstName, lastName].filter(Boolean).join(' ').trim() || (canViewEmail ? rawEmail : null) || 'Needs data repair';
+  const state =
+    status !== 'active'
+      ? 'inactive'
+      : (!userId || !rawEmail)
+        ? 'repair_required'
+        : 'verified_member';
+  const reason =
+    state === 'repair_required'
+      ? (!userId
+          ? 'missing linked user'
+          : !rawEmail
+            ? 'missing email'
+            : 'invalid membership relationship')
+      : null;
+
+  return {
+    id: String(row.id),
+    type: 'member',
+    state,
+    member_id: String(row.id),
+    invite_id: null,
+    user_id: userId ?? null,
+    member_role: role,
+    status,
+    department_id: row.department_id ?? null,
+    department_name: row.department_name ?? null,
+    display_name: state === 'verified_member' ? displayName : state === 'inactive' ? displayName : 'Data repair required',
+    email,
+    invited_email: null,
+    reason,
+    is_targetable: state === 'verified_member' && ['hr', 'manager', 'employee'].includes(role) && Boolean(email),
+    joined_at: row.joined_at ?? null,
+    expires_at: null,
+    last_scan_at: row.last_scan_at ?? null,
+    last_readiness_score: row.last_readiness_score ?? null,
+    last_risk_level: row.last_risk_level ?? null,
+    scan_status: row.scan_status ?? null,
+    todays_scan: row.todays_scan === true,
+    readiness_label: row.readiness_label ?? null,
+    presence_status: row.presence_status ?? null,
+    presence_label: row.presence_label ?? null
+  };
+}
+
+function publicWorkforceInvite(row, options = {}) {
+  const canViewEmail = options.canViewEmail === true;
+  const email = canViewEmail ? row.email ?? null : null;
+
+  return {
+    id: String(row.id),
+    type: 'invite',
+    state: 'pending_invitation',
+    member_id: null,
+    invite_id: String(row.id),
+    user_id: null,
+    member_role: normalizeRole(row.member_role) ?? 'employee',
+    status: row.status ?? 'pending',
+    department_id: row.department_id ?? null,
+    department_name: row.department_name ?? null,
+    display_name: 'Invitation pending',
+    email,
+    invited_email: email,
+    reason: email ? null : 'invitation email unavailable',
+    is_targetable: false,
+    joined_at: null,
+    expires_at: row.expires_at ?? null,
+    last_scan_at: null,
+    last_readiness_score: null,
+    last_risk_level: null,
+    scan_status: 'not_applicable',
+    todays_scan: false,
+    readiness_label: 'No scan',
+    presence_status: 'never',
+    presence_label: 'Never active'
+  };
+}
+
 function publicScanRequest(row, targetMember, requestedByUser = null) {
   const department = publicDepartment({
     department_id: targetMember.department_id,
@@ -696,6 +783,9 @@ function validateScanRequestPayload(body) {
   }
 
   const requestType = pickString(body.request_type, 60)?.toLowerCase() ?? 'manual';
+  if (!['manual', 'bulk', 'reminder'].includes(requestType)) {
+    return { ok: false, message: 'request_type must be manual, bulk, or reminder.' };
+  }
   const dueAt = pickString(body.due_at, MAX_TEXT);
   if (dueAt) {
     const parsed = new Date(dueAt);
@@ -801,6 +891,80 @@ async function loadOrganizationInvites(trx, workspaceId) {
     .where('invite.business_profile', workspaceId)
     .whereIn('invite.status', ['pending', 'sent'])
     .orderBy('invite.id', 'desc');
+}
+
+async function loadWorkforceRoster(trx, workspaceId, role, departmentId = null, userId = null) {
+  const normalizedRole = normalizeRole(role);
+  const canViewEmail = normalizedRole === 'owner' || normalizedRole === 'hr';
+  const canViewInvites = normalizedRole === 'owner' || normalizedRole === 'hr';
+
+  const [memberRows, inviteRows, departments, scanRequests] = await Promise.all([
+    loadOrganizationMembers(trx, workspaceId),
+    canViewInvites ? loadOrganizationInvites(trx, workspaceId) : Promise.resolve([]),
+    loadOrganizationDepartments(trx, workspaceId),
+    loadWorkspaceScanRequests(
+      trx,
+      workspaceId,
+      normalizedRole === 'manager'
+        ? { departmentId }
+        : normalizedRole === 'employee'
+          ? { userId }
+          : {}
+    )
+  ]);
+
+  const normalizedMembers = (memberRows ?? []).map((row) => publicWorkforceMember(row, { canViewEmail }));
+  const normalizedInvites = (inviteRows ?? []).map((row) => publicWorkforceInvite(row, { canViewEmail }));
+  const rows =
+    normalizedRole === 'manager'
+      ? normalizedMembers.filter((row) => row.department_id && row.department_id === departmentId)
+      : [...normalizedInvites, ...normalizedMembers];
+
+  const eligibleScanTargets = rows
+    .filter((row) => row.state === 'verified_member' && ['hr', 'manager', 'employee'].includes(row.member_role) && Boolean(row.email))
+    .map((row) => ({
+      member_id: row.member_id,
+      user_id: row.user_id,
+      label: row.display_name,
+      email: row.email,
+      department_id: row.department_id,
+      department_name: row.department_name,
+      member_role: row.member_role,
+      status: row.status
+    }));
+
+  const summary = {
+    total: rows.length,
+    verified_members: rows.filter((row) => row.state === 'verified_member').length,
+    pending_invitations: rows.filter((row) => row.state === 'pending_invitation').length,
+    repair_required: rows.filter((row) => row.state === 'repair_required').length,
+    inactive: rows.filter((row) => row.state === 'inactive').length,
+    eligible_scan_targets: eligibleScanTargets.length,
+    open_scan_requests: scanRequests.summary.pending + scanRequests.summary.overdue,
+    completed_scan_requests: scanRequests.summary.completed,
+    overdue_scan_requests: scanRequests.summary.overdue
+  };
+
+  return {
+    workspace: publicWorkspace({
+      workspace_id: workspaceId,
+      company_name: rows[0]?.business_profile_name ?? 'Organization',
+      workspace_is_active: true
+    }),
+    permissions: publicOrganizationPermissions(normalizedRole),
+    departments: (departments ?? []).map((department) => ({
+      id: String(department.id),
+      name: department.name ?? 'Department',
+      is_active: department.is_active === true
+    })),
+    rows,
+    eligible_scan_targets: eligibleScanTargets,
+    scan_requests: {
+      rows: scanRequests.rows,
+      summary: scanRequests.summary
+    },
+    summary
+  };
 }
 
 async function loadDepartmentById(trx, workspaceId, departmentId) {
@@ -1311,8 +1475,8 @@ export default {
             });
           }
 
-          if (normalizeRole(targetMember.member_role) !== 'employee') {
-            throw Object.assign(new Error('Scan requests can only target active employee members.'), {
+          if (!['hr', 'manager', 'employee'].includes(normalizeRole(targetMember.member_role))) {
+            throw Object.assign(new Error('Scan requests can only target active HR, manager, or employee members.'), {
               code: 'CONFLICT'
             });
           }
@@ -1503,6 +1667,67 @@ export default {
 
         logger?.error?.(error, '[wellar] scan request queue failed');
         return serverError(res, 'Scan requests could not be loaded.');
+      }
+    });
+
+    router.get('/workforce', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-workforce-roster:user:${userId}`
+          ]);
+
+          const { active } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const role = normalizeRole(active.member_role);
+          if (role !== 'owner' && role !== 'hr' && role !== 'manager') {
+            throw Object.assign(new Error('Owner, HR, or manager access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const roster = await loadWorkforceRoster(
+            trx,
+            active.workspace_id,
+            role,
+            active.department_id ?? null,
+            userId
+          );
+
+          return {
+            ...roster,
+            active: {
+              workspace: publicWorkspace(active),
+              membership: publicMembershipSummary(active),
+              department: publicDepartment(active)
+            }
+          };
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] workforce roster failed');
+        return serverError(res, 'Workforce roster could not be loaded.');
       }
     });
 

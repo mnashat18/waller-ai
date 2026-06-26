@@ -13,6 +13,7 @@ import {
 import { CompanyContextService, type CompanyContext } from '../core/context/company-context.service';
 import { type ActiveMemberRole } from '../ia/wellar-ia';
 import { AuthService } from './auth';
+import { WorkforceRosterApiService, type WorkforceRosterPayload, type WorkforceRosterQueueRow } from './workforce-roster-api.service';
 
 export type CompanyProfileRecord = {
   id: string;
@@ -179,12 +180,14 @@ export type WorkforcePresenceStatus = 'online' | 'idle' | 'offline' | 'never';
 export type WorkforceRosterRow = {
   type: WorkforceRowType;
   key: string;
+  state?: 'verified_member' | 'pending_invitation' | 'repair_required' | 'inactive';
   member_id: string | null;
   invite_id: string | null;
   user_id: string | null;
   identity: WorkforceIdentity;
   identity_state: 'identified' | 'pending_onboarding' | 'identity_unavailable';
   name: string;
+  display_name?: string;
   email: string | null;
   member_role: string;
   department_id: string | null;
@@ -206,11 +209,13 @@ export type WorkforceRosterRow = {
   invited_by_name: string | null;
   invite_phone: string | null;
   needs_review_reason: string | null;
+  reason?: string | null;
   linked_invite_email: string | null;
   linked_invite_status: string | null;
   linked_invite_requested_by: string | null;
   business_profile_id: string | null;
   business_profile_name: string | null;
+  is_targetable?: boolean;
 };
 
 export type WorkforceScanRequestRow = {
@@ -573,7 +578,8 @@ export class OperationsAdminService {
   constructor(
     private http: HttpClient,
     private auth: AuthService,
-    private companyContext: CompanyContextService
+    private companyContext: CompanyContextService,
+    private workforceRosterApi: WorkforceRosterApiService
   ) {}
 
   getCompanyPageData(): Observable<CompanyPageData> {
@@ -948,82 +954,9 @@ export class OperationsAdminService {
 
   getWorkforceRosterData(): Observable<WorkforceRosterPageData> {
     return this.ensureScopedContext().pipe(
-      switchMap((context) =>
-        forkJoin({
-          membersResult: this.getActiveMembers(context).pipe(
-            map((rows) => ({ rows, failed: false })),
-            catchError(() => of({ rows: [] as WorkforceMemberRecord[], failed: true }))
-          ),
-          invitesResult: this.getPendingInvites(context).pipe(
-            map((rows) => ({ rows, failed: false, permissionDenied: false })),
-            catchError((error) =>
-              of({
-                rows: [] as RequestInviteRecord[],
-                failed: true,
-                permissionDenied: this.isRelationPermissionError(error)
-              })
-            )
-          ),
-          acceptedInvitesResult: this.getAcceptedInvitesForMembers(context).pipe(
-            map((rows) => ({ rows, failed: false })),
-            catchError(() => of({ rows: [] as RequestInviteRecord[], failed: true }))
-          ),
-          scanRequestsResult: this.getScanRequestsForMembers(context).pipe(
-            map((rows) => ({ rows, failed: false })),
-            catchError(() => of({ rows: [] as ScanRequestRecord[], failed: true }))
-          ),
-          todaysScansResult: this.getTodaysScans(context).pipe(
-            map((rows) => ({ rows, failed: false })),
-            catchError(() => of({ rows: [] as WellnessScanRecord[], failed: true }))
-          ),
-          departmentsResult: this.getActiveDepartmentsForWorkforce(context).pipe(
-            map((rows) => ({ rows, failed: false })),
-            catchError(() => of({ rows: [] as DepartmentOption[], failed: true }))
-          )
-        }).pipe(
-          switchMap(({ membersResult, invitesResult, acceptedInvitesResult, scanRequestsResult, todaysScansResult, departmentsResult }) => {
-            const warningParts: string[] = [];
-            if (membersResult.failed) warningParts.push('member records');
-            if (invitesResult.failed) {
-              warningParts.push(
-                invitesResult.permissionDenied
-                  ? 'Pending invites could not be loaded. Check request_invites read permission.'
-                  : 'pending invites'
-              );
-            }
-            if (acceptedInvitesResult.failed) warningParts.push('accepted invite mappings');
-            if (scanRequestsResult.failed) warningParts.push('Scan request status could not be loaded. Check requests read permission.');
-            if (todaysScansResult.failed) warningParts.push("today's scans");
-            if (departmentsResult.failed) warningParts.push('departments');
-            const relationWarning =
-              membersResult.failed
-                ? 'Workforce data access is not configured for this role.'
-                : warningParts.length
-                  ? warningParts.join(' ')
-                  : null;
-            const userIds = context.activeRole === 'manager'
-              ? []
-              : this.uniqueIds([
-                  ...membersResult.rows.map((row) => this.normalizeId(row.user)),
-                  ...invitesResult.rows.map((row) => this.normalizeId(row.requested_by_user)),
-                  ...acceptedInvitesResult.rows.map((row) => this.normalizeId(row.requested_by_user))
-                ]);
-
-            return this.loadUsersByIds(context.token, userIds).pipe(
-              map((usersById) =>
-                this.buildWorkforceRosterData(
-                  membersResult.rows,
-                  invitesResult.rows,
-                  acceptedInvitesResult.rows,
-                  scanRequestsResult.rows,
-                  todaysScansResult.rows,
-                  departmentsResult.rows,
-                  usersById,
-                  relationWarning
-                )
-              )
-            );
-          })
+      switchMap(() =>
+        this.workforceRosterApi.getWorkforceRoster().pipe(
+          map((payload) => this.buildWorkforceRosterDataFromRosterPayload(payload))
         )
       )
     );
@@ -1547,67 +1480,8 @@ export class OperationsAdminService {
       return throwError(() => new Error('Scoped data unavailable: manager account has no active department context.'));
     }
 
-    const filters = this.scopeFilters(context, ['business_profile'], ['department']);
-
-    const expandedFields = [
-      'id',
-      'business_profile',
-      'department',
-      'requested_by_user',
-      'target_member',
-      'completed_scan',
-      'status',
-      'cancelled',
-      'request_type',
-      'requested_at',
-      'due_at',
-      'completed_at'
-    ];
-    const fallbackFields = [
-      'id',
-      'department',
-      'status',
-      'request_type',
-      'requested_at',
-      'due_at'
-    ];
-
-    if (context.activeRole === 'manager') {
-      return this.queryItemsStrict<ScanRequestRecord>(
-        'scan_requests',
-        fallbackFields,
-        context.token,
-        {
-          filters,
-          sort: '-requested_at',
-          limit: 800
-        }
-      ).pipe(map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))));
-    }
-
-    return this.queryItemsStrict<ScanRequestRecord>(
-      'scan_requests',
-      expandedFields,
-      context.token,
-      {
-        filters,
-        sort: '-requested_at',
-        limit: 800
-      }
-    ).pipe(
-      map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))),
-      catchError(() =>
-        this.queryItemsStrict<ScanRequestRecord>(
-          'scan_requests',
-          fallbackFields,
-          context.token,
-          {
-            filters,
-            sort: '-requested_at',
-            limit: 800
-          }
-        ).pipe(map((rows) => rows.map((row) => this.normalizeScanRequestRecord(row))))
-      )
+    return this.workforceRosterApi.getWorkforceRoster().pipe(
+      map((payload) => (payload.scan_requests?.rows ?? []) as unknown as ScanRequestRecord[])
     );
   }
 
@@ -1702,6 +1576,136 @@ export class OperationsAdminService {
           .filter((row) => row.id)
       )
     );
+  }
+
+  private buildWorkforceRosterDataFromRosterPayload(payload: WorkforceRosterPayload): WorkforceRosterPageData {
+    const rows = (payload.rows ?? []).map((row) => this.mapRosterApiRow(row));
+    const memberRows = rows.filter((row) => row.type === 'member');
+    const inviteRows = rows.filter((row) => row.type === 'invite');
+    const scanRequestRows = (payload.scan_requests?.rows ?? []).map((row) => this.mapRosterQueueRow(row));
+    const departments = (payload.departments ?? []).map((department) => ({
+      id: department.id,
+      name: department.name
+    }));
+    const roles = Array.from(new Set(rows.map((row) => row.member_role).filter(Boolean))).sort();
+    const statuses = Array.from(new Set(rows.map((row) => row.status).filter(Boolean))).sort();
+    const summary = {
+      activeMembers: payload.summary.verified_members,
+      scanEligible: payload.summary.eligible_scan_targets,
+      scanRequested: payload.summary.open_scan_requests,
+      scannedToday: scanRequestRows.filter((row) => row.status === 'completed').length,
+      missingScans: rows.filter((row) => row.type === 'member' && row.state === 'verified_member' && row.scan_status === 'missing').length,
+      pendingInvites: payload.summary.pending_invitations,
+      ownerCount: rows.filter((row) => row.type === 'member' && row.state === 'verified_member' && row.member_role === 'owner').length,
+      hrCount: rows.filter((row) => row.type === 'member' && row.state === 'verified_member' && row.member_role === 'hr').length,
+      managerCount: rows.filter((row) => row.type === 'member' && row.state === 'verified_member' && row.member_role === 'manager').length,
+      employeeCount: rows.filter((row) => row.type === 'member' && row.state === 'verified_member' && row.member_role === 'employee').length,
+      needsReviewCount: rows.filter((row) => row.state === 'repair_required').length
+    };
+
+    return {
+      rows,
+      memberRows,
+      inviteRows,
+      scanRequestRows,
+      departments,
+      roles,
+      statuses,
+      summary,
+      relationWarning: payload.summary.repair_required > 0 ? 'One or more workforce records need identity repair.' : null
+    };
+  }
+
+  private mapRosterApiRow(row: WorkforceRosterPayload['rows'][number]): WorkforceRosterRow {
+    const displayName = row.display_name || (row.state === 'pending_invitation' ? 'Invitation pending' : 'Data repair required');
+    const email = row.email ?? row.invited_email ?? null;
+    const hasApprovedDisplayName = row.state === 'verified_member';
+    const identityIssue = row.reason ?? (row.state === 'repair_required' ? 'Data repair required' : null);
+    const identity: WorkforceIdentity = {
+      displayName,
+      email,
+      hasApprovedDisplayName,
+      dataQualityIssue: identityIssue
+    };
+
+    return {
+      type: row.type,
+      key: row.id,
+      state: row.state,
+      member_id: row.member_id,
+      invite_id: row.invite_id,
+      user_id: row.user_id,
+      identity,
+      identity_state:
+        row.state === 'verified_member'
+          ? 'identified'
+          : row.state === 'pending_invitation'
+            ? 'pending_onboarding'
+            : 'identity_unavailable',
+      name: displayName,
+      display_name: displayName,
+      email,
+      member_role: row.member_role ?? 'employee',
+      department_id: row.department_id,
+      department_name: row.department_name,
+      status: row.status ?? 'active',
+      joined_at: row.joined_at,
+      expires_at: row.expires_at,
+      scan_status: (row.scan_status as WorkforceScanStatus) ?? 'not_applicable',
+      todays_scan: row.todays_scan,
+      readiness_label: (row.readiness_label as WorkforceRosterRow['readiness_label']) ?? 'No scan',
+      last_scan_at: row.last_scan_at,
+      last_readiness_score: row.last_readiness_score,
+      last_risk_level: row.last_risk_level,
+      last_seen_at: null,
+      last_active_at: null,
+      presence_status: (row.presence_status as WorkforcePresenceStatus) ?? 'never',
+      presence_label: row.presence_label ?? 'Never active',
+      is_profile_incomplete: row.state === 'repair_required',
+      invited_by_name: null,
+      invite_phone: null,
+      needs_review_reason: row.reason ?? null,
+      reason: row.reason ?? null,
+      linked_invite_email: row.invited_email ?? null,
+      linked_invite_status: row.state === 'pending_invitation' ? row.status : null,
+      linked_invite_requested_by: null,
+      business_profile_id: null,
+      business_profile_name: row.business_profile_name ?? null,
+      is_targetable: row.is_targetable
+    };
+  }
+
+  private mapRosterQueueRow(row: WorkforceRosterQueueRow): WorkforceScanRequestRow {
+    const targetUser = row.target_member.user;
+    const targetIdentity = formatWorkforceIdentity(
+      {
+        id: row.target_member.id,
+        first_name: targetUser?.first_name ?? null,
+        last_name: targetUser?.last_name ?? null
+      },
+      targetUser?.email ?? null,
+      row.target_member.id
+    );
+
+    return {
+      id: row.id,
+      status: row.status,
+      request_type: row.request_type,
+      requested_at: row.requested_at,
+      due_at: row.due_at,
+      completed_at: row.completed_at,
+      cancelled: Boolean(row.cancelled),
+      department_id: row.department?.id ?? null,
+      department_name: row.department?.name ?? null,
+      target_member_id: row.target_member.id || null,
+      target_identity: targetIdentity,
+      target_member_name: targetIdentity.displayName,
+      target_user_id: targetUser?.id ?? null,
+      target_user_email: targetUser?.email ?? null,
+      requested_by_user_id: row.requested_by_user?.id || null,
+      requested_by_name: formatUserName(row.requested_by_user, '') || 'Requester',
+      cancelled_note: row.cancelled
+    };
   }
 
   private buildWorkforceRosterData(
@@ -2051,7 +2055,7 @@ export class OperationsAdminService {
     const statuses = Array.from(new Set(rows.map((row) => row.status).filter(Boolean))).sort();
       const activeMemberRows = memberRows.filter((row) => this.normalizeText(row.status) === 'active');
       const activeMembers = activeMemberRows.length;
-      const scanEligible = activeMemberRows.filter((row) => row.member_role === 'employee').length;
+      const scanEligible = activeMemberRows.filter((row) => ['employee', 'manager', 'hr'].includes(row.member_role)).length;
       const scanRequested = activeMemberRows.filter((row) => row.scan_status === 'requested').length;
       const scannedToday = activeMemberRows.filter((row) => row.scan_status === 'completed').length;
       const missingScans = activeMemberRows.filter((row) => row.scan_status === 'missing').length;
@@ -2408,7 +2412,7 @@ export class OperationsAdminService {
     ).sort();
 
     const activeMembers = rows.filter((row) => row.status === 'active').length;
-    const scanEligible = rows.filter((row) => row.status === 'active' && row.member_role === 'employee').length;
+      const scanEligible = rows.filter((row) => row.status === 'active' && ['employee', 'manager', 'hr'].includes(row.member_role)).length;
     const scanRequested = 0;
     const scannedToday = rows.filter((row) => row.todays_scan).length;
     const missingScans = rows.filter((row) => row.status === 'active' && !row.todays_scan).length;
@@ -2750,7 +2754,7 @@ export class OperationsAdminService {
   private isScanEligibleMember(status: string | null | undefined, role: string | null | undefined): boolean {
     const normalizedStatus = this.normalizeText(status);
     const normalizedRole = this.normalizeMemberRole(role);
-    return normalizedStatus === 'active' && normalizedRole === 'employee';
+    return normalizedStatus === 'active' && ['employee', 'manager', 'hr'].includes(normalizedRole);
   }
 
   private isManagerRole(role: string | null | undefined): boolean {
