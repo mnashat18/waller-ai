@@ -898,7 +898,7 @@ async function loadWorkforceRoster(trx, workspaceId, role, departmentId = null, 
   const canViewEmail = normalizedRole === 'owner' || normalizedRole === 'hr';
   const canViewInvites = normalizedRole === 'owner' || normalizedRole === 'hr';
 
-  const [memberRows, inviteRows, departments, scanRequests] = await Promise.all([
+  const [memberRows, inviteRows, departments, scanRequestRows] = await Promise.all([
     loadOrganizationMembers(trx, workspaceId),
     canViewInvites ? loadOrganizationInvites(trx, workspaceId) : Promise.resolve([]),
     loadOrganizationDepartments(trx, workspaceId),
@@ -910,8 +910,13 @@ async function loadWorkforceRoster(trx, workspaceId, role, departmentId = null, 
         : normalizedRole === 'employee'
           ? { userId }
           : {}
-    )
+      )
   ]);
+
+  const scanRequests = {
+    rows: scanRequestRows ?? [],
+    summary: summarizeScanRequests(scanRequestRows ?? [])
+  };
 
   const normalizedMembers = (memberRows ?? []).map((row) => publicWorkforceMember(row, { canViewEmail }));
   const normalizedInvites = (inviteRows ?? []).map((row) => publicWorkforceInvite(row, { canViewEmail }));
