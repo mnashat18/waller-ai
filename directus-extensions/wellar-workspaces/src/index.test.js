@@ -273,6 +273,8 @@ async function testCreatesScanRequestWithCanonicalInsertPayload() {
   assert.equal(state.insertPayloads[0].target_member, state.targetMember.id);
   assert.equal('due_at' in state.insertPayloads[0], false);
   assert.equal('completed_scan' in state.insertPayloads[0], false);
+  assert.equal(state.activityEvents.length, 1);
+  assert.match(state.activityEvents[0].id, UUID_V4_RX);
 }
 
 async function testRejectsInvalidTargetMemberAsBadRequest() {

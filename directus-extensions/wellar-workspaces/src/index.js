@@ -1634,6 +1634,7 @@ export default {
           }
 
           await trx('activity_events').insert({
+            id: randomUUID(),
             actor: userId,
             target_user: userId,
             action: 'scan_request_created',
