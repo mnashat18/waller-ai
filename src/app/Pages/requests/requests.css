@@ -2,6 +2,18 @@
   --scan-requests-border: rgba(148, 163, 184, 0.24);
   --scan-requests-panel: rgba(9, 14, 28, 0.9);
   container-type: inline-size;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+}
+
+.scan-requests-page > *,
+.scan-requests-page app-page-header,
+.scan-requests-page app-dashboard-section,
+.scan-requests-page app-filter-bar-shell {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
 }
 
 .scan-requests-feedback {
@@ -35,6 +47,9 @@
   gap: 1rem;
   align-items: stretch;
   grid-template-columns: minmax(0, 1fr);
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
 }
 
 .scan-requests-summary-grid .app-kpi-card {

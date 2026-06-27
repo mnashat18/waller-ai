@@ -5069,14 +5069,23 @@ body::selection {
   }
 
   .app-shell .app-sidebar {
-    position: sticky !important;
+    position: relative !important;
     inset: auto !important;
-    top: 0 !important;
+    top: auto !important;
     width: var(--sidebar-width) !important;
     min-width: var(--sidebar-width) !important;
     max-width: var(--sidebar-width) !important;
-    height: 100vh !important;
-    align-self: start !important;
+    height: auto !important;
+    block-size: auto !important;
+    min-block-size: 100% !important;
+    align-self: stretch !important;
+  }
+
+  .app-shell .app-sidebar__panel {
+    height: auto !important;
+    block-size: auto !important;
+    min-height: 100% !important;
+    min-block-size: 100% !important;
   }
 
   .app-shell .app-main {
