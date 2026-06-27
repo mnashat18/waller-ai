@@ -20,6 +20,7 @@ import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
 import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 type ComplianceViewState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorkspace' | 'scopeUnavailable';
 type FeedbackMessage = {
@@ -41,7 +42,8 @@ type FeedbackMessage = {
     KpiCardComponent,
     TableShellComponent,
     CardSkeletonLoaderComponent,
-    TableSkeletonLoaderComponent
+    TableSkeletonLoaderComponent,
+    ViewportDialogComponent
   ],
   templateUrl: './compliance.html',
   styleUrls: ['./compliance.css']
@@ -79,7 +81,6 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
     if (this.feedbackTimer) {
       clearTimeout(this.feedbackTimer);
     }
-    this.setBodyScrollLocked(false);
   }
 
   @HostListener('document:keydown.escape')
@@ -245,12 +246,10 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
 
   openExceptionDetails(row: ComplianceExceptionRow): void {
     this.selectedException = row;
-    this.setBodyScrollLocked(true);
   }
 
   closeExceptionDetails(): void {
     this.selectedException = null;
-    this.setBodyScrollLocked(false);
   }
 
   hasActiveFilters(): boolean {
@@ -432,13 +431,6 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
       return this.normalizeId((value as Record<string, unknown>)['id']);
     }
     return null;
-  }
-
-  private setBodyScrollLocked(locked: boolean): void {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    document.body.style.overflow = locked ? 'hidden' : '';
   }
 
   private hasManagerOperationalReason(row: ComplianceExceptionRow): boolean {

@@ -105,9 +105,13 @@
     </app-dashboard-section>
   </ng-container>
 
-  <aside *ngIf="selectedEvent as row" class="activity-drawer" role="dialog" aria-modal="true" aria-label="Activity detail">
-    <div class="activity-drawer__scrim" (click)="closeDrawer()"></div>
-    <section class="activity-drawer__panel app-dashboard-panel">
+  <app-viewport-dialog
+    *ngIf="selectedEvent as row"
+    [panelClass]="'app-dashboard-panel activity-drawer__panel'"
+    [lockScroll]="true"
+    ariaLabel="Activity detail"
+    (backdropClick)="closeDrawer()">
+    <section class="activity-drawer__panel-content">
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="dashboard-eyebrow">Event Detail</p>
@@ -129,5 +133,5 @@
         <p class="mt-2 text-sm leading-6 text-slate-300">{{ eventSummary(row) }}</p>
       </div>
     </section>
-  </aside>
+  </app-viewport-dialog>
 </div>

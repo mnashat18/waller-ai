@@ -78,10 +78,10 @@ describe('Authlanding', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    const modal = fixture.nativeElement.querySelector('app-viewport-dialog');
+    const modal = document.body.querySelector('app-viewport-dialog');
     expect(component.showAuthModal).toBe(true);
     expect(modal).toBeTruthy();
-    expect(modal.textContent).toContain('Welcome back');
+    expect(modal?.textContent).toContain('Welcome back');
   });
 
   it('opens the signup modal when the auth query param is present', async () => {
@@ -91,9 +91,9 @@ describe('Authlanding', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    const modal = fixture.nativeElement.querySelector('app-viewport-dialog');
+    const modal = document.body.querySelector('app-viewport-dialog');
     expect(component.showAuthModal).toBe(true);
     expect(modal).toBeTruthy();
-    expect(modal.textContent).toContain('Start your organization');
+    expect(modal?.textContent).toContain('Start your organization');
   });
 });

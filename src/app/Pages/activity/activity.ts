@@ -15,6 +15,7 @@ import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.com
 import { CompanyContextChipComponent } from '../../shared/ui/company-context-chip/company-context-chip.component';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 type ActivityFilters = {
   actor: string;
@@ -42,7 +43,8 @@ type ActivityFilters = {
     CardSkeletonLoaderComponent,
     TableSkeletonLoaderComponent,
     EmptyStateCtaComponent,
-    ErrorStateComponent
+    ErrorStateComponent,
+    ViewportDialogComponent
   ],
   templateUrl: './activity.html'
 })

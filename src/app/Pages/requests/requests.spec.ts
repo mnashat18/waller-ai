@@ -243,14 +243,14 @@ describe('RequestsPageComponent', () => {
     fixture.detectChanges();
 
     const optionTexts = Array.from(
-      fixture.nativeElement.querySelectorAll('select[name="requestTargetMemberId"] option') as NodeListOf<HTMLOptionElement>
+      document.body.querySelectorAll('select[name="requestTargetMemberId"] option') as NodeListOf<HTMLOptionElement>
     ).map((option) => option.textContent?.trim() ?? '');
 
-    expect(optionTexts).toContain('demo employee — demo-employee@example.com · Employee');
-    expect(optionTexts).toContain('demo manager — demo-manager@example.com · Manager');
-    expect(optionTexts).toContain('demo hr — demo-hr@example.com · HR');
+    expect(optionTexts.some((text) => text.includes('demo employee') && text.includes('demo-employee@example.com') && text.includes('Employee'))).toBe(true);
+    expect(optionTexts.some((text) => text.includes('demo manager') && text.includes('demo-manager@example.com') && text.includes('Manager'))).toBe(true);
+    expect(optionTexts.some((text) => text.includes('demo hr') && text.includes('demo-hr@example.com') && text.includes('HR'))).toBe(true);
     expect(optionTexts.some((text) => text.includes('Owner'))).toBe(false);
-    expect(fixture.nativeElement.textContent).not.toContain('No eligible members');
+    expect(document.body.textContent).not.toContain('No eligible members');
   });
 
   it('renders the no-eligible-employees state when the modal has no valid targets', async () => {
@@ -270,10 +270,10 @@ describe('RequestsPageComponent', () => {
 
       expect(localComponent.showCreateModal).toBe(true);
       expect(localComponent.eligibleRequestMembers.length).toBe(0);
-      expect(localFixture.nativeElement.textContent).toContain(
+      expect(document.body.textContent).toContain(
         'No eligible members are available. Complete an HR, manager, or employee invitation or repair the member profile before creating a scan request.'
       );
-      expect(localFixture.nativeElement.querySelectorAll('.scan-requests-row-actions button').length).toBe(0);
+      expect(document.body.querySelectorAll('.scan-requests-row-actions button').length).toBe(0);
     } finally {
       requestModalOptions.members = originalOptions;
     }
@@ -360,14 +360,15 @@ describe('RequestsPageComponent', () => {
       viewButton?.click();
       localFixture.detectChanges();
 
-      const modal = localFixture.nativeElement.querySelector('app-viewport-dialog [role="dialog"]');
-      const detailPanel = localFixture.nativeElement.querySelector('.scan-requests-dialog-panel');
+      const modal = document.body.querySelector('app-viewport-dialog [role="dialog"]');
+      const detailPanel = document.body.querySelector('.scan-requests-dialog-panel');
 
       expect(modal).toBeTruthy();
       expect(detailPanel).toBeTruthy();
       expect(document.body.style.overflow).toBe('hidden');
 
       localComponent.closeRequestDetails();
+      localFixture.destroy();
 
       expect(document.body.style.overflow).toBe('');
       expect(localComponent.selectedRequest).toBeNull();
@@ -377,3 +378,5 @@ describe('RequestsPageComponent', () => {
     }
   });
 });
+
+

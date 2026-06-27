@@ -427,6 +427,7 @@
   <app-viewport-dialog
     *ngIf="selectedMember as member"
     [panelClass]="'app-dashboard-panel roster-dialog-panel'"
+    [lockScroll]="true"
     ariaLabel="Member Details"
     (backdropClick)="closeMemberDrawer()">
     <div>
@@ -495,6 +496,7 @@
   <app-viewport-dialog
     *ngIf="showInviteModal"
     [panelClass]="'app-dashboard-panel roster-dialog-panel'"
+    [lockScroll]="true"
     labelledBy="members-invite-title"
     (backdropClick)="closeInviteModal()">
     <div>
@@ -571,6 +573,7 @@
   <app-viewport-dialog
     *ngIf="showEditModal"
     [panelClass]="'app-dashboard-panel roster-dialog-panel'"
+    [lockScroll]="true"
     labelledBy="members-edit-title"
     (backdropClick)="closeEditModal()">
     <div>

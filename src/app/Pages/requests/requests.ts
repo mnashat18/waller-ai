@@ -148,7 +148,6 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.setBodyScrollLocked(false);
     if (this.feedbackTimer) {
       clearTimeout(this.feedbackTimer);
     }
@@ -290,12 +289,10 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
 
   openRequest(row: QueueRow): void {
     this.selectedRequest = row;
-    this.setBodyScrollLocked(true);
   }
 
   closeRequestDetails(): void {
     this.selectedRequest = null;
-    this.setBodyScrollLocked(false);
   }
 
   trackByRequest(index: number, row: QueueRow): string {
@@ -491,12 +488,10 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     const selectedRequestId = this.selectedRequest?.source.id;
     if (!selectedRequestId) {
       this.selectedRequest = null;
-      this.setBodyScrollLocked(false);
       return;
     }
 
     this.selectedRequest = this.rows.find((row) => row.source.id === selectedRequestId) ?? null;
-    this.setBodyScrollLocked(Boolean(this.selectedRequest));
   }
 
   private resolveStatus(row: RequestRow): QueueStatus {
@@ -688,10 +683,4 @@ export class RequestsPageComponent implements OnInit, OnDestroy {
     }, 3500);
   }
 
-  private setBodyScrollLocked(locked: boolean): void {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    document.body.style.overflow = locked ? 'hidden' : '';
-  }
 }

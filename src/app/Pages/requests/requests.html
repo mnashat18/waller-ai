@@ -199,6 +199,7 @@
   <app-viewport-dialog
     *ngIf="selectedRequest as row"
     [panelClass]="'app-dashboard-panel scan-requests-dialog-panel'"
+    [lockScroll]="true"
     labelledBy="scan-request-detail-title"
     (backdropClick)="closeRequestDetails()">
     <div>
@@ -232,6 +233,7 @@
   <app-viewport-dialog
     *ngIf="showCreateModal"
     [panelClass]="'app-dashboard-panel scan-requests-dialog-panel'"
+    [lockScroll]="true"
     labelledBy="scan-request-create-title"
     (backdropClick)="closeCreateRequestModal()">
     <form (ngSubmit)="submitCreateRequest()">

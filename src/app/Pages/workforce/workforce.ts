@@ -172,7 +172,6 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.setBodyScrollLocked(false);
   }
 
   @HostListener('document:keydown.escape')
@@ -516,7 +515,6 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
 
     this.selectedMember = row;
     this.showDetailsModal = true;
-    this.setBodyScrollLocked(true);
     this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     queueMicrotask(() => this.detailsCloseButton?.nativeElement.focus());
   }
@@ -524,7 +522,6 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
   closeMemberView(): void {
     this.selectedMember = null;
     this.showDetailsModal = false;
-    this.setBodyScrollLocked(false);
     queueMicrotask(() => this.previouslyFocusedElement?.focus());
     this.previouslyFocusedElement = null;
   }
@@ -1472,10 +1469,4 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
     return [statusPart, reasonPart].filter(Boolean).join(' - ');
   }
 
-  private setBodyScrollLocked(locked: boolean): void {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    document.body.style.overflow = locked ? 'hidden' : '';
-  }
 }

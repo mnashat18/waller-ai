@@ -216,24 +216,9 @@
   color: rgb(203 213 225);
 }
 
-.compliance-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-}
-
-.compliance-modal__scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(2, 6, 23, 0.72);
-  backdrop-filter: blur(3px);
-}
-
-.compliance-modal__panel {
-  position: relative;
-  width: min(42rem, calc(100% - 1.5rem));
-  max-height: calc(100vh - 3rem);
-  margin: min(6vh, 3rem) auto;
+.compliance-member-modal {
+  inline-size: min(42rem, 100%);
+  max-block-size: calc(100dvh - 2rem);
   border: 1px solid rgba(148, 163, 184, 0.24);
   overflow: auto;
   overscroll-behavior: contain;
@@ -296,11 +281,6 @@
   .compliance-table th,
   .compliance-table td {
     padding: 0.75rem;
-  }
-
-  .compliance-modal__panel {
-    margin-top: 4vh;
-    margin-bottom: 4vh;
   }
 
   .compliance-modal__fact {

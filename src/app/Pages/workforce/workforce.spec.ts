@@ -162,10 +162,11 @@ describe('WorkforcePageComponent', () => {
     const table = fixture.nativeElement.querySelector('.workforce-table') as HTMLElement | null;
     const scroller = fixture.nativeElement.querySelector('.app-table-shell__scroller') as HTMLElement | null;
 
-    expect(getComputedStyle(host).overflowX).toBe('clip');
+    expect(getComputedStyle(host).overflowX).not.toBe('clip');
     expect(table).toBeTruthy();
     expect(table?.className).toContain('w-full');
     expect(scroller).toBeTruthy();
+    expect(scroller?.className).toContain('overflow-x-auto');
   });
 
   it('allows verified hr, manager, and employee members to be scan-request targets while excluding owners', () => {

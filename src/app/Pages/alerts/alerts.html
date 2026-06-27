@@ -231,10 +231,12 @@
 </div>
 
 @if (selectedAlert; as row) {
-  <div class="alerts-drawer" role="dialog" aria-modal="true" aria-label="Alert details">
-    <div class="alerts-drawer__backdrop" (click)="closeAlertDetails()"></div>
-
-    <aside class="alerts-drawer__panel app-dashboard-panel">
+  <app-viewport-dialog
+    [panelClass]="'app-dashboard-panel alerts-drawer__panel'"
+    [lockScroll]="true"
+    ariaLabel="Alert details"
+    (backdropClick)="closeAlertDetails()">
+    <aside class="alerts-drawer__panel-content">
       <header class="alerts-drawer__header">
         <div>
           <p class="dashboard-eyebrow">Alert Detail</p>
@@ -271,5 +273,5 @@
         <button type="button" class="alerts-row-action alerts-row-action--primary" (click)="closeAlertDetails()">Close</button>
       </footer>
     </aside>
-  </div>
+  </app-viewport-dialog>
 }

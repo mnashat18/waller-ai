@@ -162,6 +162,7 @@
   <app-viewport-dialog
     *ngIf="showCreateModal"
     [panelClass]="'rounded-[2rem] bg-white px-6 py-6 shadow-2xl text-slate-950'"
+    [lockScroll]="true"
     labelledBy="department-create-title"
     (backdropClick)="closeModal()">
     <div>
@@ -217,6 +218,7 @@
   <app-viewport-dialog
     *ngIf="showEditModal"
     [panelClass]="'rounded-[2rem] bg-white px-6 py-6 shadow-2xl text-slate-950'"
+    [lockScroll]="true"
     labelledBy="department-edit-title"
     (backdropClick)="closeModal()">
     <div>
@@ -272,6 +274,7 @@
   <app-viewport-dialog
     *ngIf="showManagerModal"
     [panelClass]="'rounded-[2rem] bg-white px-6 py-6 shadow-2xl text-slate-950'"
+    [lockScroll]="true"
     labelledBy="department-manager-title"
     (backdropClick)="closeModal()">
     <div>

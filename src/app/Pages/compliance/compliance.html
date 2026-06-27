@@ -315,10 +315,12 @@
 </div>
 
 @if (selectedException; as row) {
-  <div class="compliance-modal">
-    <div class="compliance-modal__scrim" (click)="closeExceptionDetails()"></div>
-
-    <div class="compliance-modal__panel app-dashboard-panel compliance-member-modal">
+  <app-viewport-dialog
+    [panelClass]="'app-dashboard-panel compliance-member-modal'"
+    [lockScroll]="true"
+    ariaLabel="Compliance exception details"
+    (backdropClick)="closeExceptionDetails()">
+    <div>
       <div class="compliance-modal__header">
         <div>
           <p class="dashboard-eyebrow">Exception Detail</p>
@@ -351,5 +353,5 @@
         <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="closeExceptionDetails()">Close</button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 }

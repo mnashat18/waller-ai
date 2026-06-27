@@ -257,6 +257,7 @@
   <app-viewport-dialog
     *ngIf="showDetailsModal && selectedMember"
     [panelClass]="'app-dashboard-panel workforce-dialog-panel'"
+    [lockScroll]="true"
     labelledBy="workforce-detail-title"
     (backdropClick)="closeMemberView()">
     <div
@@ -316,6 +317,7 @@
   <app-viewport-dialog
     *ngIf="showInviteModal && canShowInvitations"
     [panelClass]="'app-dashboard-panel workforce-dialog-panel'"
+    [lockScroll]="true"
     labelledBy="workforce-invite-title"
     (backdropClick)="closeInviteModal()">
     <div>
@@ -382,6 +384,7 @@
   <app-viewport-dialog
     *ngIf="showRoleModal"
     [panelClass]="'app-dashboard-panel workforce-dialog-panel workforce-dialog-panel--compact'"
+    [lockScroll]="true"
     ariaLabel="Edit Role"
     (backdropClick)="closeRoleModal()">
     <div>
@@ -405,6 +408,7 @@
   <app-viewport-dialog
     *ngIf="showDepartmentModal"
     [panelClass]="'app-dashboard-panel workforce-dialog-panel workforce-dialog-panel--compact'"
+    [lockScroll]="true"
     ariaLabel="Change Department"
     (backdropClick)="closeDepartmentModal()">
     <div>
@@ -429,6 +433,7 @@
   <app-viewport-dialog
     *ngIf="showDestructiveModal && destructiveAction"
     [panelClass]="'app-dashboard-panel workforce-dialog-panel workforce-dialog-panel--compact'"
+    [lockScroll]="true"
     [ariaLabel]="destructiveAction.title"
     (backdropClick)="closeDestructiveModal()">
     <div>

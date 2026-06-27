@@ -1,5 +1,87 @@
-import { CommonModule, NgClass } from '@angular/common';
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { DOCUMENT, CommonModule, NgClass } from '@angular/common';
+import { AfterViewInit, Component, ElementRef, EventEmitter, Input, OnDestroy, Output, Renderer2, inject } from '@angular/core';
+
+type ScrollLockState = {
+  scrollX: number;
+  scrollY: number;
+  bodyOverflow: string;
+  bodyPosition: string;
+  bodyTop: string;
+  bodyLeft: string;
+  bodyRight: string;
+  bodyWidth: string;
+  bodyPaddingRight: string;
+  htmlOverflow: string;
+};
+
+let activeScrollLocks = 0;
+let savedScrollLockState: ScrollLockState | null = null;
+
+function lockDocumentScroll(doc: Document): void {
+  if (typeof window === 'undefined' || activeScrollLocks > 0) {
+    activeScrollLocks += 1;
+    return;
+  }
+
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const scrollbarWidth = Math.max(0, window.innerWidth - doc.documentElement.clientWidth);
+  const bodyStyle = doc.body.style;
+  const htmlStyle = doc.documentElement.style;
+
+  savedScrollLockState = {
+    scrollX,
+    scrollY,
+    bodyOverflow: bodyStyle.overflow,
+    bodyPosition: bodyStyle.position,
+    bodyTop: bodyStyle.top,
+    bodyLeft: bodyStyle.left,
+    bodyRight: bodyStyle.right,
+    bodyWidth: bodyStyle.width,
+    bodyPaddingRight: bodyStyle.paddingRight,
+    htmlOverflow: htmlStyle.overflow
+  };
+
+  htmlStyle.overflow = 'hidden';
+  bodyStyle.overflow = 'hidden';
+  bodyStyle.position = 'fixed';
+  bodyStyle.top = `-${scrollY}px`;
+  bodyStyle.left = '0';
+  bodyStyle.right = '0';
+  bodyStyle.width = '100%';
+  bodyStyle.paddingRight = scrollbarWidth > 0 ? `${scrollbarWidth}px` : bodyStyle.paddingRight;
+
+  activeScrollLocks = 1;
+}
+
+function unlockDocumentScroll(doc: Document): void {
+  if (activeScrollLocks === 0) {
+    return;
+  }
+
+  activeScrollLocks -= 1;
+  if (activeScrollLocks > 0 || typeof window === 'undefined' || !savedScrollLockState) {
+    return;
+  }
+
+  const state = savedScrollLockState;
+  const bodyStyle = doc.body.style;
+  const htmlStyle = doc.documentElement.style;
+
+  htmlStyle.overflow = state.htmlOverflow;
+  bodyStyle.overflow = state.bodyOverflow;
+  bodyStyle.position = state.bodyPosition;
+  bodyStyle.top = state.bodyTop;
+  bodyStyle.left = state.bodyLeft;
+  bodyStyle.right = state.bodyRight;
+  bodyStyle.width = state.bodyWidth;
+  bodyStyle.paddingRight = state.bodyPaddingRight;
+  if (!/jsdom/i.test(window.navigator.userAgent)) {
+    window.scrollTo(state.scrollX, state.scrollY);
+  }
+
+  savedScrollLockState = null;
+}
 
 @Component({
   selector: 'app-viewport-dialog',
@@ -61,12 +143,40 @@ import { Component, EventEmitter, Input, Output } from '@angular/core';
     }
   `]
 })
-export class ViewportDialogComponent {
+export class ViewportDialogComponent implements AfterViewInit, OnDestroy {
+  private readonly document = inject(DOCUMENT);
+  private readonly elementRef = inject(ElementRef<HTMLElement>);
+  private readonly renderer = inject(Renderer2);
+  private movedHost = false;
+
   @Input() panelClass: string | string[] | Set<string> | Record<string, boolean> = '';
   @Input() backdropClass: string | string[] | Set<string> | Record<string, boolean> = '';
   @Input() labelledBy = '';
   @Input() ariaLabel = '';
   @Input() role = 'dialog';
+  @Input() lockScroll = false;
 
   @Output() readonly backdropClick = new EventEmitter<void>();
+
+  ngAfterViewInit(): void {
+    const host = this.elementRef.nativeElement;
+    if (this.document?.body && host.parentNode !== this.document.body) {
+      this.renderer.appendChild(this.document.body, host);
+      this.movedHost = true;
+    }
+
+    if (this.lockScroll && this.document?.body) {
+      lockDocumentScroll(this.document);
+    }
+  }
+
+  ngOnDestroy(): void {
+    if (this.lockScroll && this.document?.body) {
+      unlockDocumentScroll(this.document);
+    }
+
+    if (this.movedHost) {
+      this.elementRef.nativeElement.remove();
+    }
+  }
 }

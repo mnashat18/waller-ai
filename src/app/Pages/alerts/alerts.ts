@@ -14,6 +14,7 @@ import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
 import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 import { sanitizeDisplayValue } from '../../shared/utils/display-formatters';
 
 type AlertsPageState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorkspace' | 'scopeUnavailable';
@@ -62,7 +63,8 @@ type DistributionRow = {
     KpiCardComponent,
     TableShellComponent,
     CardSkeletonLoaderComponent,
-    TableSkeletonLoaderComponent
+    TableSkeletonLoaderComponent,
+    ViewportDialogComponent
   ],
   templateUrl: './alerts.html',
   styleUrls: ['./alerts.css']
@@ -101,7 +103,6 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.setBodyScrollLocked(false);
   }
 
   @HostListener('document:keydown.escape')
@@ -194,12 +195,10 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   viewAlert(row: AlertViewModel): void {
     this.selectedAlert = row;
-    this.setBodyScrollLocked(true);
   }
 
   closeAlertDetails(): void {
     this.selectedAlert = null;
-    this.setBodyScrollLocked(false);
   }
 
   trackByAlert(index: number, row: AlertViewModel): string {
@@ -416,10 +415,4 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
     return null;
   }
 
-  private setBodyScrollLocked(locked: boolean): void {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    document.body.style.overflow = locked ? 'hidden' : '';
-  }
 }
