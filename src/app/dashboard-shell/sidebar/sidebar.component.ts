@@ -118,6 +118,10 @@ export class SidebarComponent {
     contextDepartmentName: string | null | undefined,
     role: ActiveMemberRole | null
   ): string | null {
+    if (role !== 'manager' && role !== 'employee') {
+      return null;
+    }
+
     const membershipDepartmentName =
       department && typeof department === 'object'
         ? this.sanitizeDepartmentName((department as { name?: unknown }).name)
@@ -125,10 +129,6 @@ export class SidebarComponent {
 
     if (membershipDepartmentName) {
       return membershipDepartmentName;
-    }
-
-    if (role !== 'manager' && role !== 'employee') {
-      return null;
     }
 
     return this.sanitizeDepartmentName(contextDepartmentName);
