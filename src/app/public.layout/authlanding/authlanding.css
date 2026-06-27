@@ -772,9 +772,9 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  inline-size: min(560px, calc(100vw - 2rem));
-  max-inline-size: 100%;
-  max-height: calc(100dvh - 2rem);
+  inline-size: auto;
+  max-inline-size: calc(100vw - 2rem);
+  max-block-size: calc(100dvh - clamp(1.25rem, 5vh, 3rem));
   border-radius: 1.55rem;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background:
@@ -782,7 +782,16 @@
     radial-gradient(440px at 90% 100%, rgba(233, 156, 47, 0.12), transparent 60%),
     linear-gradient(180deg, rgba(7, 11, 22, 0.96), rgba(5, 9, 18, 0.97));
   box-shadow: 0 38px 110px rgba(2, 6, 23, 0.75);
+  overflow: hidden;
   padding: clamp(1.25rem, 2.6vw, 1.7rem);
+}
+
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--login {
+  inline-size: clamp(31rem, 33vw, 34rem);
+}
+
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--signup {
+  inline-size: clamp(34rem, 35vw, 37.5rem);
 }
 
 ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card,
@@ -797,6 +806,7 @@
   flex-direction: column;
   min-inline-size: 0;
   min-block-size: 0;
+  block-size: 100%;
 }
 
 .auth-card__content {
@@ -1244,7 +1254,7 @@
   }
 
   ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card {
-    inline-size: min(94vw, 720px);
+    inline-size: min(94vw, 37.5rem);
     padding: 1.14rem 1rem;
   }
 
@@ -1262,7 +1272,7 @@
 
 @media (max-height: 780px) {
   ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card {
-    max-height: calc(100dvh - 2rem);
+    max-block-size: calc(100dvh - 1.25rem);
   }
 }
 

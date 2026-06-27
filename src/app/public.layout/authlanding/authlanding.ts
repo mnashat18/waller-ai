@@ -139,6 +139,10 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     return this.submitting || this.resolvingOrganizationAccess;
   }
 
+  get authPanelClass(): string[] {
+    return ['auth-card', this.authMode === 'login' ? 'auth-card--login' : 'auth-card--signup'];
+  }
+
   openAuth(mode: 'signup' | 'login' = 'signup') {
     this.authMode = mode;
     this.feedback = '';
