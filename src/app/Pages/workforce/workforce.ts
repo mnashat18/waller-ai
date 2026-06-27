@@ -24,6 +24,7 @@ import { FilterBarShellComponent } from '../../shared/ui/filter-bar-shell/filter
 import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
 import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 type ViewState = 'loading' | 'ready' | 'empty' | 'error';
 type FeedbackType = 'success' | 'error' | 'info';
@@ -74,7 +75,8 @@ type DestructiveAction = {
     KpiCardComponent,
     TableShellComponent,
     ErrorStateComponent,
-    CardSkeletonLoaderComponent
+    CardSkeletonLoaderComponent,
+    ViewportDialogComponent
   ],
   templateUrl: './workforce.html',
   styleUrls: ['./workforce.css']

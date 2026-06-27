@@ -254,12 +254,15 @@
     </ng-container>
   </ng-container>
 
-  <div *ngIf="showDetailsModal && selectedMember" class="workforce-modal workforce-detail-drawer" role="dialog" aria-modal="true" [attr.aria-labelledby]="'workforce-detail-title'">
-    <div class="workforce-modal__scrim" (click)="closeMemberView()"></div>
+  <app-viewport-dialog
+    *ngIf="showDetailsModal && selectedMember"
+    [panelClass]="'app-dashboard-panel workforce-dialog-panel'"
+    labelledBy="workforce-detail-title"
+    (backdropClick)="closeMemberView()">
     <div
       #detailsDrawerPanel
       tabindex="-1"
-      class="workforce-modal__panel workforce-detail-drawer__panel app-dashboard-panel"
+      class="workforce-detail-dialog"
       (keydown.tab)="trapDetailsFocus($event)">
       <div class="flex items-start justify-between gap-4">
         <div>
@@ -308,15 +311,18 @@
       </div>
 
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showInviteModal && canShowInvitations" class="workforce-modal">
-    <div class="workforce-modal__scrim" (click)="closeInviteModal()"></div>
-    <div class="workforce-modal__panel app-dashboard-panel">
+  <app-viewport-dialog
+    *ngIf="showInviteModal && canShowInvitations"
+    [panelClass]="'app-dashboard-panel workforce-dialog-panel'"
+    labelledBy="workforce-invite-title"
+    (backdropClick)="closeInviteModal()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="dashboard-eyebrow">Invite Member</p>
-          <h3 class="mt-2 text-2xl font-semibold text-slate-50">Invite a team member</h3>
+          <h3 id="workforce-invite-title" class="mt-2 text-2xl font-semibold text-slate-50">Invite a team member</h3>
           <p class="mt-2 text-sm text-slate-300">Creates a pending invitation first. Membership is created only after claim.</p>
         </div>
         <button type="button" class="dashboard-action-button" (click)="closeInviteModal()">Close</button>
@@ -371,11 +377,14 @@
         </button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showRoleModal" class="workforce-modal">
-    <div class="workforce-modal__scrim" (click)="closeRoleModal()"></div>
-    <div class="workforce-modal__panel app-dashboard-panel workforce-modal__panel--compact">
+  <app-viewport-dialog
+    *ngIf="showRoleModal"
+    [panelClass]="'app-dashboard-panel workforce-dialog-panel workforce-dialog-panel--compact'"
+    ariaLabel="Edit Role"
+    (backdropClick)="closeRoleModal()">
+    <div>
       <h3 class="text-xl font-semibold text-slate-50">Edit Role</h3>
       <p class="mt-2 text-sm text-slate-300">Update role for {{ roleModalMember ? memberName(roleModalMember) : 'member' }}.</p>
 
@@ -391,11 +400,14 @@
         <button type="button" class="dashboard-action-button dashboard-action-button--primary" [disabled]="savingRole" (click)="saveRole()">{{ savingRole ? 'Saving...' : 'Save Role' }}</button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showDepartmentModal" class="workforce-modal">
-    <div class="workforce-modal__scrim" (click)="closeDepartmentModal()"></div>
-    <div class="workforce-modal__panel app-dashboard-panel workforce-modal__panel--compact">
+  <app-viewport-dialog
+    *ngIf="showDepartmentModal"
+    [panelClass]="'app-dashboard-panel workforce-dialog-panel workforce-dialog-panel--compact'"
+    ariaLabel="Change Department"
+    (backdropClick)="closeDepartmentModal()">
+    <div>
       <h3 class="text-xl font-semibold text-slate-50">Change Department</h3>
       <p class="mt-2 text-sm text-slate-300">Update department for {{ departmentModalMember ? memberName(departmentModalMember) : 'member' }}.</p>
 
@@ -412,11 +424,14 @@
         <button type="button" class="dashboard-action-button dashboard-action-button--primary" [disabled]="savingDepartment" (click)="saveDepartment()">{{ savingDepartment ? 'Saving...' : 'Save Department' }}</button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showDestructiveModal && destructiveAction" class="workforce-modal">
-    <div class="workforce-modal__scrim" (click)="closeDestructiveModal()"></div>
-    <div class="workforce-modal__panel app-dashboard-panel workforce-modal__panel--compact">
+  <app-viewport-dialog
+    *ngIf="showDestructiveModal && destructiveAction"
+    [panelClass]="'app-dashboard-panel workforce-dialog-panel workforce-dialog-panel--compact'"
+    [ariaLabel]="destructiveAction.title"
+    (backdropClick)="closeDestructiveModal()">
+    <div>
       <h3 class="text-xl font-semibold text-slate-50">{{ destructiveAction.title }}</h3>
       <p class="mt-3 text-sm leading-6 text-slate-300">{{ destructiveAction.description }}</p>
 
@@ -431,5 +446,5 @@
         </button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 </div>

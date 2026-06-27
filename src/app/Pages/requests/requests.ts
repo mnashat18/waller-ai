@@ -21,6 +21,7 @@ import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
 import { PageHeaderComponent } from '../../shared/ui/page-header/page-header.component';
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 type PageState = 'loading' | 'ready' | 'error' | 'scopeUnavailable';
 type FeedbackType = 'success' | 'error' | 'info';
@@ -88,7 +89,8 @@ const REQUEST_TYPE_OPTIONS: Array<{ value: RequestType; label: string }> = [
     KpiCardComponent,
     TableShellComponent,
     CardSkeletonLoaderComponent,
-    TableSkeletonLoaderComponent
+    TableSkeletonLoaderComponent,
+    ViewportDialogComponent
   ],
   templateUrl: './requests.html',
   styleUrls: ['./requests.css']

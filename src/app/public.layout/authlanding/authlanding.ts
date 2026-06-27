@@ -7,11 +7,12 @@ import { of, Subscription } from 'rxjs';
 import { catchError, filter, map, switchMap, timeout } from 'rxjs/operators';
 import { InviteService } from '../../services/invites';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 @Component({
   selector: 'app-authlanding',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule],
+  imports: [CommonModule, RouterModule, FormsModule, ViewportDialogComponent],
   templateUrl: './authlanding.html',
   styleUrls: ['./authlanding.css']
 })

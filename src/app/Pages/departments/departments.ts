@@ -18,6 +18,7 @@ import { KpiCardComponent } from '../../shared/ui/kpi-card/kpi-card.component';
 import { PageActionBarComponent } from '../../shared/ui/page-action-bar/page-action-bar.component';
 import { StatusBadgeComponent } from '../../shared/ui/status-badge/status-badge.component';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 type DepartmentForm = {
   name: string;
@@ -37,6 +38,7 @@ type DepartmentForm = {
     KpiCardComponent,
     StatusBadgeComponent,
     CardSkeletonLoaderComponent,
+    ViewportDialogComponent,
     EmptyStateCtaComponent,
     ErrorStateComponent
   ],

@@ -360,8 +360,8 @@ describe('RequestsPageComponent', () => {
       viewButton?.click();
       localFixture.detectChanges();
 
-      const modal = localFixture.nativeElement.querySelector('.scan-requests-modal[role="dialog"]');
-      const detailPanel = localFixture.nativeElement.querySelector('.scan-requests-modal__panel--detail');
+      const modal = localFixture.nativeElement.querySelector('app-viewport-dialog [role="dialog"]');
+      const detailPanel = localFixture.nativeElement.querySelector('.scan-requests-dialog-panel');
 
       expect(modal).toBeTruthy();
       expect(detailPanel).toBeTruthy();

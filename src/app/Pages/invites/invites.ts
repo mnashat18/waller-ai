@@ -21,6 +21,7 @@ import { StatusBadgeComponent } from '../../shared/ui/status-badge/status-badge.
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 type InviteForm = {
   email: string;
@@ -47,6 +48,7 @@ type InviteForm = {
     TableShellComponent,
     CardSkeletonLoaderComponent,
     TableSkeletonLoaderComponent,
+    ViewportDialogComponent,
     EmptyStateCtaComponent,
     ErrorStateComponent
   ],

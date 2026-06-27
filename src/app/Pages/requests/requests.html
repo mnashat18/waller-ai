@@ -196,10 +196,12 @@
     </app-dashboard-section>
   </ng-container>
 
-  <div *ngIf="selectedRequest as row" class="scan-requests-modal" role="dialog" aria-modal="true" aria-labelledby="scan-request-detail-title">
-    <div class="scan-requests-modal__scrim" (click)="closeRequestDetails()"></div>
-
-    <div class="scan-requests-modal__panel scan-requests-modal__panel--detail app-dashboard-panel">
+  <app-viewport-dialog
+    *ngIf="selectedRequest as row"
+    [panelClass]="'app-dashboard-panel scan-requests-dialog-panel'"
+    labelledBy="scan-request-detail-title"
+    (backdropClick)="closeRequestDetails()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="dashboard-eyebrow">Scan Request</p>
@@ -225,12 +227,14 @@
         </span>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showCreateModal" class="scan-requests-modal" role="dialog" aria-modal="true" aria-labelledby="scan-request-create-title">
-    <div class="scan-requests-modal__scrim" (click)="closeCreateRequestModal()"></div>
-
-    <form class="scan-requests-modal__panel app-dashboard-panel scan-requests-modal__panel--create" (ngSubmit)="submitCreateRequest()">
+  <app-viewport-dialog
+    *ngIf="showCreateModal"
+    [panelClass]="'app-dashboard-panel scan-requests-dialog-panel'"
+    labelledBy="scan-request-create-title"
+    (backdropClick)="closeCreateRequestModal()">
+    <form (ngSubmit)="submitCreateRequest()">
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="dashboard-eyebrow">New Request</p>
@@ -298,5 +302,5 @@
         </button>
       </div>
     </form>
-  </div>
+  </app-viewport-dialog>
 </div>

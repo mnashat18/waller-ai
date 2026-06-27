@@ -78,7 +78,7 @@ describe('Authlanding', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    const modal = fixture.nativeElement.querySelector('.auth-modal');
+    const modal = fixture.nativeElement.querySelector('app-viewport-dialog');
     expect(component.showAuthModal).toBe(true);
     expect(modal).toBeTruthy();
     expect(modal.textContent).toContain('Welcome back');
@@ -91,7 +91,7 @@ describe('Authlanding', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    const modal = fixture.nativeElement.querySelector('.auth-modal');
+    const modal = fixture.nativeElement.querySelector('app-viewport-dialog');
     expect(component.showAuthModal).toBe(true);
     expect(modal).toBeTruthy();
     expect(modal.textContent).toContain('Start your organization');

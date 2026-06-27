@@ -159,12 +159,16 @@
     </app-dashboard-section>
   </ng-container>
 
-  <div *ngIf="showCreateModal" class="fixed inset-0 z-40 bg-slate-950/40 px-4 py-10">
-    <div class="mx-auto max-w-2xl rounded-[2rem] bg-white px-6 py-6 shadow-2xl">
+  <app-viewport-dialog
+    *ngIf="showCreateModal"
+    [panelClass]="'rounded-[2rem] bg-white px-6 py-6 shadow-2xl text-slate-950'"
+    labelledBy="department-create-title"
+    (backdropClick)="closeModal()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Create Department</p>
-          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Add Department</h2>
+          <h2 id="department-create-title" class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Add Department</h2>
         </div>
         <button type="button" (click)="closeModal()" class="text-sm font-medium text-slate-500">Close</button>
       </div>
@@ -208,14 +212,18 @@
         </button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showEditModal" class="fixed inset-0 z-40 bg-slate-950/40 px-4 py-10">
-    <div class="mx-auto max-w-2xl rounded-[2rem] bg-white px-6 py-6 shadow-2xl">
+  <app-viewport-dialog
+    *ngIf="showEditModal"
+    [panelClass]="'rounded-[2rem] bg-white px-6 py-6 shadow-2xl text-slate-950'"
+    labelledBy="department-edit-title"
+    (backdropClick)="closeModal()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Edit Department</p>
-          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ selectedDepartment?.name }}</h2>
+          <h2 id="department-edit-title" class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ selectedDepartment?.name }}</h2>
         </div>
         <button type="button" (click)="closeModal()" class="text-sm font-medium text-slate-500">Close</button>
       </div>
@@ -259,14 +267,18 @@
         </button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showManagerModal" class="fixed inset-0 z-40 bg-slate-950/40 px-4 py-10">
-    <div class="mx-auto max-w-xl rounded-[2rem] bg-white px-6 py-6 shadow-2xl">
+  <app-viewport-dialog
+    *ngIf="showManagerModal"
+    [panelClass]="'rounded-[2rem] bg-white px-6 py-6 shadow-2xl text-slate-950'"
+    labelledBy="department-manager-title"
+    (backdropClick)="closeModal()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Assign Manager</p>
-          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ selectedDepartment?.name }}</h2>
+          <h2 id="department-manager-title" class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ selectedDepartment?.name }}</h2>
         </div>
         <button type="button" (click)="closeModal()" class="text-sm font-medium text-slate-500">Close</button>
       </div>
@@ -295,5 +307,5 @@
         </button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 </div>

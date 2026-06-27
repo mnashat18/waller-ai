@@ -22,6 +22,7 @@ import { RoleBadgeComponent } from '../../shared/ui/role-badge/role-badge.compon
 import { StatusBadgeComponent } from '../../shared/ui/status-badge/status-badge.component';
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
 import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.component';
+import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
 type MemberFilters = {
   search: string;
@@ -63,6 +64,7 @@ type InviteMode = 'invite' | 'add';
     RoleBadgeComponent,
     StatusBadgeComponent,
     RiskBadgeComponent,
+    ViewportDialogComponent,
   ],
   templateUrl: './members.html',
   styleUrls: ['./members.css']

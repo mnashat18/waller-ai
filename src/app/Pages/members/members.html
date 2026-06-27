@@ -424,9 +424,12 @@
     </app-dashboard-section>
   </section>
 
-  <aside *ngIf="selectedMember as member" class="roster-drawer">
-    <div class="roster-drawer__scrim" (click)="closeMemberDrawer()"></div>
-    <div class="roster-drawer__panel app-dashboard-panel">
+  <app-viewport-dialog
+    *ngIf="selectedMember as member"
+    [panelClass]="'app-dashboard-panel roster-dialog-panel'"
+    ariaLabel="Member Details"
+    (backdropClick)="closeMemberDrawer()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div class="flex items-start gap-3">
           <div class="roster-avatar roster-avatar--lg">
@@ -487,15 +490,18 @@
         </button>
       </div>
     </div>
-  </aside>
+  </app-viewport-dialog>
 
-  <div *ngIf="showInviteModal" class="roster-modal">
-    <div class="roster-modal__scrim" (click)="closeInviteModal()"></div>
-    <div class="roster-modal__panel app-dashboard-panel">
+  <app-viewport-dialog
+    *ngIf="showInviteModal"
+    [panelClass]="'app-dashboard-panel roster-dialog-panel'"
+    labelledBy="members-invite-title"
+    (backdropClick)="closeInviteModal()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="dashboard-eyebrow">{{ inviteMode === 'add' ? 'Add Member' : 'Invite Members' }}</p>
-          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-50">
+          <h2 id="members-invite-title" class="mt-2 text-2xl font-semibold tracking-tight text-slate-50">
             {{ inviteMode === 'add' ? 'Add a new workspace member' : 'Invite a workspace member' }}
           </h2>
           <p class="mt-2 text-sm text-slate-300">This creates a request_invites record for workforce access.</p>
@@ -560,15 +566,18 @@
         </button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 
-  <div *ngIf="showEditModal" class="roster-modal">
-    <div class="roster-modal__scrim" (click)="closeEditModal()"></div>
-    <div class="roster-modal__panel app-dashboard-panel">
+  <app-viewport-dialog
+    *ngIf="showEditModal"
+    [panelClass]="'app-dashboard-panel roster-dialog-panel'"
+    labelledBy="members-edit-title"
+    (backdropClick)="closeEditModal()">
+    <div>
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="dashboard-eyebrow">Edit Member</p>
-          <h2 class="mt-2 text-2xl font-semibold tracking-tight text-slate-50">{{ editingMember?.name }}</h2>
+          <h2 id="members-edit-title" class="mt-2 text-2xl font-semibold tracking-tight text-slate-50">{{ editingMember?.name }}</h2>
           <p class="mt-2 text-sm text-slate-300">Update role, department, status, and roster metadata.</p>
         </div>
         <button type="button" class="dashboard-action-button" (click)="closeEditModal()">Close</button>
@@ -640,5 +649,5 @@
         </button>
       </div>
     </div>
-  </div>
+  </app-viewport-dialog>
 </div>

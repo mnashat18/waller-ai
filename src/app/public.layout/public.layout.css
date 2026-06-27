@@ -420,7 +420,7 @@
   width: 100%;
 }
 
-.page-slot:has(.auth-modal) {
+.page-slot:has(app-viewport-dialog) {
   z-index: 80;
 }
 
