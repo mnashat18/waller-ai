@@ -766,16 +766,17 @@
   min-width: max-content;
 }
 
-.auth-card {
+:host ::ng-deep app-viewport-dialog .auth-card {
   position: relative;
   z-index: 1;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
-  width: min(100%, 500px);
+  inline-size: min(720px, calc(100vw - 2rem));
+  max-inline-size: 100%;
   max-height: calc(100dvh - 2rem);
   overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  overflow-y: hidden;
   border-radius: 1.55rem;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background:
@@ -786,9 +787,27 @@
   padding: clamp(1.25rem, 2.6vw, 1.7rem);
 }
 
-.auth-card,
-.auth-card * {
+:host ::ng-deep app-viewport-dialog .auth-card,
+:host ::ng-deep app-viewport-dialog .auth-card * {
   box-sizing: border-box;
+}
+
+.auth-card__shell {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+
+.auth-card__content {
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 0.25rem;
 }
 
 .auth-card__glow {
@@ -838,6 +857,7 @@
 .auth-header {
   text-align: center;
   margin-bottom: 1.1rem;
+  padding-right: 2.5rem;
 }
 
 .auth-logo-img {
@@ -868,6 +888,7 @@
   gap: 0.4rem;
   padding: 0.3rem;
   margin-bottom: 1rem;
+  min-width: 0;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(3, 8, 16, 0.62);
@@ -927,6 +948,7 @@
 .auth-field {
   display: grid;
   gap: 0.38rem;
+  min-width: 0;
 }
 
 .auth-field span {
@@ -958,6 +980,7 @@
 
 .auth-password-wrap {
   position: relative;
+  min-width: 0;
 }
 
 .auth-input--password {
@@ -1093,6 +1116,7 @@
   align-items: center;
   gap: 0.7rem;
   margin: 1rem 0 0.9rem;
+  min-width: 0;
   color: rgba(226, 232, 240, 0.5);
   font-size: 0.72rem;
   letter-spacing: 0.17em;
@@ -1108,6 +1132,7 @@
 
 .google-btn {
   width: 100%;
+  min-width: 0;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(4, 10, 19, 0.95);
@@ -1245,8 +1270,8 @@
     padding-left: 0;
   }
 
-  .auth-card {
-    width: min(94vw, 500px);
+  :host ::ng-deep app-viewport-dialog .auth-card {
+    inline-size: min(94vw, 720px);
     padding: 1.14rem 1rem;
   }
 
@@ -1263,9 +1288,8 @@
 }
 
 @media (max-height: 780px) {
-  .auth-card {
-    max-height: calc(100vh - 2rem);
-    overflow-y: auto;
+  :host ::ng-deep app-viewport-dialog .auth-card {
+    max-height: calc(100dvh - 2rem);
   }
 }
 
@@ -1278,7 +1302,7 @@
   .landing-cta,
   .landing-cta::before,
   .ghost-cta,
-  .auth-card,
+  :host ::ng-deep app-viewport-dialog .auth-card,
   .presentation-glow,
   .presentation-window,
   .presentation-rail button,
