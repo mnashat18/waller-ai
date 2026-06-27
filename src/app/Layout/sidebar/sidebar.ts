@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, EventEmitter, OnDestroy, OnInit, Output } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterModule } from '@angular/router';
 import { of, Subscription as RxSubscription } from 'rxjs';
 import { catchError, timeout } from 'rxjs/operators';
@@ -32,6 +32,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
   activeDepartmentLabel = 'Loading department...';
   memberRoleLabel = 'Loading access level...';
   sections: SidebarSectionViewModel[] = [];
+  @Output() closeRequested = new EventEmitter<void>();
 
   private accessSub?: RxSubscription;
   private navSub?: RxSubscription;
@@ -96,6 +97,10 @@ export class SidebarComponent implements OnInit, OnDestroy {
   }
 
   onNavigate(_item: WorkspaceRouteDefinition): void {}
+
+  requestClose(): void {
+    this.closeRequested.emit();
+  }
 
   toAppRoute(path: string): string {
     return `/app/${path.replace(/^\/+/, '')}`;

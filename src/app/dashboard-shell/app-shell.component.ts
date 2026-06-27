@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, HostListener, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import {
   NavigationCancel,
   NavigationEnd,
@@ -24,6 +24,7 @@ import { TopbarComponent } from './topbar/topbar.component';
     <div
       class="app-shell"
       [class.is-sidebar-open]="mobileSidebarOpen"
+      [class.is-mobile-shell]="isMobileViewport"
       *ngIf="!isAuthOnlyRouteActive">
       <ng-container *ngIf="shellMounted; else workspaceLoading">
       <div class="app-shell__ambient" aria-hidden="true">
@@ -33,18 +34,27 @@ import { TopbarComponent } from './topbar/topbar.component';
       </div>
 
       <div class="app-shell__grid">
-        <app-dashboard-sidebar id="app-sidebar-navigation" class="app-sidebar"></app-dashboard-sidebar>
+        <app-dashboard-sidebar
+          *ngIf="!isMobileViewport || mobileSidebarOpen"
+          id="app-sidebar-navigation"
+          class="app-sidebar"
+          (closeRequested)="closeMobileSidebar()">
+        </app-dashboard-sidebar>
         <button
           type="button"
           class="app-sidebar-backdrop"
           aria-label="Close navigation"
-          *ngIf="mobileSidebarOpen"
+          *ngIf="isMobileViewport && mobileSidebarOpen"
           (click)="closeMobileSidebar()">
         </button>
 
-        <div class="app-main">
+        <div
+          class="app-main"
+          [attr.inert]="isMobileViewport && mobileSidebarOpen ? '' : null"
+          [attr.aria-hidden]="isMobileViewport && mobileSidebarOpen ? 'true' : null">
           <button
             type="button"
+            #mobileMenuButton
             class="app-mobile-menu-button"
             aria-controls="app-sidebar-navigation"
             [attr.aria-expanded]="mobileSidebarOpen"
@@ -332,15 +342,20 @@ export class AppShellComponent implements OnInit, OnDestroy {
   breadcrumbs: string[] = ['Dashboard'];
   isTransitioning = false;
   isAuthOnlyRouteActive = false;
+  isMobileViewport = false;
   shellMounted = false;
   loadingTitle = 'Loading session...';
   loadingSubtitle = 'Loading organization...';
   showRetryAction = false;
   mobileSidebarOpen = false;
 
+  @ViewChild('mobileMenuButton') mobileMenuButton?: ElementRef<HTMLButtonElement>;
+
   private navSubscription?: Subscription;
   private contextSubscription?: Subscription;
   private bootstrapTimeoutHandle?: ReturnType<typeof setTimeout>;
+  private mobileScrollTop = 0;
+  private bodyScrollLocked = false;
   private readonly bootstrapTimeoutMs = 15000;
 
   constructor(
@@ -350,6 +365,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.updateViewportState();
     this.updateRouteState();
     this.contextSubscription = this.companyContext.state$.subscribe((state) => {
       const hasResolvedContext =
@@ -413,6 +429,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.navSubscription?.unsubscribe();
     this.contextSubscription?.unsubscribe();
     this.clearBootstrapTimeout();
+    this.unlockBodyScroll();
   }
 
   @HostListener('document:keydown.escape')
@@ -420,9 +437,18 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.closeMobileSidebar();
   }
 
+  @HostListener('window:resize')
+  onWindowResize(): void {
+    this.updateViewportState();
+  }
+
   toggleMobileSidebar(): void {
-    this.mobileSidebarOpen = !this.mobileSidebarOpen;
-    this.scheduleViewRefresh();
+    if (this.mobileSidebarOpen) {
+      this.closeMobileSidebar();
+      return;
+    }
+
+    this.openMobileSidebar();
   }
 
   closeMobileSidebar(): void {
@@ -431,7 +457,26 @@ export class AppShellComponent implements OnInit, OnDestroy {
     }
 
     this.mobileSidebarOpen = false;
+    this.unlockBodyScroll();
     this.scheduleViewRefresh();
+    queueMicrotask(() => {
+      this.mobileMenuButton?.nativeElement.focus();
+    });
+  }
+
+  private openMobileSidebar(): void {
+    if (this.mobileSidebarOpen || !this.isMobileViewport || typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
+    }
+
+    this.mobileScrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+    this.mobileSidebarOpen = true;
+    this.lockBodyScroll();
+    this.scheduleViewRefresh();
+    queueMicrotask(() => {
+      const closeButton = document.querySelector('.app-sidebar__mobile-close') as HTMLButtonElement | null;
+      closeButton?.focus();
+    });
   }
 
   private async bootstrapWorkspaceContext(): Promise<void> {
@@ -451,6 +496,56 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   private updateRouteState(): void {
     this.isAuthOnlyRouteActive = isAuthOnlyRoute(this.router.url);
+  }
+
+  private updateViewportState(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const nextIsMobileViewport = window.innerWidth <= 900;
+    if (nextIsMobileViewport === this.isMobileViewport) {
+      return;
+    }
+
+    this.isMobileViewport = nextIsMobileViewport;
+
+    if (!nextIsMobileViewport) {
+      this.closeMobileSidebar();
+      this.unlockBodyScroll();
+    }
+  }
+
+  private lockBodyScroll(): void {
+    if (this.bodyScrollLocked || typeof document === 'undefined') {
+      return;
+    }
+
+    const body = document.body;
+    body.style.position = 'fixed';
+    body.style.top = `-${this.mobileScrollTop}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    this.bodyScrollLocked = true;
+  }
+
+  private unlockBodyScroll(): void {
+    if (!this.bodyScrollLocked || typeof document === 'undefined') {
+      return;
+    }
+
+    const body = document.body;
+    body.style.position = '';
+    body.style.top = '';
+    body.style.left = '';
+    body.style.right = '';
+    body.style.width = '';
+    this.bodyScrollLocked = false;
+
+    if (typeof window !== 'undefined') {
+      window.scrollTo(0, this.mobileScrollTop);
+    }
   }
 
   private updateRouteMeta(): void {
