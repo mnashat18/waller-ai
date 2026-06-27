@@ -793,6 +793,14 @@
   inline-size: clamp(34rem, 35vw, 37.5rem);
 }
 
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--login .auth-header {
+  margin-bottom: 0.85rem;
+}
+
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--login .auth-mode-tabs {
+  margin-bottom: 0.85rem;
+}
+
 ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card,
 ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card * {
   box-sizing: border-box;
