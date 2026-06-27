@@ -14,11 +14,13 @@ export type PageBreadcrumb = {
   styles: [`
     .app-page-header__breadcrumbs,
     .app-page-header__layout {
-      width: min(100%, 72rem);
+      width: min(100%, 68rem);
       margin-inline: auto;
     }
 
     .app-page-header__layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
       gap: 1rem 1.25rem;
     }
@@ -29,6 +31,7 @@ export type PageBreadcrumb = {
       align-items: center;
       justify-content: flex-end;
       gap: 0.65rem;
+      min-width: 0;
       max-width: 100%;
     }
 
