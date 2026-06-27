@@ -12,8 +12,15 @@ export type PageBreadcrumb = {
   standalone: true,
   imports: [CommonModule, RouterLink],
   styles: [`
+    .app-page-header__breadcrumbs,
+    .app-page-header__layout {
+      width: min(100%, 72rem);
+      margin-inline: auto;
+    }
+
     .app-page-header__layout {
       align-items: center;
+      gap: 1rem 1.25rem;
     }
 
     .app-page-header__actions {
@@ -21,9 +28,16 @@ export type PageBreadcrumb = {
       flex-wrap: wrap;
       align-items: center;
       justify-content: flex-end;
+      gap: 0.65rem;
+      max-width: 100%;
     }
 
     @media (max-width: 1199px) {
+      .app-page-header__breadcrumbs,
+      .app-page-header__layout {
+        width: 100%;
+      }
+
       .app-page-header__layout {
         grid-template-columns: minmax(0, 1fr);
         align-items: start;

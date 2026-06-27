@@ -1,3 +1,7 @@
+.compliance-page {
+  container-type: inline-size;
+}
+
 .compliance-scope-strip {
   display: flex;
   flex-wrap: wrap;
@@ -80,16 +84,16 @@
 .compliance-summary-grid {
   display: grid;
   gap: 1rem;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
-@media (min-width: 768px) {
+@container (min-width: 48rem) {
   .compliance-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (min-width: 1280px) {
+@container (min-width: 80rem) {
   .compliance-summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

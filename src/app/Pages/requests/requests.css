@@ -1,6 +1,7 @@
 .scan-requests-page {
   --scan-requests-border: rgba(148, 163, 184, 0.24);
   --scan-requests-panel: rgba(9, 14, 28, 0.9);
+  container-type: inline-size;
 }
 
 .scan-requests-feedback {
@@ -30,12 +31,34 @@
 }
 
 .scan-requests-summary-grid {
+  display: grid;
+  gap: 1rem;
   align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .scan-requests-summary-grid .app-kpi-card {
   height: 100%;
   min-height: 8.4rem;
+  min-width: 0;
+}
+
+@container (min-width: 48rem) {
+  .scan-requests-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 72rem) {
+  .scan-requests-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 92rem) {
+  .scan-requests-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .scan-requests-search {
