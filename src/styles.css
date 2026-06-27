@@ -428,7 +428,7 @@ body {
 }
 
 .app-main {
-  margin-left: 248px;
+  margin-left: 0;
 }
 
 .sidebar-stack {
@@ -3400,15 +3400,15 @@ body::selection {
 }
 
 .app-content {
-  padding: 1rem 1.15rem 1.35rem;
+  padding: 1rem clamp(1rem, 2vw, 2rem) 1.35rem;
 }
 
 .app-content-frame {
   position: relative;
   min-height: calc(100vh - 9rem);
-  padding: 1rem;
-  max-width: 91rem;
-  margin-inline: auto;
+  padding: 1rem 0;
+  max-width: 100%;
+  margin-inline: 0;
   width: 100%;
   border-radius: 2rem;
   border: 1px solid rgba(148, 163, 184, 0.08);
