@@ -5081,9 +5081,13 @@ body::selection {
 
   .app-shell .app-main {
     margin-left: 0 !important;
-    width: 100% !important;
+    width: auto !important;
+    inline-size: auto !important;
     max-width: 100% !important;
+    max-inline-size: 100% !important;
     min-width: 0 !important;
+    min-inline-size: 0 !important;
+    box-sizing: border-box !important;
   }
 
   .app-shell .app-content,
@@ -5100,24 +5104,41 @@ body::selection {
   .compliance-summary-grid,
   .compliance-summary-grid > * {
     min-width: 0 !important;
+    min-inline-size: 0 !important;
     max-width: 100% !important;
+    max-inline-size: 100% !important;
+    box-sizing: border-box !important;
   }
 
   .app-shell .app-content,
   .app-shell .app-content-frame,
   .app-page-shell {
-    width: 100% !important;
+    width: auto !important;
+    inline-size: auto !important;
+    max-width: 100% !important;
+    max-inline-size: 100% !important;
   }
 
   .app-shell .app-content {
-    padding: 0.9rem !important;
+    padding: 0.9rem 0 !important;
+    box-sizing: border-box !important;
   }
 
   .app-shell .app-content-frame {
-    padding: 0.85rem !important;
+    padding-block: 0.85rem !important;
+    padding-inline: clamp(1rem, 2vw, 2rem) !important;
+    box-sizing: border-box !important;
   }
 
   .app-page-header {
     padding: 1.1rem !important;
+    max-inline-size: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .app-dashboard-panel,
+  .app-page-shell {
+    max-inline-size: 100% !important;
+    box-sizing: border-box !important;
   }
 }
