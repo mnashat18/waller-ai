@@ -2,7 +2,8 @@
   --workforce-border: rgba(148, 163, 184, 0.24);
   --workforce-panel: rgba(9, 14, 28, 0.9);
   min-width: 0;
-  overflow-x: clip;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .workforce-feedback {

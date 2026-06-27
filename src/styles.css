@@ -1595,16 +1595,24 @@ body::selection {
   display: grid;
   grid-template-columns: clamp(19rem, 19vw, 21rem) minmax(0, 1fr);
   min-height: 100vh;
+  align-items: stretch;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .app-sidebar {
-  position: sticky;
-  top: 0;
-  align-self: start;
+  position: relative;
+  top: auto;
+  align-self: stretch;
+  min-width: 0;
+  block-size: auto;
+  min-block-size: 100%;
 }
 
 .app-sidebar__panel {
-  min-height: 100vh;
+  min-height: 100%;
+  block-size: auto;
   padding: 1.4rem 1.35rem;
   border-right: 1px solid var(--wellar-border);
   border-radius: 0;
@@ -1684,6 +1692,9 @@ body::selection {
 
 .app-main {
   min-width: 0;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
 }
@@ -1899,17 +1910,20 @@ body::selection {
 
 .app-content {
   flex: 1;
-  padding: 1.25rem clamp(1rem, 1.8vw, 1.5rem) 1.5rem;
+  padding: 1.1rem 0 1.35rem;
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .app-content-frame {
   min-height: calc(100vh - 11rem);
-  padding: 1.25rem;
-  max-width: 90rem;
-  margin-inline: auto;
-  width: 100%;
+  padding: 1.05rem clamp(1rem, 2vw, 2rem);
+  max-width: 100%;
+  margin-inline: 0;
+  width: auto;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 @keyframes orbDrift {
@@ -2089,30 +2103,8 @@ body::selection {
   color: #f8fafc !important;
 }
 
-.app-shell .app-sidebar {
-  width: var(--sidebar-width) !important;
-  margin-left: 0 !important;
-  position: fixed !important;
-  inset: 0 auto 0 0;
-  height: 100vh !important;
-  z-index: 40 !important;
-}
-
-.app-shell .app-main {
-  margin-left: var(--sidebar-width) !important;
-  min-width: 0;
-}
-
 .app-shell .app-header {
   position: static !important;
-}
-
-.app-shell .app-content {
-  padding: 1.1rem 1.15rem 1.35rem !important;
-}
-
-.app-shell .app-content-frame {
-  padding: 1.05rem !important;
 }
 
 .app-shell .app-dashboard-section {
@@ -2121,44 +2113,6 @@ body::selection {
 
 .app-shell .app-dashboard-section + .app-dashboard-section {
   margin-top: 1.5rem;
-}
-
-.app-shell .app-sidebar__panel {
-  min-height: calc(100vh - 0px) !important;
-  border-radius: 0 1.5rem 1.5rem 0 !important;
-}
-
-.app-shell .app-shell__grid {
-  grid-template-columns: 17.5rem minmax(0, 1fr) !important;
-}
-
-@media (max-width: 1200px) {
-  .app-shell .app-shell__grid {
-    grid-template-columns: 16rem minmax(0, 1fr) !important;
-  }
-}
-
-@media (max-width: 900px) {
-  .app-shell .app-sidebar {
-    position: static !important;
-    inset: auto !important;
-    width: auto !important;
-    height: auto !important;
-    z-index: 1 !important;
-  }
-
-  .app-shell .app-main {
-    margin-left: 0 !important;
-  }
-
-  .app-shell .app-shell__grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  .app-shell .app-sidebar__panel {
-    min-height: 0 !important;
-    border-radius: 0 0 1.5rem 1.5rem !important;
-  }
 }
 
 .app-dashboard-panel {
@@ -3625,30 +3579,15 @@ body::selection {
     rgba(9, 14, 28, 0.82);
 }
 
-.activity-drawer {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  pointer-events: none;
-}
-
-.activity-drawer__scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(2, 6, 23, 0.58);
-  backdrop-filter: blur(4px);
-  pointer-events: auto;
-}
-
 .activity-drawer__panel {
-  position: absolute;
-  inset-block: 0;
-  right: 0;
-  width: min(38rem, 100%);
-  overflow-y: auto;
+  inline-size: min(38rem, 100%);
+  max-block-size: calc(100dvh - 2rem);
+  overflow: auto;
+}
+
+.activity-drawer__panel-content {
+  min-block-size: 100%;
   padding: 1.35rem;
-  border-radius: 1.4rem 0 0 1.4rem;
-  pointer-events: auto;
 }
 
 .activity-drawer__summary {
@@ -3809,24 +3748,6 @@ body::selection {
   --sidebar-width: clamp(20rem, 22vw, 23rem);
 }
 
-.app-shell__grid {
-  display: block !important;
-  min-height: 100vh;
-}
-
-.app-sidebar {
-  position: fixed !important;
-  inset: 0 auto 0 0;
-  width: var(--sidebar-width) !important;
-  height: 100vh !important;
-  z-index: 40;
-}
-
-.app-main {
-  margin-left: var(--sidebar-width) !important;
-  min-width: 0;
-}
-
 .app-shell .app-header,
 .app-shell .app-breadcrumbs,
 .app-shell .app-content {
@@ -3835,28 +3756,6 @@ body::selection {
 
 .app-sidebar__rail {
   display: none !important;
-}
-
-.app-sidebar__panel {
-  height: 100%;
-  padding: 1.25rem 1.1rem 1.1rem !important;
-  gap: 1rem !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  scrollbar-gutter: stable;
-  background:
-    radial-gradient(1000px at 8% 0%, rgba(56, 189, 248, 0.18), transparent 46%),
-    radial-gradient(900px at 100% 18%, rgba(99, 102, 241, 0.12), transparent 42%),
-    linear-gradient(180deg, rgba(6, 10, 21, 0.98), rgba(4, 7, 16, 0.98)) !important;
-  border-right: 1px solid rgba(148, 163, 184, 0.14) !important;
-}
-
-.app-sidebar__panel::-webkit-scrollbar {
-  width: 0.45rem;
-}
-
-.app-sidebar__panel::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .app-sidebar__panel::-webkit-scrollbar-thumb {
@@ -4250,10 +4149,6 @@ body::selection {
   width: var(--sidebar-width) !important;
 }
 
-.app-shell .app-main {
-  margin-left: var(--sidebar-width) !important;
-}
-
 .app-shell .app-sidebar__panel {
   display: flex;
   flex-direction: column;
@@ -4538,16 +4433,11 @@ body::selection {
 }
 
 /* =========================
-   Sidebar Premium Compact Override
+  Sidebar Premium Compact Override
 ========================= */
-.app-shell .app-sidebar {
-  height: 100vh !important;
-}
-
 .app-shell .app-sidebar__panel {
   gap: 0.82rem !important;
   padding: 0.96rem 0.88rem 0.88rem !important;
-  overflow: hidden !important;
   scrollbar-width: none;
 }
 
@@ -5059,95 +4949,51 @@ body::selection {
    Desktop Shell Overflow Fix
 ========================= */
 @media (min-width: 901px) {
-  .app-shell .app-shell__grid {
-    display: grid !important;
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) !important;
-    align-items: stretch !important;
-    min-height: 100vh !important;
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
-  .app-shell .app-sidebar {
-    position: relative !important;
-    inset: auto !important;
-    top: auto !important;
-    width: var(--sidebar-width) !important;
-    min-width: var(--sidebar-width) !important;
-    max-width: var(--sidebar-width) !important;
-    height: auto !important;
-    block-size: auto !important;
-    min-block-size: 100% !important;
-    align-self: stretch !important;
-  }
-
-  .app-shell .app-sidebar__panel {
-    height: auto !important;
-    block-size: auto !important;
-    min-height: 100% !important;
-    min-block-size: 100% !important;
-  }
-
-  .app-shell .app-main {
-    margin-left: 0 !important;
-    width: auto !important;
-    inline-size: auto !important;
-    max-width: 100% !important;
-    max-inline-size: 100% !important;
-    min-width: 0 !important;
-    min-inline-size: 0 !important;
-    box-sizing: border-box !important;
-  }
-
+  .app-shell .app-shell__grid,
+  .app-shell .app-main,
   .app-shell .app-content,
   .app-shell .app-content-frame,
   .app-page-shell,
   .app-dashboard-section,
+  .app-dashboard-section__header,
+  .app-dashboard-section__body,
+  .app-dashboard-panel,
   .app-page-header,
   .app-page-header__layout,
   .app-page-header__intro,
   .app-page-header__title-block,
   .app-page-header__actions,
+  .app-table-shell,
+  .app-table-shell__scroller,
   .scan-requests-summary-grid,
   .scan-requests-summary-grid > *,
   .compliance-summary-grid,
   .compliance-summary-grid > * {
-    min-width: 0 !important;
-    min-inline-size: 0 !important;
-    max-width: 100% !important;
-    max-inline-size: 100% !important;
-    box-sizing: border-box !important;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    box-sizing: border-box;
   }
 
-  .app-shell .app-content,
-  .app-shell .app-content-frame,
-  .app-page-shell {
-    width: auto !important;
-    inline-size: auto !important;
-    max-width: 100% !important;
-    max-inline-size: 100% !important;
+  .app-shell .app-sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    max-width: var(--sidebar-width);
   }
 
-  .app-shell .app-content {
-    padding: 0.9rem 0 !important;
-    box-sizing: border-box !important;
-  }
-
-  .app-shell .app-content-frame {
-    padding-block: 0.85rem !important;
-    padding-inline: clamp(1rem, 2vw, 2rem) !important;
-    box-sizing: border-box !important;
-  }
-
-  .app-page-header {
-    padding: 1.1rem !important;
-    max-inline-size: 100% !important;
-    box-sizing: border-box !important;
-  }
-
+  .app-page-shell,
   .app-dashboard-panel,
-  .app-page-shell {
-    max-inline-size: 100% !important;
-    box-sizing: border-box !important;
+  .app-table-shell {
+    width: auto;
+    max-inline-size: 100%;
   }
+}
+
+app-page-header,
+app-dashboard-section,
+app-filter-bar-shell,
+app-page-action-bar,
+app-table-shell {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }

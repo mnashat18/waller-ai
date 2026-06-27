@@ -6,8 +6,8 @@ import { Component } from '@angular/core';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="app-dashboard-panel app-dashboard-panel--compact">
-      <div class="flex flex-wrap items-center gap-3">
+    <div class="app-dashboard-panel app-dashboard-panel--compact min-w-0 max-w-full box-border">
+      <div class="flex min-w-0 flex-wrap items-center gap-3">
         <ng-content></ng-content>
       </div>
     </div>

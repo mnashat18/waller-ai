@@ -6,12 +6,12 @@ import { Component } from '@angular/core';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <section class="app-table-shell overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm">
-      <div class="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
+    <section class="app-table-shell min-w-0 max-w-full box-border overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm">
+      <div class="flex min-w-0 items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
         <ng-content select="[tableHeader]"></ng-content>
       </div>
 
-      <div class="app-table-shell__scroller overflow-x-auto pb-1 [scrollbar-gutter:stable]">
+      <div class="app-table-shell__scroller min-w-0 max-w-full overflow-x-auto pb-1 [scrollbar-gutter:stable]">
         <ng-content></ng-content>
       </div>
     </section>

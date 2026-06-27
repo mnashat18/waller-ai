@@ -6,10 +6,10 @@ import { Component } from '@angular/core';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="app-dashboard-panel">
-      <div class="flex flex-wrap items-center justify-between gap-4">
+    <div class="app-dashboard-panel min-w-0 max-w-full box-border">
+      <div class="flex min-w-0 flex-wrap items-center justify-between gap-4">
         <ng-content select="[actionBarMeta]"></ng-content>
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex min-w-0 flex-wrap items-center gap-3">
           <ng-content select="[actionBarActions]"></ng-content>
         </div>
       </div>
