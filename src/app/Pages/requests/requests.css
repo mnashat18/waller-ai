@@ -1,7 +1,6 @@
 .scan-requests-page {
   --scan-requests-border: rgba(148, 163, 184, 0.24);
   --scan-requests-panel: rgba(9, 14, 28, 0.9);
-  container-type: inline-size;
   min-inline-size: 0;
   max-inline-size: 100%;
   box-sizing: border-box;
@@ -40,6 +39,13 @@
   border-color: rgba(125, 211, 252, 0.35);
   background: rgba(56, 189, 248, 0.14);
   color: rgb(186 230 253);
+}
+
+.scan-requests-summary {
+  container-type: inline-size;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
 }
 
 .scan-requests-summary-grid {
@@ -105,10 +111,26 @@
   width: 100%;
 }
 
+.scan-requests-queue-section,
+.scan-requests-table-shell,
+.scan-requests-table-scroller {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
+}
+
+.scan-requests-table-scroller {
+  overflow-x: auto;
+  overflow-y: hidden;
+  inline-size: 100%;
+}
+
 .scan-requests-table {
   border-collapse: collapse;
   color: rgb(203 213 225);
   font-size: 0.86rem;
+  inline-size: max(100%, 72rem);
+  min-inline-size: 72rem;
 }
 
 .scan-requests-table thead {
@@ -242,14 +264,14 @@
   position: fixed;
   inset: 0;
   z-index: 1200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   padding: 1rem;
+  overflow: auto;
 }
 
 .scan-requests-modal__scrim {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: rgba(2, 6, 23, 0.68);
   backdrop-filter: blur(3px);
@@ -257,12 +279,15 @@
 
 .scan-requests-modal__panel {
   position: relative;
-  width: min(720px, calc(100vw - 2rem));
-  max-height: 85vh;
-  overflow-y: auto;
+  z-index: 1;
+  width: min(760px, 100%);
+  max-inline-size: 100%;
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
   border-radius: 1rem;
   border: 1px solid var(--scan-requests-border);
   background: var(--scan-requests-panel);
+  box-sizing: border-box;
 }
 
 .scan-requests-detail-grid {
@@ -312,6 +337,6 @@
   }
 
   .scan-requests-modal__panel {
-    width: min(720px, calc(100vw - 1rem));
+    width: min(760px, 100%);
   }
 }

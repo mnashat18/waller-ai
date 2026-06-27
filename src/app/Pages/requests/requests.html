@@ -56,34 +56,36 @@
       eyebrow="Queue"
       title="Request Summary"
       [description]="isManager ? 'Safe department-scoped request counts from returned queue data.' : 'Organization request counts from returned queue data.'">
-      <div class="scan-requests-summary-grid grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <app-kpi-card
-          label="Pending"
-          [value]="summary.pending.toString()"
-          helper="Requests waiting for completion."
-          [tone]="summary.pending > 0 ? 'warning' : 'neutral'"
-          toneLabel="Pending"></app-kpi-card>
+      <div class="scan-requests-summary">
+        <div class="scan-requests-summary-grid grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <app-kpi-card
+            label="Pending"
+            [value]="summary.pending.toString()"
+            helper="Requests waiting for completion."
+            [tone]="summary.pending > 0 ? 'warning' : 'neutral'"
+            toneLabel="Pending"></app-kpi-card>
 
-        <app-kpi-card
-          label="Overdue"
-          [value]="summary.overdue.toString()"
-          helper="Open requests past their due time."
-          [tone]="summary.overdue > 0 ? 'danger' : 'neutral'"
-          toneLabel="Attention"></app-kpi-card>
+          <app-kpi-card
+            label="Overdue"
+            [value]="summary.overdue.toString()"
+            helper="Open requests past their due time."
+            [tone]="summary.overdue > 0 ? 'danger' : 'neutral'"
+            toneLabel="Attention"></app-kpi-card>
 
-        <app-kpi-card
-          label="Due Today"
-          [value]="summary.dueToday.toString()"
-          helper="Requests with a due time today."
-          tone="neutral"
-          toneLabel="Today"></app-kpi-card>
+          <app-kpi-card
+            label="Due Today"
+            [value]="summary.dueToday.toString()"
+            helper="Requests with a due time today."
+            tone="neutral"
+            toneLabel="Today"></app-kpi-card>
 
-        <app-kpi-card
-          label="Closed"
-          [value]="summary.completedOrClosed.toString()"
-          helper="Requests returned as completed, expired, or cancelled."
-          tone="neutral"
-          toneLabel="Closed"></app-kpi-card>
+          <app-kpi-card
+            label="Closed"
+            [value]="summary.completedOrClosed.toString()"
+            helper="Requests returned as completed, expired, or cancelled."
+            tone="neutral"
+            toneLabel="Closed"></app-kpi-card>
+        </div>
       </div>
     </app-dashboard-section>
 
@@ -145,11 +147,12 @@
     </section>
 
     <app-dashboard-section
+      class="scan-requests-queue-section"
       *ngIf="visibleRows.length > 0"
       eyebrow="Requests"
       title="Request Queue"
       [description]="isManager ? 'Department-scoped scan request follow-up queue.' : 'Organization scan request follow-up queue.'">
-      <app-table-shell>
+      <app-table-shell class="scan-requests-table-shell">
         <div tableHeader class="scan-requests-table-header">
           <div>
             <p class="text-sm font-semibold text-slate-50">{{ isManager ? (managerDepartmentName || 'Department scope') : 'Organization queue' }}</p>
@@ -157,48 +160,50 @@
           </div>
         </div>
 
-        <table class="scan-requests-table min-w-[72rem] w-full text-left">
-          <thead>
-            <tr>
-              <th>Request Type</th>
-              <th>Department</th>
-              <th>Status</th>
-              <th>Requested</th>
-              <th>Due</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let row of visibleRows; trackBy: trackByRequest" class="scan-requests-table-row">
-              <td>
-                <p class="scan-requests-primary">{{ row.requestTypeLabel }}</p>
-              </td>
-              <td>{{ row.departmentName }}</td>
-              <td><span [class]="row.statusClass">{{ row.statusLabel }}</span></td>
-              <td>{{ row.requestedAtLabel }}</td>
-              <td>
-                <span [class.scan-requests-due-overdue]="row.status === 'overdue'">{{ row.dueAtLabel }}</span>
-              </td>
-              <td>
-                <div class="scan-requests-row-actions">
-                  <button type="button" class="scan-requests-row-action scan-requests-row-action--view" (click)="openRequest(row)">View</button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="scan-requests-table-scroller">
+          <table class="scan-requests-table text-left">
+            <thead>
+              <tr>
+                <th>Request Type</th>
+                <th>Department</th>
+                <th>Status</th>
+                <th>Requested</th>
+                <th>Due</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let row of visibleRows; trackBy: trackByRequest" class="scan-requests-table-row">
+                <td>
+                  <p class="scan-requests-primary">{{ row.requestTypeLabel }}</p>
+                </td>
+                <td>{{ row.departmentName }}</td>
+                <td><span [class]="row.statusClass">{{ row.statusLabel }}</span></td>
+                <td>{{ row.requestedAtLabel }}</td>
+                <td>
+                  <span [class.scan-requests-due-overdue]="row.status === 'overdue'">{{ row.dueAtLabel }}</span>
+                </td>
+                <td>
+                  <div class="scan-requests-row-actions">
+                    <button type="button" class="scan-requests-row-action scan-requests-row-action--view" (click)="openRequest(row)">View</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </app-table-shell>
     </app-dashboard-section>
   </ng-container>
 
-  <div *ngIf="selectedRequest as row" class="scan-requests-modal">
+  <div *ngIf="selectedRequest as row" class="scan-requests-modal" role="dialog" aria-modal="true" aria-labelledby="scan-request-detail-title">
     <div class="scan-requests-modal__scrim" (click)="closeRequestDetails()"></div>
 
-    <div class="scan-requests-modal__panel app-dashboard-panel">
+    <div class="scan-requests-modal__panel scan-requests-modal__panel--detail app-dashboard-panel">
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="dashboard-eyebrow">Scan Request</p>
-          <h3 class="mt-2 text-2xl font-semibold text-slate-50">{{ row.requestTypeLabel }}</h3>
+          <h3 id="scan-request-detail-title" class="mt-2 text-2xl font-semibold text-slate-50">{{ row.requestTypeLabel }}</h3>
           <p class="mt-2 text-sm text-slate-300">{{ row.departmentName }}</p>
         </div>
 
