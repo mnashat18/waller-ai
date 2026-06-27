@@ -782,7 +782,6 @@
     radial-gradient(440px at 90% 100%, rgba(233, 156, 47, 0.12), transparent 60%),
     linear-gradient(180deg, rgba(7, 11, 22, 0.96), rgba(5, 9, 18, 0.97));
   box-shadow: 0 38px 110px rgba(2, 6, 23, 0.75);
-  overflow: hidden;
   padding: clamp(1.25rem, 2.6vw, 1.7rem);
 }
 
