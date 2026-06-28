@@ -749,17 +749,15 @@
   min-width: max-content;
 }
 
-:host ::ng-deep app-viewport-dialog .auth-card {
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  inline-size: min(720px, calc(100vw - 2rem));
-  max-inline-size: 100%;
-  max-height: calc(100dvh - 2rem);
-  overflow-x: hidden;
-  overflow-y: hidden;
+  inline-size: auto;
+  max-inline-size: calc(100vw - 2rem);
+  max-block-size: calc(100dvh - clamp(1.25rem, 5vh, 3rem));
   border-radius: 1.55rem;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background:
@@ -770,8 +768,24 @@
   padding: clamp(1.25rem, 2.6vw, 1.7rem);
 }
 
-:host ::ng-deep app-viewport-dialog .auth-card,
-:host ::ng-deep app-viewport-dialog .auth-card * {
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--login {
+  inline-size: clamp(31rem, 33vw, 34rem);
+}
+
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--signup {
+  inline-size: clamp(34rem, 35vw, 37.5rem);
+}
+
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--login .auth-header {
+  margin-bottom: 0.85rem;
+}
+
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--login .auth-mode-tabs {
+  margin-bottom: 0.85rem;
+}
+
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card,
+::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card * {
   box-sizing: border-box;
 }
 
@@ -782,39 +796,15 @@
   flex-direction: column;
   min-inline-size: 0;
   min-block-size: 0;
+  block-size: 100%;
 }
 
 .auth-card__content {
   min-inline-size: 0;
   min-block-size: 0;
-  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 0.25rem;
-}
-
-.auth-card__glow {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(18px);
-  pointer-events: none;
-  opacity: 0.5;
-}
-
-.auth-card__glow--a {
-  width: 170px;
-  height: 170px;
-  top: -78px;
-  left: -62px;
-  background: radial-gradient(circle, rgba(56, 189, 248, 0.3), transparent 65%);
-}
-
-.auth-card__glow--b {
-  width: 190px;
-  height: 190px;
-  right: -78px;
-  bottom: -98px;
-  background: radial-gradient(circle, rgba(245, 196, 81, 0.22), transparent 68%);
 }
 
 .auth-close {
@@ -1253,8 +1243,8 @@
     padding-left: 0;
   }
 
-  :host ::ng-deep app-viewport-dialog .auth-card {
-    inline-size: min(94vw, 720px);
+  ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card {
+    inline-size: min(94vw, 37.5rem);
     padding: 1.14rem 1rem;
   }
 
@@ -1271,8 +1261,8 @@
 }
 
 @media (max-height: 780px) {
-  :host ::ng-deep app-viewport-dialog .auth-card {
-    max-height: calc(100dvh - 2rem);
+  ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card {
+    max-block-size: calc(100dvh - 1.25rem);
   }
 }
 
@@ -1285,7 +1275,7 @@
   .landing-cta,
   .landing-cta::before,
   .ghost-cta,
-  :host ::ng-deep app-viewport-dialog .auth-card,
+  ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card,
   .presentation-glow,
   .presentation-window,
   .presentation-rail button {
@@ -1300,7 +1290,7 @@
   .hero-ambient::before,
   .hero-ambient::after,
   .presentation-glow {
-    filter:none;
-    opacity:.18;
+    filter: none;
+    opacity: 0.18;
   }
 }

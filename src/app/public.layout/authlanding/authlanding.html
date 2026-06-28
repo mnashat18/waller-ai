@@ -152,13 +152,11 @@
 
 <app-viewport-dialog
   *ngIf="showAuthModal"
-  panelClass="auth-card"
+  [panelClass]="authPanelClass"
   [lockScroll]="true"
   ariaLabel="Sign in or create your account"
   (backdropClick)="!authBusy && closeAuth()">
   <div class="auth-card__shell">
-    <div class="auth-card__glow auth-card__glow--a"></div>
-    <div class="auth-card__glow auth-card__glow--b"></div>
     <button class="auth-close" (click)="closeAuth()" [disabled]="authBusy">&times;</button>
 
     <div class="auth-header">
