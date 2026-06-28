@@ -1759,6 +1759,12 @@ export class OperationsWorkflowsService {
     notifications: NotificationRecord[]
   ): AlertsPageData {
     const notificationCountByLink = this.notificationCounts(notifications);
+    const departmentNameById = new Map<string, string>();
+    for (const department of departments ?? []) {
+      const id = this.normalizeId(department.id);
+      if (!id) continue;
+      departmentNameById.set(id, formatDepartment(department, 'Unnamed Department'));
+    }
 
     const rows = (alerts ?? []).map((alert) => {
       const alertId = this.normalizeId(alert.id) ?? '';
@@ -1781,6 +1787,11 @@ export class OperationsWorkflowsService {
         null;
       const targetMemberStatus = this.pickString(targetMemberRecord?.['status']);
       const targetMemberRole = this.pickString(targetMemberRecord?.['member_role']);
+      const alertDepartmentId = this.normalizeId(alert.department);
+      const targetMemberDepartmentId = this.normalizeId(targetMemberDepartment);
+      const alertDepartmentName = this.resolveDepartmentLabel(alert.department, departmentNameById, '');
+      const targetMemberDepartmentName = this.resolveDepartmentLabel(targetMemberDepartment, departmentNameById, '');
+      const departmentName = alertDepartmentName || targetMemberDepartmentName || 'Unassigned';
       const targetMemberLabel =
         this.firstReadableLabel([targetUserName ?? '', targetUserEmail ?? '', formatMember(targetMemberRecord, '')], 'Assigned member');
 
@@ -1793,8 +1804,8 @@ export class OperationsWorkflowsService {
         severity: alert.severity?.trim() || null,
         title: alert.title?.trim() || 'Alert',
         message: alert.message?.trim() || alert.body?.trim() || alert.summary?.trim() || null,
-        department_id: this.normalizeId(alert.department) ?? this.normalizeId(targetMemberDepartment),
-        department_name: formatDepartment(alert.department ?? targetMemberDepartment, 'Unassigned'),
+        department_id: alertDepartmentId ?? targetMemberDepartmentId,
+        department_name: departmentName,
         target_member_id: targetMemberId,
         target_member_status: targetMemberStatus,
         target_member_role: targetMemberRole,
@@ -1828,7 +1839,7 @@ export class OperationsWorkflowsService {
         name: formatDepartment(department, 'Unnamed Department')
       })).filter((item) => item.id),
       severityOptions: this.uniqueValues(rows.map((row) => row.severity)),
-      statusOptions: this.uniqueValues(rows.map((row) => row.status), ['new', 'seen', 'reviewed', 'resolved', 'overridden']),
+      statusOptions: this.uniqueValues(rows.map((row) => row.status), ['open', 'new', 'seen', 'reviewed', 'resolved', 'overridden']),
       summary: {
         total: rows.length,
         open: rows.filter((row) => this.normalizeText(row.status) === 'new').length,
@@ -2507,6 +2518,24 @@ export class OperationsWorkflowsService {
   private departmentName(value: unknown): string | null {
     const label = formatDepartment(value, '');
     return label || null;
+  }
+
+  private resolveDepartmentLabel(
+    value: unknown,
+    departmentNameById: Map<string, string>,
+    fallback: string
+  ): string {
+    const directLabel = formatDepartment(value, '');
+    if (directLabel) {
+      return directLabel;
+    }
+
+    const id = this.normalizeId(value);
+    if (id) {
+      return departmentNameById.get(id) ?? fallback;
+    }
+
+    return fallback;
   }
 
   private userLabel(user: unknown): string {

@@ -18,7 +18,7 @@ import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewpor
 import { sanitizeDisplayValue } from '../../shared/utils/display-formatters';
 
 type AlertsPageState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorkspace' | 'scopeUnavailable';
-type AlertStatus = 'new' | 'seen' | 'reviewed' | 'resolved' | 'overridden' | 'unknown';
+type AlertStatus = 'open' | 'new' | 'seen' | 'reviewed' | 'resolved' | 'overridden' | 'unknown';
 type AlertSeverity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
 
 type AlertsFilters = {
@@ -38,6 +38,7 @@ type AlertViewModel = {
   statusLabel: string;
   departmentName: string;
   departmentKey: string;
+  reviewedAt: string | null;
   createdAt: string | null;
   createdTs: number;
   createdLabel: string;
@@ -156,20 +157,16 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
     return this.hasAlerts && this.filteredAlerts.length === 0;
   }
 
-  get openAlertsCount(): number {
-    return this.alerts.filter((row) => this.isOpenStatus(row.status)).length;
+  get newAlertsCount(): number {
+    return this.alerts.filter((row) => row.status === 'new').length;
   }
 
-  get highSeverityCount(): number {
+  get highCriticalCount(): number {
     return this.alerts.filter((row) => row.severity === 'high' || row.severity === 'critical').length;
   }
 
-  get returnedStatusCount(): number {
-    return this.statusDistribution.length;
-  }
-
-  get returnedSeverityCount(): number {
-    return this.severityDistribution.length;
+  get needsReviewCount(): number {
+    return this.alerts.filter((row) => !row.reviewedAt).length;
   }
 
   refresh(): void {
@@ -301,6 +298,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
       statusLabel: this.statusLabel(status),
       departmentName,
       departmentKey: departmentName.toLowerCase(),
+      reviewedAt: raw.reviewed_at ?? null,
       createdAt: raw.date_created,
       createdTs,
       createdLabel: this.formatDateTime(raw.date_created)
@@ -361,7 +359,8 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   private normalizeStatus(value: string | null | undefined): AlertStatus {
     const normalized = String(value ?? '').trim().toLowerCase();
-    if (normalized === 'open' || normalized === 'new') return 'new';
+    if (normalized === 'open') return 'open';
+    if (normalized === 'new') return 'new';
     if (normalized === 'seen') return 'seen';
     if (normalized === 'reviewed') return 'reviewed';
     if (normalized === 'resolved') return 'resolved';
@@ -370,12 +369,9 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
   }
 
   private statusLabel(status: AlertStatus): string {
-    if (status === 'new') return 'Open';
+    if (status === 'open') return 'Open';
+    if (status === 'new') return 'New';
     return this.toTitleCase(status);
-  }
-
-  private isOpenStatus(status: AlertStatus): boolean {
-    return status === 'new' || status === 'seen' || status === 'reviewed';
   }
 
   private formatDateTime(value: string | null): string {

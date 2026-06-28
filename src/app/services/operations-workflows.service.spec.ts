@@ -213,4 +213,56 @@ describe('OperationsWorkflowsService', () => {
     expect(error.status).toBe(403);
     expect(error.userMessage).toBe('Workspace access denied');
   });
+
+  it('resolves alert department labels from department ids and expanded objects while preserving raw status', () => {
+    const departments = [
+      { id: '11111111-1111-4111-8111-111111111111', name: 'Operations' },
+      { id: '22222222-2222-4222-8222-222222222222', name: 'Safety' }
+    ];
+
+    const idPayload = (service as unknown as { buildAlertsPageData: Function }).buildAlertsPageData(
+      departments,
+      [
+        {
+          id: 'alert-1',
+          date_created: '2026-06-26T10:00:00.000Z',
+          business_profile: { id: 'profile-1', company_name: 'Wellar' },
+          department: '11111111-1111-4111-8111-111111111111',
+          status: 'new',
+          severity: 'high',
+          title: 'Returned alert',
+          message: 'Returned alert message',
+          reviewed_at: null
+        }
+      ],
+      []
+    );
+
+    expect(idPayload.rows[0].department_id).toBe('11111111-1111-4111-8111-111111111111');
+    expect(idPayload.rows[0].department_name).toBe('Operations');
+    expect(idPayload.rows[0].status).toBe('new');
+    expect(idPayload.statusOptions).toContain('new');
+
+    const objectPayload = (service as unknown as { buildAlertsPageData: Function }).buildAlertsPageData(
+      departments,
+      [
+        {
+          id: 'alert-2',
+          date_created: '2026-06-26T11:00:00.000Z',
+          business_profile: { id: 'profile-1', company_name: 'Wellar' },
+          department: { id: '22222222-2222-4222-8222-222222222222', name: 'Safety' },
+          status: 'open',
+          severity: 'critical',
+          title: 'Expanded alert',
+          message: 'Expanded alert message',
+          reviewed_at: '2026-06-26T12:00:00.000Z'
+        }
+      ],
+      []
+    );
+
+    expect(objectPayload.rows[0].department_id).toBe('22222222-2222-4222-8222-222222222222');
+    expect(objectPayload.rows[0].department_name).toBe('Safety');
+    expect(objectPayload.rows[0].status).toBe('open');
+  });
 });

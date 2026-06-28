@@ -62,29 +62,25 @@
         [description]="isManager ? 'Returned department alert counts from the active scope.' : 'Returned organization alert counts from authorized data.'">
         <div class="alerts-summary-grid">
           <app-kpi-card
-            label="Open Alerts"
-            [value]="openAlertsCount.toString()"
-            helper="Returned alerts that are not closed."
-            [tone]="openAlertsCount > 0 ? 'warning' : 'neutral'"
-            toneLabel="Open"></app-kpi-card>
+            label="New alerts"
+            [value]="newAlertsCount.toString()"
+            helper="Returned alerts whose raw status is new."
+            [tone]="newAlertsCount > 0 ? 'warning' : 'neutral'"
+            toneLabel="New"></app-kpi-card>
 
-          @if (returnedSeverityCount > 0) {
-            <app-kpi-card
-              label="High / Critical"
-              [value]="highSeverityCount.toString()"
-              helper="Returned alerts with high or critical severity."
-              [tone]="highSeverityCount > 0 ? 'danger' : 'neutral'"
-              toneLabel="Severity"></app-kpi-card>
-          }
+          <app-kpi-card
+            label="High / Critical"
+            [value]="highCriticalCount.toString()"
+            helper="Returned alerts with high or critical severity."
+            [tone]="highCriticalCount > 0 ? 'danger' : 'neutral'"
+            toneLabel="Severity"></app-kpi-card>
 
-          @if (returnedStatusCount > 0) {
-            <app-kpi-card
-              label="Returned Statuses"
-              [value]="returnedStatusCount.toString()"
-              helper="Distinct alert statuses present in returned data."
-              tone="neutral"
-              toneLabel="Status"></app-kpi-card>
-          }
+          <app-kpi-card
+            label="Needs review"
+            [value]="needsReviewCount.toString()"
+            helper="Returned alerts without a reviewed_at timestamp."
+            [tone]="needsReviewCount > 0 ? 'warning' : 'neutral'"
+            toneLabel="Review"></app-kpi-card>
         </div>
 
         @if (severityDistribution.length || statusDistribution.length) {
