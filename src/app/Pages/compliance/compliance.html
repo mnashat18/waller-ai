@@ -73,6 +73,12 @@
       [message]="errorMessage || 'Please refresh and try again.'"
       (retry)="refresh()">
     </app-error-state>
+  } @else if (viewState === 'unavailable') {
+    <section class="compliance-state-card compliance-state-card--warning compliance-unavailable" data-testid="compliance-unavailable">
+      <p class="compliance-state-card__title">Compliance data unavailable</p>
+      <p>We could not load the authorized compliance data for this workspace.</p>
+      <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="refresh()">Retry</button>
+    </section>
   } @else {
     @if (showPageEmpty) {
       <section class="compliance-state-card">
@@ -123,12 +129,14 @@
       <app-dashboard-section eyebrow="Coverage" title="Coverage Summary" [description]="coverageDescription">
         @if (showCoverageSummary) {
           <div class="compliance-summary-grid">
-            <app-kpi-card
-              label="Coverage"
-              [value]="coverageRateDisplay"
-              helper="Completed checks divided by returned scan-eligible members for the selected range."
-              [tone]="coverageRateTone"
-              toneLabel="Coverage"></app-kpi-card>
+            @if (showCoverageKpi) {
+              <app-kpi-card
+                label="Coverage"
+                [value]="coverageRateDisplay"
+                helper="Completed checks divided by returned scan-eligible members for the selected range."
+                [tone]="coverageRateTone"
+                toneLabel="Coverage"></app-kpi-card>
+            }
 
             <app-kpi-card
               label="Completed"
@@ -344,6 +352,11 @@
         <div class="compliance-modal__fact"><span>Alert status</span><strong>{{ row.alertStatus }}</strong></div>
         <div class="compliance-modal__fact"><span>Last check</span><strong>{{ row.lastScanLabel }}</strong></div>
         <div class="compliance-modal__fact"><span>Request status</span><strong>{{ openRequestStatusLabel(row) }}</strong></div>
+        @if (row.suggestedAction) {
+          <div class="compliance-modal__fact compliance-modal__fact--suggested-action" data-testid="suggested-action">
+            <span>Suggested action</span><strong>{{ row.suggestedAction }}</strong>
+          </div>
+        }
       </div>
 
       <div class="compliance-modal__footer">

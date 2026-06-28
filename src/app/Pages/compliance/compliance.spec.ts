@@ -71,6 +71,10 @@ describe('CompliancePageComponent', () => {
     }
   });
 
+  const settle = async (): Promise<void> => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  };
+
   beforeEach(async () => {
     navigateCalls = [];
     overviewResponse = buildOverview([
@@ -165,11 +169,204 @@ describe('CompliancePageComponent', () => {
 
     fixture = TestBed.createComponent(CompliancePageComponent);
     component = fixture.componentInstance;
+    component.ngOnInit = () => {};
     component.overview = overviewResponse;
     component.viewState = 'ready';
+    fixture.detectChanges();
+    await fixture.whenStable();
     fixture.detectChanges();
 
     expect(component.departmentDataQualityCount).toBe(0);
     expect(fixture.nativeElement.textContent).not.toContain('Department data quality issue');
+  });
+
+  it('renders compliance-unavailable when dataUnavailable is true while hasAnyData is true', async () => {
+    overviewResponse = {
+      ...buildOverview([]),
+      dataUnavailable: true,
+      hasAnyData: true,
+      scanResultsAccess: 'permission_blocked'
+    };
+
+    const complianceService = TestBed.inject(ComplianceService);
+    complianceService.loadComplianceOverview = () => Promise.resolve(overviewResponse);
+
+    fixture = TestBed.createComponent(CompliancePageComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    await settle();
+    await settle();
+    fixture.detectChanges();
+
+    const unavailableSection = fixture.nativeElement.querySelector('[data-testid="compliance-unavailable"]');
+    expect(unavailableSection).toBeTruthy();
+    expect(unavailableSection.textContent).toContain('Compliance data unavailable');
+    expect(unavailableSection.textContent).toContain('We could not load the authorized compliance data for this workspace.');
+  });
+
+  it('in unavailable state, hides KPI cards, filters, distributions, coverage section, exception table, and exception detail', async () => {
+    overviewResponse = {
+      ...buildOverview([]),
+      dataUnavailable: true,
+      hasAnyData: true,
+      scanResultsAccess: 'permission_blocked'
+    };
+
+    fixture = TestBed.createComponent(CompliancePageComponent);
+    component = fixture.componentInstance;
+    component.ngOnInit = () => {};
+    component.overview = overviewResponse;
+    component.viewState = 'unavailable';
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('app-kpi-card')).toBeFalsy();
+    expect(fixture.nativeElement.querySelector('app-filter-bar-shell')).toBeFalsy();
+    expect(fixture.nativeElement.querySelector('table.compliance-table')).toBeFalsy();
+    expect(fixture.nativeElement.querySelector('app-viewport-dialog')).toBeFalsy();
+  });
+
+  it('retry button calls refresh', async () => {
+    let loadCallCount = 0;
+    overviewResponse = {
+      ...buildOverview([]),
+      dataUnavailable: true,
+      hasAnyData: true,
+      scanResultsAccess: 'permission_blocked',
+      coverageProven: false
+    } as any;
+    const complianceService = TestBed.inject(ComplianceService);
+    complianceService.loadComplianceOverview = () => {
+      loadCallCount++;
+      return Promise.resolve(overviewResponse);
+    };
+
+    fixture = TestBed.createComponent(CompliancePageComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    await settle();
+    await settle();
+    fixture.detectChanges();
+
+    let refreshCalls = 0;
+    const originalRefresh = component.refresh.bind(component);
+    component.refresh = () => {
+      refreshCalls++;
+      originalRefresh();
+    };
+    const unavailableSection = fixture.nativeElement.querySelector('[data-testid="compliance-unavailable"]') as HTMLElement | null;
+    expect(unavailableSection).toBeTruthy();
+
+    const retryButton = Array.from(unavailableSection?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.trim() === 'Retry'
+    ) as HTMLButtonElement | undefined;
+    expect(retryButton).toBeTruthy();
+
+    retryButton?.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(refreshCalls).toBe(1);
+    expect(loadCallCount).toBeGreaterThan(0);
+    expect(component.loading).toBe(false);
+  });
+
+  it('coverage KPI is absent when coverageProven is false', async () => {
+    overviewResponse = {
+      ...buildOverview([]),
+      coverageProven: false
+    };
+
+    fixture = TestBed.createComponent(CompliancePageComponent);
+    component = fixture.componentInstance;
+    component.ngOnInit = () => {};
+    component.overview = overviewResponse;
+    component.viewState = 'ready';
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const kpiCards = fixture.nativeElement.querySelectorAll('app-kpi-card');
+    const coverageCard = Array.from(kpiCards).find((card: any) =>
+      card.textContent?.includes('Coverage') || card.textContent?.includes('Scan Eligible')
+    );
+    expect(coverageCard).toBeFalsy();
+  });
+
+  it('suggested action appears in detail dialog only when suggestedAction has a real value', async () => {
+    const exceptionWithAction = {
+      memberId: 'member-1',
+      memberName: 'Alex Parker',
+      memberEmail: 'alex@example.com',
+      memberRole: 'employee',
+      membershipStatus: 'active',
+      joinedAt: '2026-06-01T10:00:00.000Z',
+      userId: 'user-1',
+      departmentId: 'dept-1',
+      departmentName: 'Engineering',
+      expectedCheck: 'Daily',
+      todayScan: 'Missing' as const,
+      readiness: 'High Risk' as const,
+      alertStatus: 'None' as const,
+      lastScanAt: '2026-06-25T14:00:00.000Z',
+      lastScanLabel: '3 days ago',
+      openAlertId: null,
+      openRequestId: null,
+      openRequestStatus: null,
+      requestDueAt: null,
+      requestRequestedAt: null,
+      linkedInviteEmail: null,
+      invitedBy: null,
+      reason: null,
+      suggestedAction: 'Schedule a wellness check-in and review workload'
+    };
+
+    const exceptionWithoutAction = {
+      ...exceptionWithAction,
+      memberId: 'member-2',
+      memberName: 'Jordan Smith',
+      suggestedAction: null
+    };
+
+    overviewResponse = {
+      ...buildOverview([]),
+      exceptionRows: [exceptionWithAction, exceptionWithoutAction]
+    };
+
+    const complianceService = TestBed.inject(ComplianceService);
+    complianceService.loadComplianceOverview = () => Promise.resolve(overviewResponse);
+
+    fixture = TestBed.createComponent(CompliancePageComponent);
+    component = fixture.componentInstance;
+    component.ngOnInit = () => {};
+    component.overview = overviewResponse;
+    component.viewState = 'ready';
+    component.selectedException = exceptionWithAction;
+    fixture.detectChanges();
+    await settle();
+    await settle();
+    fixture.detectChanges();
+
+    expect(document.body.textContent).toContain('Schedule a wellness check-in and review workload');
+    const suggestedAction = document.body.querySelector('[data-testid="suggested-action"]') as HTMLElement | null;
+    expect(suggestedAction).toBeTruthy();
+    expect(suggestedAction?.querySelector('span')?.textContent?.trim()).toBe('Suggested action');
+    expect(suggestedAction?.querySelector('strong')?.textContent?.trim()).toBe('Schedule a wellness check-in and review workload');
+
+    fixture.destroy();
+
+    fixture = TestBed.createComponent(CompliancePageComponent);
+    component = fixture.componentInstance;
+    component.ngOnInit = () => {};
+    component.overview = overviewResponse;
+    component.viewState = 'ready';
+    component.selectedException = exceptionWithoutAction;
+    fixture.detectChanges();
+    await settle();
+    await settle();
+    fixture.detectChanges();
+
+    expect(document.body.querySelector('[data-testid="suggested-action"]')).toBeFalsy();
   });
 });

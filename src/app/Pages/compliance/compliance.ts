@@ -22,7 +22,7 @@ import { TableShellComponent } from '../../shared/ui/table-shell/table-shell.com
 import { TableSkeletonLoaderComponent } from '../../shared/ui/table-skeleton-loader/table-skeleton-loader.component';
 import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
-type ComplianceViewState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorkspace' | 'scopeUnavailable';
+type ComplianceViewState = 'loading' | 'ready' | 'error' | 'unavailable' | 'permission' | 'noWorkspace' | 'scopeUnavailable';
 type FeedbackMessage = {
   type: 'info' | 'error';
   text: string;
@@ -156,6 +156,10 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
 
   get showCoverageSummary(): boolean {
     return Boolean(this.overview?.summary) && this.overview?.hasAnyData === true;
+  }
+
+  get showCoverageKpi(): boolean {
+    return this.overview?.coverageProven === true;
   }
 
   get showCoverageEmpty(): boolean {
@@ -389,7 +393,13 @@ export class CompliancePageComponent implements OnInit, OnDestroy {
       const overview = await this.complianceService.loadComplianceOverview(activeContext, this.filters, refresh);
       this.overview = overview;
       this.partialWarning = overview.partialWarning ?? '';
-      this.viewState = overview.permissionDenied ? 'permission' : 'ready';
+      if (overview.permissionDenied) {
+        this.viewState = 'permission';
+      } else if (overview.dataUnavailable) {
+        this.viewState = 'unavailable';
+      } else {
+        this.viewState = 'ready';
+      }
     } catch (error: unknown) {
       const status = (error as { status?: number } | null)?.status ?? 0;
       const message = (error as { message?: string } | null)?.message ?? '';

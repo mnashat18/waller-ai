@@ -75,6 +75,7 @@ export type ComplianceExceptionRow = {
   linkedInviteEmail: string | null;
   invitedBy: string | null;
   reason: string | null;
+  suggestedAction: string | null;
 };
 
 export type ProfileLinkageIssueRow = {
@@ -112,7 +113,9 @@ export type ComplianceOverviewData = {
   departmentMetadataBlocked: boolean;
   scanResultsAccess: 'available' | 'permission_blocked' | 'degraded';
   permissionDenied: boolean;
+  dataUnavailable: boolean;
   hasAnyData: boolean;
+  coverageProven: boolean;
   sourceCounts: {
     members: number;
     departments: number;
@@ -157,9 +160,6 @@ type ScanResultRecord = {
   readiness_score?: number | string | null;
   confidence?: number | string | null;
   task_performance_score?: number | string | null;
-  readiness_summary?: string | null;
-  operational_summary?: string | null;
-  recommended_action?: string | null;
   explanation?: string | null;
   suggested_action?: string | null;
   date_created?: string | null;
@@ -171,6 +171,7 @@ type ScanResultsLoadResult = {
   rows: ScanResultRecord[];
   state: ScanResultsLoadState;
   missingFields: string[];
+  succeeded: boolean;
 };
 
 type MemberRiskRecord = {
@@ -223,6 +224,8 @@ export class ComplianceService {
         departmentMetadataBlocked: boolean;
         departmentMetadataUnreadable: boolean;
         scanResultsAccess: ScanResultsLoadState;
+        scanResultsSucceeded: boolean;
+        wellnessScansSucceeded: boolean;
         memberLastRiskByIdEntries: Array<[string, string]>;
       }
     | null = null;
@@ -261,6 +264,8 @@ export class ComplianceService {
     let departmentMetadataBlocked = false;
     let departmentMetadataUnreadable = false;
     let scanResultsAccess: ScanResultsLoadState = 'available';
+    let scanResultsSucceeded = true;
+    let wellnessScansSucceeded = true;
     let memberLastRiskById = new Map<string, string>();
     const warnings = new Set<string>();
     let forbiddenSources = 0;
@@ -275,6 +280,8 @@ export class ComplianceService {
       departmentMetadataBlocked = this.cache?.departmentMetadataBlocked ?? false;
       departmentMetadataUnreadable = this.cache?.departmentMetadataUnreadable ?? false;
       scanResultsAccess = this.cache?.scanResultsAccess ?? 'available';
+      scanResultsSucceeded = this.cache?.scanResultsSucceeded ?? true;
+      wellnessScansSucceeded = this.cache?.wellnessScansSucceeded ?? true;
       memberLastRiskById = new Map(this.cache?.memberLastRiskByIdEntries ?? []);
     } else {
       const token = this.auth.getStoredAccessToken() ?? '';
@@ -333,9 +340,11 @@ export class ComplianceService {
         });
       }
       wellnessScans = this.resolveSettled('wellness_scans', wellnessScansSettled, warnings, () => { forbiddenSources += 1; });
+      wellnessScansSucceeded = wellnessScansSettled.status === 'fulfilled';
       const scanResultsLoad = this.resolveScanResultsSettled(scanResultsSettled, warnings, () => { forbiddenSources += 1; });
       scanResults = scanResultsLoad.rows;
       scanResultsAccess = scanResultsLoad.state;
+      scanResultsSucceeded = scanResultsLoad.succeeded;
       if (scanResultsAccess !== 'available') {
         console.warn('[COMPLIANCE_STATS_DEGRADED]', {
           reason: scanResultsAccess,
@@ -357,6 +366,8 @@ export class ComplianceService {
         departmentMetadataBlocked,
         departmentMetadataUnreadable,
         scanResultsAccess,
+        scanResultsSucceeded,
+        wellnessScansSucceeded,
         memberLastRiskByIdEntries: Array.from(memberLastRiskById.entries())
       };
     }
@@ -387,6 +398,14 @@ export class ComplianceService {
       alerts.length > 0 ||
       wellnessScans.length > 0;
 
+    const coverageProven = members.length > 0 && summary.scanEligibleMembersToday > 0;
+    // The compliance page renders only when the real-field scan_results fetch
+    // returned a usable payload AND the wellness_scans query that scopes it
+    // succeeded. Any partial success elsewhere (members, alerts, requests)
+    // cannot rescue this — without scan_results + wellness_scans the page
+    // cannot display readiness, coverage, or compliance exceptions truthfully.
+    const dataUnavailable = !scanResultsSucceeded || !wellnessScansSucceeded;
+
     return {
       workspaceName:
         activeContext.activeBusinessProfile.company_name?.trim() ||
@@ -405,7 +424,9 @@ export class ComplianceService {
       departmentMetadataBlocked,
       scanResultsAccess,
       permissionDenied: forbiddenSources >= 3 && !hasAnyData,
+      dataUnavailable,
       hasAnyData,
+      coverageProven,
       sourceCounts: {
         members: members.length,
         departments: departments.length,
@@ -530,6 +551,7 @@ export class ComplianceService {
 
   buildComplianceExceptions(data: NormalizedSource): ComplianceExceptionRow[] {
     const memberRiskLevelById = this.memberRiskLevelById(data);
+    const memberSuggestedActionById = this.memberSuggestedActionById(data);
     const activeMembers = this.applyDepartmentFilterToMembers(data.members, data.filters.department)
       .filter((member) => this.normalizeText(member.status) === 'active');
 
@@ -632,7 +654,8 @@ export class ComplianceService {
         requestRequestedAt: latestRequest?.requested_at ?? null,
         linkedInviteEmail,
         invitedBy: null,
-        reason
+        reason,
+        suggestedAction: memberSuggestedActionById.get(member.id) ?? null
       });
     }
 
@@ -950,7 +973,8 @@ export class ComplianceService {
     return {
       rows: [],
       state: status === 401 || status === 403 ? 'permission_blocked' : 'degraded',
-      missingFields: []
+      missingFields: [],
+      succeeded: false
     };
   }
 
@@ -1090,27 +1114,14 @@ export class ComplianceService {
       return {
         rows: [],
         state: 'available',
-        missingFields: []
+        missingFields: [],
+        succeeded: true
       };
     }
 
     const scanIdFilter = { path: ['scan_id'], operator: '_in', value: scopedScanIds.join(',') };
 
     const fieldVariants: string[][] = [
-      [
-        'id',
-        'date_created',
-        'scan_id',
-        'risk_level',
-        'readiness_score',
-        'confidence',
-        'task_performance_score',
-        'readiness_summary',
-        'operational_summary',
-        'recommended_action',
-        'explanation',
-        'suggested_action'
-      ],
       [
         'id',
         'date_created',
@@ -1161,7 +1172,8 @@ export class ComplianceService {
         return {
           rows,
           state: degradedFields.length ? 'degraded' : 'available',
-          missingFields: degradedFields
+          missingFields: degradedFields,
+          succeeded: true
         };
       } catch (error) {
         const status = this.httpStatus(error);
@@ -1174,7 +1186,8 @@ export class ComplianceService {
           return {
             rows: [],
             state: 'permission_blocked',
-            missingFields: []
+            missingFields: [],
+            succeeded: false
           };
         }
 
@@ -1199,7 +1212,8 @@ export class ComplianceService {
         return {
           rows: [],
           state: 'degraded',
-          missingFields: Array.from(missingFields)
+          missingFields: Array.from(missingFields),
+          succeeded: false
         };
       }
     }
@@ -1211,7 +1225,8 @@ export class ComplianceService {
     return {
       rows: [],
       state: 'degraded',
-      missingFields: Array.from(missingFields)
+      missingFields: Array.from(missingFields),
+      succeeded: false
     };
   }
 
@@ -1503,6 +1518,37 @@ export class ComplianceService {
       if (!merged.has(memberId) && risk) {
         merged.set(memberId, risk);
       }
+    }
+    return merged;
+  }
+
+  private memberSuggestedActionById(data: NormalizedSource): Map<string, string> {
+    const scanToMember = new Map<string, string>();
+    for (const scan of data.wellnessScans ?? []) {
+      const scanId = this.normalizeId(scan.id);
+      const memberId = this.normalizeId(scan.member);
+      if (!scanId || !memberId) continue;
+      scanToMember.set(scanId, memberId);
+    }
+
+    const latestByMember = new Map<string, { action: string; ts: number }>();
+    for (const result of data.scanResults ?? []) {
+      const scanId = this.normalizeId(result.scan_id);
+      if (!scanId) continue;
+      const memberId = scanToMember.get(scanId);
+      if (!memberId) continue;
+      const action = this.pickString(result.suggested_action);
+      if (!action) continue;
+      const ts = this.toTimestamp(result.date_created);
+      const current = latestByMember.get(memberId);
+      if (!current || ts >= current.ts) {
+        latestByMember.set(memberId, { action, ts });
+      }
+    }
+
+    const merged = new Map<string, string>();
+    for (const [memberId, payload] of latestByMember.entries()) {
+      merged.set(memberId, payload.action);
     }
     return merged;
   }
