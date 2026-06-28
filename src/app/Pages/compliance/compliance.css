@@ -1,5 +1,8 @@
 .compliance-page {
   container-type: inline-size;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
 }
 
 .compliance-scope-strip {
@@ -83,18 +86,23 @@
 
 .compliance-summary-grid {
   display: grid;
+  width: 100%;
   gap: 1rem;
+  align-items: stretch;
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: 1fr;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  box-sizing: border-box;
 }
 
-@container (min-width: 48rem) {
+@media (min-width: 768px) {
   .compliance-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@container (min-width: 80rem) {
+@media (min-width: 1120px) {
   .compliance-summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -102,19 +110,30 @@
 
 .compliance-summary-grid > * {
   min-width: 0;
+  min-inline-size: 0;
   display: flex;
+  align-self: stretch;
 }
 
 .compliance-summary-grid > * > .app-kpi-card,
 .compliance-summary-grid > .app-kpi-card {
   flex: 1 1 auto;
   width: 100%;
+  min-width: 0;
+  height: 100%;
 }
 
 .compliance-page .app-kpi-card {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.compliance-page .app-kpi-card .kpi-card-head,
+.compliance-page .app-kpi-card .kpi-card-copy {
+  min-width: 0;
 }
 
 .compliance-page .app-kpi-card .kpi-helper,
@@ -123,6 +142,14 @@
   overflow: visible;
   text-overflow: initial;
   word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.compliance-page .app-kpi-card .kpi-helper {
+  display: block;
+  max-width: none;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: initial;
 }
 
 .compliance-unavailable {
