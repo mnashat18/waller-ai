@@ -1283,7 +1283,7 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (max-width: 900px), (prefers-reduced-motion: reduce) {
   .reveal,
   .hero-ambient::before,
   .hero-ambient::after,
@@ -1303,5 +1303,12 @@
 
   .hero-ambient {
     opacity: 0.42;
+  }
+
+  .hero-ambient::before,
+  .hero-ambient::after,
+  .presentation-glow {
+    filter: none;
+    opacity: 0.18;
   }
 }
