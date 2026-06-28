@@ -1711,6 +1711,42 @@ export default {
             throw new Error('Scan request creation did not return an id.');
           }
 
+          const existingNotification = await trx('notifications')
+            .select(['id'])
+            .where({
+              business_profile: active.workspace_id,
+              user: targetMember.user_id,
+              type: 'scan_request',
+              link_type: 'scan_request',
+              link_id: String(created.id)
+            })
+            .first();
+
+          if (!existingNotification?.id) {
+            const [notification] = await trx('notifications')
+              .insert({
+                user: targetMember.user_id,
+                business_profile: active.workspace_id,
+                title: 'New scan request',
+                body: 'You have a new request to complete.',
+                type: 'scan_request',
+                status: 'unread',
+                link_type: 'scan_request',
+                link_id: String(created.id),
+                read_at: null,
+                meta: JSON.stringify({
+                  type: 'scan_request_created',
+                  screen: 'scan_request_detail',
+                  scan_request_id: String(created.id)
+                })
+              })
+              .returning(['id']);
+
+            if (!notification?.id) {
+              throw new Error('Notification creation did not return an id.');
+            }
+          }
+
           await trx('activity_events').insert({
             actor: userId,
             target_user: userId,
