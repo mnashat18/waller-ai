@@ -1821,7 +1821,7 @@ export default {
             updatePayload = {
               status: 'reviewed',
               reviewed_by: userId,
-              reviewed_at: new Date().toISOString()
+              reviewed_at: trx.fn.now()
             };
           } else if (validation.payload.action === 'resolve' && currentStatus === 'reviewed') {
             updatePayload = {
@@ -1837,9 +1837,15 @@ export default {
             });
           }
 
-          await trx('alerts')
-            .where({ id: alertId, business_profile: alert.business_profile })
+          const updatedCount = await trx('alerts')
+            .where({ id: alertId, business_profile: alert.business_profile, status: currentStatus })
             .update(updatePayload);
+
+          if (updatedCount !== 1) {
+            throw Object.assign(new Error('The alert workflow state changed before the action could be applied.'), {
+              code: 'CONFLICT'
+            });
+          }
 
           const updatedAlert = await loadAlertWorkflowRecord(trx, alertId);
           if (!updatedAlert) {
