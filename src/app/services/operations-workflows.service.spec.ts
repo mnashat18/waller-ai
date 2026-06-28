@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient, HttpHeaders } from '@angular/common/http';
 import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
-import { of, throwError } from 'rxjs';
+import { firstValueFrom, of, throwError } from 'rxjs';
 
 import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthService } from './auth';
@@ -9,7 +9,16 @@ import { WorkforceRosterApiService } from './workforce-roster-api.service';
 import { OperationsWorkflowsService, ScanRequestApiError } from './operations-workflows.service';
 
 describe('OperationsWorkflowsService', () => {
-  const activeContext = {
+  const activeContext: {
+    authInitialized: boolean;
+    workspaceInitialized: boolean;
+    isAuthenticated: boolean;
+    activeBusinessProfileId: string;
+    activeBusinessProfileName: string;
+    activeDepartmentId: string | null;
+    activeDepartmentName: string | null;
+    activeMemberRole: 'owner' | 'hr' | 'manager' | 'employee';
+  } = {
     authInitialized: true,
     workspaceInitialized: true,
     isAuthenticated: true,
@@ -214,55 +223,73 @@ describe('OperationsWorkflowsService', () => {
     expect(error.userMessage).toBe('Workspace access denied');
   });
 
-  it('resolves alert department labels from department ids and expanded objects while preserving raw status', () => {
-    const departments = [
-      { id: '11111111-1111-4111-8111-111111111111', name: 'Operations' },
-      { id: '22222222-2222-4222-8222-222222222222', name: 'Safety' }
-    ];
+  it('requests alerts from /items/alerts with department and review fields and resolves id and expanded department relations', async () => {
+    activeContext.activeMemberRole = 'manager';
+    activeContext.activeDepartmentId = 'department-1';
 
-    const idPayload = (service as unknown as { buildAlertsPageData: Function }).buildAlertsPageData(
-      departments,
-      [
+    const pagePromise = firstValueFrom(service.getAlertsPageData());
+
+    const alertsRequest = httpMock.expectOne((request) => request.url.includes('/items/alerts'));
+    expect(alertsRequest.request.method).toBe('GET');
+
+    const fields = new URLSearchParams(alertsRequest.request.urlWithParams.split('?')[1] ?? '').get('fields')?.split(',') ?? [];
+    expect(fields).toEqual(expect.arrayContaining([
+      'id',
+      'date_created',
+      'department',
+      'department.id',
+      'department.name',
+      'severity',
+      'title',
+      'message',
+      'status',
+      'reviewed_at'
+    ]));
+
+    alertsRequest.flush({
+      data: [
         {
           id: 'alert-1',
-          date_created: '2026-06-26T10:00:00.000Z',
+          date_created: '2026-06-28T10:00:00.000Z',
           business_profile: { id: 'profile-1', company_name: 'Wellar' },
-          department: '11111111-1111-4111-8111-111111111111',
+          department: 'department-1',
           status: 'new',
           severity: 'high',
           title: 'Returned alert',
           message: 'Returned alert message',
           reviewed_at: null
-        }
-      ],
-      []
-    );
-
-    expect(idPayload.rows[0].department_id).toBe('11111111-1111-4111-8111-111111111111');
-    expect(idPayload.rows[0].department_name).toBe('Operations');
-    expect(idPayload.rows[0].status).toBe('new');
-    expect(idPayload.statusOptions).toContain('new');
-
-    const objectPayload = (service as unknown as { buildAlertsPageData: Function }).buildAlertsPageData(
-      departments,
-      [
+        },
         {
           id: 'alert-2',
-          date_created: '2026-06-26T11:00:00.000Z',
+          date_created: '2026-06-28T11:00:00.000Z',
           business_profile: { id: 'profile-1', company_name: 'Wellar' },
-          department: { id: '22222222-2222-4222-8222-222222222222', name: 'Safety' },
+          department: { id: 'department-2', name: 'Safety' },
           status: 'open',
           severity: 'critical',
           title: 'Expanded alert',
           message: 'Expanded alert message',
-          reviewed_at: '2026-06-26T12:00:00.000Z'
+          reviewed_at: '2026-06-28T11:05:00.000Z'
         }
-      ],
-      []
-    );
+      ]
+    });
 
-    expect(objectPayload.rows[0].department_id).toBe('22222222-2222-4222-8222-222222222222');
-    expect(objectPayload.rows[0].department_name).toBe('Safety');
-    expect(objectPayload.rows[0].status).toBe('open');
+    const departmentsRequest = httpMock.expectOne((request) => request.url.includes('/items/departments'));
+    const notificationsRequest = httpMock.expectOne((request) => request.url.includes('/items/notifications'));
+    departmentsRequest.flush({
+      data: [
+        { id: 'department-1', name: 'Operations' },
+        { id: 'department-2', name: 'Safety' }
+      ]
+    });
+    notificationsRequest.flush({ data: [] });
+
+    const result = await pagePromise;
+    const idRow = result.rows.find((row: { id: string; department_name: string | null; reviewed_at: string | null }) => row.id === 'alert-1');
+    const expandedRow = result.rows.find((row: { id: string; department_name: string | null; reviewed_at: string | null }) => row.id === 'alert-2');
+
+    expect(idRow?.department_name).toBe('Operations');
+    expect(idRow?.reviewed_at).toBeNull();
+    expect(expandedRow?.department_name).toBe('Safety');
+    expect(expandedRow?.reviewed_at).toBe('2026-06-28T11:05:00.000Z');
   });
 });

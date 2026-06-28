@@ -1197,10 +1197,13 @@ export class OperationsWorkflowsService {
       'id',
       'date_created',
       'department',
+      'department.id',
+      'department.name',
       'severity',
       'title',
       'message',
-      'status'
+      'status',
+      'reviewed_at'
     ];
     const expandedFields = [
       ...baseFields,
@@ -1237,6 +1240,8 @@ export class OperationsWorkflowsService {
           'date_created',
           'business_profile',
           'department',
+          'department.id',
+          'department.name',
           'target_member',
           'target_user',
           'scan',
@@ -2525,17 +2530,30 @@ export class OperationsWorkflowsService {
     departmentNameById: Map<string, string>,
     fallback: string
   ): string {
+    const departmentRecord = this.objectRecord(value);
+    if (departmentRecord) {
+      const departmentId = this.normalizeId(departmentRecord);
+      if (departmentId && departmentNameById.has(departmentId)) {
+        return departmentNameById.get(departmentId) ?? fallback;
+      }
+
+      const explicitLabel = this.firstReadableLabel([
+        this.pickString(departmentRecord['name']),
+        this.pickString(departmentRecord['title']),
+        this.pickString(departmentRecord['label'])
+      ], '');
+      if (explicitLabel) {
+        return explicitLabel;
+      }
+    }
+
+    const departmentId = this.normalizeId(value);
+    if (departmentId) {
+      return departmentNameById.get(departmentId) ?? fallback;
+    }
+
     const directLabel = formatDepartment(value, '');
-    if (directLabel) {
-      return directLabel;
-    }
-
-    const id = this.normalizeId(value);
-    if (id) {
-      return departmentNameById.get(id) ?? fallback;
-    }
-
-    return fallback;
+    return directLabel || fallback;
   }
 
   private userLabel(user: unknown): string {
