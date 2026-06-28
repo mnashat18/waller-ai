@@ -402,8 +402,7 @@
 
 .presentation-panel__top,
 .presentation-window,
-.presentation-rail,
-.presentation-progress {
+.presentation-rail {
   position: relative;
   z-index: 1;
 }
@@ -442,7 +441,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 18px 48px rgba(2, 6, 23, 0.24);
-  animation: presentationSwap 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: presentationSwap .22s cubic-bezier(.22,1,.36,1);
 }
 
 .presentation-window::before {
@@ -497,7 +496,7 @@
   font-size: 0.8rem;
   font-weight: 760;
   cursor: pointer;
-  transition: background 0.28s ease, color 0.28s ease, border-color 0.28s ease, transform 0.28s ease, box-shadow 0.28s ease;
+  transition:background .18s,color .18s,border-color .18s,transform .18s;
 }
 
 .presentation-rail button.is-active {
@@ -506,22 +505,6 @@
   background: linear-gradient(135deg, #f6ca68, #e99c2f);
   transform: translateY(-1px);
   box-shadow: 0 12px 24px rgba(233, 156, 47, 0.18);
-}
-
-.presentation-progress {
-  height: 3px;
-  margin-top: 0.9rem;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.16);
-  overflow: hidden;
-}
-
-.presentation-progress span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #9ed8eb, #f0bd5f);
-  transition: width 0.1s linear;
 }
 
 @keyframes presentationSwap {
@@ -1293,7 +1276,7 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (max-width: 900px), (prefers-reduced-motion: reduce) {
   .reveal,
   .hero-ambient::before,
   .hero-ambient::after,
@@ -1305,13 +1288,19 @@
   :host ::ng-deep app-viewport-dialog .auth-card,
   .presentation-glow,
   .presentation-window,
-  .presentation-rail button,
-  .presentation-progress span {
+  .presentation-rail button {
     transition: none;
     animation: none;
   }
 
   .hero-ambient {
     opacity: 0.42;
+  }
+
+  .hero-ambient::before,
+  .hero-ambient::after,
+  .presentation-glow {
+    filter:none;
+    opacity:.18;
   }
 }

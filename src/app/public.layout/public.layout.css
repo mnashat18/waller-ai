@@ -665,7 +665,7 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (max-width: 900px), (prefers-reduced-motion: reduce) {
   .page-slot.is-transitioning,
   .orbit,
   .scroll-top-ring,
@@ -678,5 +678,14 @@
   .public-node {
     animation: none;
     transition: none;
+  }
+
+  .orbit {
+    filter: none;
+    opacity: 0.22;
+  }
+
+  .public-header {
+    backdrop-filter: none;
   }
 }

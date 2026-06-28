@@ -51,7 +51,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   ];
 
   activePresentationIndex = 0;
-  presentationProgress = 0;
   authMode: 'signup' | 'login' | null = null;
   submitting = false;
   resolvingOrganizationAccess = false;
@@ -76,8 +75,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   private routeSub?: Subscription;
   private authQuerySub?: Subscription;
-  private presentationTimer: ReturnType<typeof setInterval> | null = null;
-  private presentationProgressTimer: ReturnType<typeof setInterval> | null = null;
   private revealObserver: IntersectionObserver | null = null;
 
   constructor(
@@ -102,7 +99,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   }
 
   ngAfterViewInit() {
-    this.startPresentationRotation();
     this.setupReveal();
     setTimeout(() => this.focusProductFragment(), 0);
   }
@@ -110,14 +106,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   ngOnDestroy() {
     this.routeSub?.unsubscribe();
     this.authQuerySub?.unsubscribe();
-    if (this.presentationTimer) {
-      clearInterval(this.presentationTimer);
-      this.presentationTimer = null;
-    }
-    if (this.presentationProgressTimer) {
-      clearInterval(this.presentationProgressTimer);
-      this.presentationProgressTimer = null;
-    }
     if (this.revealObserver) {
       this.revealObserver.disconnect();
       this.revealObserver = null;
@@ -200,9 +188,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       return;
     }
     this.activePresentationIndex = index;
-    this.presentationProgress = 0;
     this.cdr.detectChanges();
-    this.restartPresentationRotation();
   }
 
   private focusFirstField(): void {
@@ -539,53 +525,6 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       return 'Account created successfully. Please verify your email if required, then log in.';
     }
     return 'Account created successfully. Please log in to continue.';
-  }
-
-  startPresentationRotation() {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const reduceMotion = this.prefersReducedMotion();
-    if (reduceMotion) {
-      this.presentationProgress = 0;
-      return;
-    }
-
-    this.restartPresentationRotation();
-  }
-
-  private restartPresentationRotation(): void {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const reduceMotion = this.prefersReducedMotion();
-    if (reduceMotion) {
-      return;
-    }
-
-    if (this.presentationTimer) {
-      clearInterval(this.presentationTimer);
-    }
-    if (this.presentationProgressTimer) {
-      clearInterval(this.presentationProgressTimer);
-    }
-
-    const intervalMs = 5000;
-    const progressStepMs = 100;
-    this.presentationProgress = 0;
-
-    this.presentationProgressTimer = setInterval(() => {
-      this.presentationProgress = Math.min(100, this.presentationProgress + (progressStepMs / intervalMs) * 100);
-      this.cdr.detectChanges();
-    }, progressStepMs);
-
-    this.presentationTimer = setInterval(() => {
-      this.activePresentationIndex = (this.activePresentationIndex + 1) % this.presentationStates.length;
-      this.presentationProgress = 0;
-      this.cdr.detectChanges();
-    }, intervalMs);
   }
 
   private prefersReducedMotion(): boolean {
