@@ -815,6 +815,92 @@ async function loadOrganizationMembership(trx, userId) {
   return { rows: normalized, active, userRow };
 }
 
+async function loadOrganizationMembershipForWorkspace(trx, userId, workspaceId) {
+  const rows = await loadActiveMembershipRows(trx, userId);
+  const normalized = rows.filter((row) => validateMembershipRow(row).ok && pickString(row.workspace_id) === pickString(workspaceId));
+  const userRow = await trx('directus_users')
+    .select('id', 'active_business_profile', 'active_department', 'active_member_role')
+    .where({ id: userId })
+    .first();
+  const active = selectCanonicalMembership(normalized);
+  return { rows: normalized, active, userRow };
+}
+
+async function loadAlertWorkflowRecord(trx, alertId) {
+  return trx('alerts as alert')
+    .leftJoin('business_profiles as profile', 'profile.id', 'alert.business_profile')
+    .leftJoin('departments as department', 'department.id', 'alert.department')
+    .leftJoin('directus_users as reviewer', 'reviewer.id', 'alert.reviewed_by')
+    .select(
+      'alert.id',
+      'alert.business_profile',
+      'alert.department',
+      'alert.status',
+      'alert.reviewed_by',
+      'alert.reviewed_at',
+      'alert.action_note',
+      'alert.action_type',
+      'alert.date_created',
+      'alert.date_updated',
+      'profile.company_name',
+      'department.name as department_name',
+      'reviewer.id as reviewed_by_id',
+      'reviewer.email as reviewed_by_email',
+      'reviewer.first_name as reviewed_by_first_name',
+      'reviewer.last_name as reviewed_by_last_name'
+    )
+    .where('alert.id', alertId)
+    .forUpdate()
+    .first();
+}
+
+function publicAlertWorkflowRecord(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+    business_profile: row.business_profile ?? null,
+    department: row.department ?? null,
+    status: row.status ?? null,
+    reviewed_by: row.reviewed_by_id
+      ? {
+          id: String(row.reviewed_by_id),
+          email: row.reviewed_by_email ?? null,
+          first_name: row.reviewed_by_first_name ?? null,
+          last_name: row.reviewed_by_last_name ?? null
+        }
+      : row.reviewed_by ?? null,
+    reviewed_at: row.reviewed_at ?? null,
+    action_note: row.action_note ?? null,
+    action_type: row.action_type ?? null,
+    date_created: row.date_created ?? null,
+    date_updated: row.date_updated ?? null
+  };
+}
+
+function validateAlertWorkflowPayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== 'action') {
+    return { ok: false, message: 'Only action is accepted.' };
+  }
+
+  const action = pickString(body.action, 32);
+  if (!action || !['start_review', 'mark_reviewed', 'resolve'].includes(action)) {
+    return { ok: false, message: 'action must be start_review, mark_reviewed, or resolve.' };
+  }
+
+  return {
+    ok: true,
+    payload: { action }
+  };
+}
+
 async function loadOrganizationProfile(trx, workspaceId) {
   return trx('business_profiles')
     .select([
@@ -1672,6 +1758,113 @@ export default {
 
         logger?.error?.(error, '[wellar] scan request queue failed');
         return serverError(res, 'Scan requests could not be loaded.');
+      }
+    });
+
+    router.post('/alerts/:alertId/workflow', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const alertId = pickString(req?.params?.alertId);
+      if (!alertId) {
+        return badRequest(res, 'alertId is required.');
+      }
+
+      const validation = validateAlertWorkflowPayload(req.body ?? {});
+      if (!validation.ok) {
+        return badRequest(res, validation.message);
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-alert-workflow:alert:${alertId}`
+          ]);
+
+          const alert = await loadAlertWorkflowRecord(trx, alertId);
+          if (!alert) {
+            throw Object.assign(new Error('The requested alert was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const { active } = await loadOrganizationMembershipForWorkspace(trx, userId, alert.business_profile);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const role = normalizeRole(active.member_role);
+          if (role !== 'owner' && role !== 'hr' && role !== 'manager') {
+            throw Object.assign(new Error('Owner, HR, or manager access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          if (role === 'manager' && pickString(active.department_id) !== pickString(alert.department)) {
+            throw Object.assign(new Error('Manager workflow actions are limited to their own department.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const currentStatus = pickString(alert.status)?.toLowerCase() ?? '';
+          let updatePayload = null;
+
+          if (validation.payload.action === 'start_review' && currentStatus === 'new') {
+            updatePayload = {
+              status: 'seen'
+            };
+          } else if (validation.payload.action === 'mark_reviewed' && currentStatus === 'seen') {
+            updatePayload = {
+              status: 'reviewed',
+              reviewed_by: userId,
+              reviewed_at: new Date().toISOString()
+            };
+          } else if (validation.payload.action === 'resolve' && currentStatus === 'reviewed') {
+            updatePayload = {
+              status: 'resolved'
+            };
+          } else if (currentStatus === 'resolved' || currentStatus === 'overridden') {
+            throw Object.assign(new Error('The selected alert workflow state can no longer be changed.'), {
+              code: 'CONFLICT'
+            });
+          } else {
+            throw Object.assign(new Error('The requested alert workflow transition is not valid.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          await trx('alerts')
+            .where({ id: alertId, business_profile: alert.business_profile })
+            .update(updatePayload);
+
+          const updatedAlert = await loadAlertWorkflowRecord(trx, alertId);
+          if (!updatedAlert) {
+            throw new Error('Alert workflow update did not return a row.');
+          }
+
+          return {
+            alert: publicAlertWorkflowRecord(updatedAlert)
+          };
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] alert workflow update failed');
+        return serverError(res, 'Alert workflow could not be updated.');
       }
     });
 

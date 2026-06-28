@@ -190,7 +190,7 @@
   white-space: nowrap;
 }
 
-.alerts-status--open {
+.alerts-status--new {
   border-color: rgba(125, 211, 252, 0.36);
   background: rgba(56, 189, 248, 0.16);
   color: rgb(186 230 253);
@@ -271,6 +271,11 @@
 .alerts-row-action--primary {
   border-color: rgba(110, 231, 183, 0.55);
   color: rgb(167 243 208);
+}
+
+.alerts-row-action--secondary {
+  border-color: rgba(148, 163, 184, 0.4);
+  color: rgb(226 232 240);
 }
 
 .alerts-drawer__panel {
@@ -368,9 +373,28 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 0.6rem;
   border-top: 1px solid rgba(148, 163, 184, 0.22);
   padding: 1rem;
+}
+
+.alerts-workflow-message {
+  margin: 0;
+  flex: 1 1 100%;
+  color: rgb(186 230 253);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.alerts-workflow-message--error {
+  color: rgb(254 202 202);
+}
+
+.alerts-workflow-action[disabled],
+.alerts-row-action--secondary[disabled] {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 @media (max-width: 760px) {

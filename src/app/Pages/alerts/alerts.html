@@ -211,9 +211,6 @@
                   <td>
                     <div class="alerts-row-actions">
                       <button type="button" class="alerts-row-action" (click)="viewAlert(row)">View</button>
-                      @if (isOwnerOrHr) {
-                        <span class="alerts-row-action-note">Workflow follow-up is not available in this release.</span>
-                      }
                     </div>
                   </td>
                 </tr>
@@ -242,7 +239,7 @@
             <span [class]="statusBadgeClass(row.status)">{{ row.statusLabel }}</span>
           </div>
         </div>
-        <button type="button" class="dashboard-action-button" (click)="closeAlertDetails()">Close</button>
+        <button type="button" class="dashboard-action-button" [disabled]="isWorkflowSaving" (click)="closeAlertDetails()">Close</button>
       </header>
 
       <div class="alerts-drawer__content">
@@ -263,10 +260,28 @@
       </div>
 
       <footer class="alerts-drawer__footer">
-        @if (isOwnerOrHr) {
-          <span class="alerts-row-action-note">Workflow follow-up is not available in this release.</span>
+        @if (workflowStatusMessage) {
+          <p class="alerts-workflow-message" [class.alerts-workflow-message--error]="workflowStatusMessage !== 'Saving alert update...'">
+            {{ workflowStatusMessage }}
+          </p>
         }
-        <button type="button" class="alerts-row-action alerts-row-action--primary" (click)="closeAlertDetails()">Close</button>
+
+        @if (selectedAlertWorkflowAction) {
+          <button
+            type="button"
+            class="alerts-row-action alerts-row-action--primary alerts-workflow-action"
+            [disabled]="isWorkflowSaving"
+            (click)="runSelectedAlertWorkflowAction()">
+            {{ isWorkflowSaving ? 'Saving...' : selectedAlertWorkflowLabel }}
+          </button>
+        }
+        <button
+          type="button"
+          class="alerts-row-action alerts-row-action--secondary"
+          [disabled]="isWorkflowSaving"
+          (click)="closeAlertDetails()">
+          Close
+        </button>
       </footer>
     </aside>
   </app-viewport-dialog>

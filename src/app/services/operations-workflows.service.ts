@@ -154,6 +154,20 @@ export class ScanRequestApiError extends Error {
   }
 }
 
+export type AlertWorkflowApiErrorCode = ScanRequestApiErrorCode;
+
+export class AlertWorkflowApiError extends Error {
+  constructor(
+    public readonly code: AlertWorkflowApiErrorCode,
+    public readonly status: number,
+    public readonly userMessage: string,
+    public readonly details?: unknown
+  ) {
+    super(userMessage);
+    this.name = 'AlertWorkflowApiError';
+  }
+}
+
 export type RequestRow = {
   id: string;
   status: string | null;
@@ -243,18 +257,27 @@ export type AlertsPageData = {
   statusOptions: string[];
   summary: {
     total: number;
-    open: number;
+    new: number;
     reviewed: number;
     escalated: number;
   };
 };
 
-export type AlertActionInput = {
-  status?: string | null;
-  reviewed_by?: string | null;
-  reviewed_at?: string | null;
-  action_note?: string | null;
-  action_type?: string | null;
+export type AlertWorkflowAction = 'start_review' | 'mark_reviewed' | 'resolve';
+
+export type AlertWorkflowRecord = {
+  id: string;
+  status: string | null;
+  reviewed_by: string | number | Record<string, unknown> | null;
+  reviewed_at: string | null;
+  action_note: string | null;
+  action_type: string | null;
+  date_created?: string | null;
+  date_updated?: string | null;
+};
+
+export type AlertWorkflowResponse = {
+  alert: AlertWorkflowRecord;
 };
 
 type UserRecord = {
@@ -1037,15 +1060,20 @@ export class OperationsWorkflowsService {
     return 'This action requires an approved server-side workflow.';
   }
 
-  updateAlert(alertId: string, input: AlertActionInput): Observable<Record<string, unknown> | null> {
-    void alertId;
-    void input;
-    return throwError(() => new Error(this.alertReviewFlowPrerequisiteMessage()));
+  updateAlert(alertId: string, action: AlertWorkflowAction): Observable<AlertWorkflowRecord> {
+    return this.performAlertWorkflowAction(alertId, action);
   }
 
-  markAlertReviewed(alertId: string): Observable<void> {
-    void alertId;
-    return throwError(() => new Error(this.alertReviewFlowPrerequisiteMessage()));
+  startAlertReview(alertId: string): Observable<AlertWorkflowRecord> {
+    return this.performAlertWorkflowAction(alertId, 'start_review');
+  }
+
+  markAlertReviewed(alertId: string): Observable<AlertWorkflowRecord> {
+    return this.performAlertWorkflowAction(alertId, 'mark_reviewed');
+  }
+
+  resolveAlert(alertId: string): Observable<AlertWorkflowRecord> {
+    return this.performAlertWorkflowAction(alertId, 'resolve');
   }
 
   private loadDepartmentsForRequests(context: ScopedContext): Observable<DepartmentRecord[]> {
@@ -1844,14 +1872,86 @@ export class OperationsWorkflowsService {
         name: formatDepartment(department, 'Unnamed Department')
       })).filter((item) => item.id),
       severityOptions: this.uniqueValues(rows.map((row) => row.severity)),
-      statusOptions: this.uniqueValues(rows.map((row) => row.status), ['open', 'new', 'seen', 'reviewed', 'resolved', 'overridden']),
+      statusOptions: this.uniqueValues(rows.map((row) => row.status), ['new', 'seen', 'reviewed', 'resolved', 'overridden']),
       summary: {
         total: rows.length,
-        open: rows.filter((row) => this.normalizeText(row.status) === 'new').length,
+        new: rows.filter((row) => this.normalizeText(row.status) === 'new').length,
         reviewed: rows.filter((row) => this.normalizeText(row.status) === 'reviewed').length,
         escalated: rows.filter((row) => this.normalizeText(row.action_type) === 'escalated').length
       }
     };
+  }
+
+  private performAlertWorkflowAction(alertId: string, action: AlertWorkflowAction): Observable<AlertWorkflowRecord> {
+    return this.ensureScopedContext(true).pipe(
+      switchMap((context) => {
+        const normalizedAlertId = this.normalizeId(alertId);
+        if (!normalizedAlertId) {
+          return throwError(() => new AlertWorkflowApiError('invalid_response', 0, 'Alert id is missing.'));
+        }
+
+        return this.http.post<{ data?: AlertWorkflowResponse }>(
+          `${this.api}/wellar/alerts/${encodeURIComponent(normalizedAlertId)}/workflow`,
+          { action },
+          { headers: this.headers(context.token), withCredentials: true }
+        ).pipe(
+          timeout(25000),
+          map((response) => {
+            const alert = response.data?.alert;
+            if (!alert?.id || !alert.status) {
+              throw new AlertWorkflowApiError('invalid_response', 0, 'Alert workflow response was invalid.');
+            }
+            return this.normalizeAlertWorkflowRecord(alert);
+          }),
+          catchError((error) => this.handleAlertWorkflowError(error))
+        );
+      })
+    );
+  }
+
+  private normalizeAlertWorkflowRecord(record: AlertWorkflowRecord): AlertWorkflowRecord {
+    return {
+      id: this.normalizeId(record.id) ?? '',
+      status: this.pickString(record.status),
+      reviewed_by: record.reviewed_by ?? null,
+      reviewed_at: record.reviewed_at ?? null,
+      action_note: record.action_note?.trim() || null,
+      action_type: record.action_type?.trim() || null,
+      date_created: record.date_created ?? null,
+      date_updated: record.date_updated ?? null
+    };
+  }
+
+  private handleAlertWorkflowError(error: unknown): Observable<never> {
+    if (error instanceof AlertWorkflowApiError) {
+      return throwError(() => error);
+    }
+
+    const status = (error as { status?: number } | null)?.status ?? 0;
+    const directusError = this.objectRecord((error as { error?: unknown } | null)?.error);
+    const backendCode = this.pickString(directusError?.['code'])?.toUpperCase() ?? '';
+    const backendMessage = this.pickString(directusError?.['message']);
+
+    if (status === 0) {
+      return throwError(() => new AlertWorkflowApiError('network_error', status, 'Alert workflow update could not reach the server.', error));
+    }
+    if (status === 401 || backendCode === 'UNAUTHORIZED') {
+      return throwError(() => new AlertWorkflowApiError('unauthorized', 401, 'Session expired. Please sign in again.', error));
+    }
+    if (status === 403 || backendCode === 'FORBIDDEN') {
+      return throwError(() => new AlertWorkflowApiError('forbidden', 403, backendMessage ?? 'You do not have permission to change this alert.', error));
+    }
+    if (status === 404 || backendCode === 'NOT_FOUND') {
+      return throwError(() => new AlertWorkflowApiError('not_found', 404, backendMessage ?? 'The selected alert was not found.', error));
+    }
+    if (status === 409 || backendCode === 'CONFLICT') {
+      return throwError(() => new AlertWorkflowApiError('conflict', 409, backendMessage ?? 'The alert workflow state changed before the action could be applied.', error));
+    }
+    if (status >= 500 || backendCode === 'SERVER_ERROR') {
+      return throwError(() => new AlertWorkflowApiError('server_error', status || 500, backendMessage ?? 'Alert workflow update failed.', error));
+    }
+
+    return throwError(() => new AlertWorkflowApiError('unknown', status, backendMessage ?? 'Alert workflow update failed.', error));
   }
 
   private queryItems<T>(

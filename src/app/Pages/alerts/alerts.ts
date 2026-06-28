@@ -18,8 +18,9 @@ import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewpor
 import { sanitizeDisplayValue } from '../../shared/utils/display-formatters';
 
 type AlertsPageState = 'loading' | 'ready' | 'error' | 'permission' | 'noWorkspace' | 'scopeUnavailable';
-type AlertStatus = 'open' | 'new' | 'seen' | 'reviewed' | 'resolved' | 'overridden' | 'unknown';
+type AlertStatus = 'new' | 'seen' | 'reviewed' | 'resolved' | 'overridden' | 'unknown';
 type AlertSeverity = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
+type AlertWorkflowAction = 'start_review' | 'mark_reviewed' | 'resolve';
 
 type AlertsFilters = {
   search: string;
@@ -78,6 +79,8 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
   errorMessage = '';
   feedbackMessage = '';
   warningMessage = '';
+  workflowStatusMessage = '';
+  workflowSavingAction: AlertWorkflowAction | null = null;
 
   filters: AlertsFilters = {
     search: '',
@@ -192,10 +195,15 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   viewAlert(row: AlertViewModel): void {
     this.selectedAlert = row;
+    this.workflowStatusMessage = '';
   }
 
   closeAlertDetails(): void {
+    if (this.isWorkflowSaving) {
+      return;
+    }
     this.selectedAlert = null;
+    this.workflowStatusMessage = '';
   }
 
   trackByAlert(index: number, row: AlertViewModel): string {
@@ -212,7 +220,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
     if (status === 'seen') return 'alerts-status alerts-status--seen';
     if (status === 'overridden') return 'alerts-status alerts-status--overridden';
     if (status === 'unknown') return 'alerts-status alerts-status--neutral';
-    return 'alerts-status alerts-status--open';
+    return 'alerts-status alerts-status--new';
   }
 
   severityBadgeClass(value: AlertSeverity): string {
@@ -223,8 +231,32 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
     return 'alerts-severity alerts-severity--low';
   }
 
+  get isWorkflowSaving(): boolean {
+    return this.workflowSavingAction !== null;
+  }
+
+  get selectedAlertWorkflowAction(): AlertWorkflowAction | null {
+    if (!this.selectedAlert || (!this.isOwnerOrHr && !this.isManager)) {
+      return null;
+    }
+
+    if (this.selectedAlert.status === 'new') return 'start_review';
+    if (this.selectedAlert.status === 'seen') return 'mark_reviewed';
+    if (this.selectedAlert.status === 'reviewed') return 'resolve';
+    return null;
+  }
+
+  get selectedAlertWorkflowLabel(): string {
+    const action = this.selectedAlertWorkflowAction;
+    if (action === 'start_review') return 'Start review';
+    if (action === 'mark_reviewed') return 'Mark reviewed';
+    if (action === 'resolve') return 'Resolve alert';
+    return '';
+  }
+
   private async loadAlerts(force = false): Promise<void> {
     const runId = ++this.loadRunId;
+    const selectedAlertId = this.selectedAlert?.key ?? null;
     this.pageState = 'loading';
     this.errorMessage = '';
     this.warningMessage = '';
@@ -260,6 +292,12 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
       this.alerts = (pageData?.rows ?? []).map((raw, index) => this.normalizeAlert(raw, index));
       this.buildFilterOptions();
       this.applyFilters();
+      if (selectedAlertId) {
+        const refreshedSelected = this.alerts.find((row) => row.key === selectedAlertId);
+        if (refreshedSelected) {
+          this.selectedAlert = refreshedSelected;
+        }
+      }
       this.pageState = 'ready';
     } catch (error: unknown) {
       if (runId !== this.loadRunId) return;
@@ -278,6 +316,35 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
         this.pageState = 'error';
       }
     } finally {
+      this.cdr.markForCheck();
+    }
+  }
+
+  async runSelectedAlertWorkflowAction(): Promise<void> {
+    const action = this.selectedAlertWorkflowAction;
+    const row = this.selectedAlert;
+    if (!action || !row || this.isWorkflowSaving) {
+      return;
+    }
+
+    this.workflowSavingAction = action;
+    this.workflowStatusMessage = 'Saving alert update...';
+
+    try {
+      if (action === 'start_review') {
+        await firstValueFrom(this.workflows.startAlertReview(row.key).pipe(timeout(25000)));
+      } else if (action === 'mark_reviewed') {
+        await firstValueFrom(this.workflows.markAlertReviewed(row.key).pipe(timeout(25000)));
+      } else {
+        await firstValueFrom(this.workflows.resolveAlert(row.key).pipe(timeout(25000)));
+      }
+
+      this.workflowStatusMessage = '';
+      await this.loadAlerts(true);
+    } catch (error: unknown) {
+      this.workflowStatusMessage = this.workflowErrorMessage(error);
+    } finally {
+      this.workflowSavingAction = null;
       this.cdr.markForCheck();
     }
   }
@@ -359,7 +426,6 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   private normalizeStatus(value: string | null | undefined): AlertStatus {
     const normalized = String(value ?? '').trim().toLowerCase();
-    if (normalized === 'open') return 'open';
     if (normalized === 'new') return 'new';
     if (normalized === 'seen') return 'seen';
     if (normalized === 'reviewed') return 'reviewed';
@@ -369,8 +435,8 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
   }
 
   private statusLabel(status: AlertStatus): string {
-    if (status === 'open') return 'Open';
     if (status === 'new') return 'New';
+    if (status === 'seen') return 'In review';
     return this.toTitleCase(status);
   }
 
@@ -409,6 +475,32 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
       return this.normalizeId((value as Record<string, unknown>)['id']);
     }
     return null;
+  }
+
+  private workflowErrorMessage(error: unknown): string {
+    const status = (error as { status?: number } | null)?.status ?? 0;
+    const message = String(
+      (error as { userMessage?: string; message?: string } | null)?.userMessage ??
+      (error as { message?: string } | null)?.message ??
+      ''
+    ).trim();
+
+    if (status === 401) {
+      return message || 'Session expired. Please sign in again.';
+    }
+    if (status === 403) {
+      return message || 'You do not have permission to change this alert.';
+    }
+    if (status === 404) {
+      return message || 'The selected alert was not found.';
+    }
+    if (status === 409) {
+      return message || 'The alert was updated elsewhere. Refresh and try again.';
+    }
+    if (status >= 500) {
+      return message || 'Alert workflow update failed.';
+    }
+    return message || 'Alert workflow update failed.';
   }
 
 }

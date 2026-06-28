@@ -6,7 +6,11 @@ import { firstValueFrom, of, throwError } from 'rxjs';
 import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthService } from './auth';
 import { WorkforceRosterApiService } from './workforce-roster-api.service';
-import { OperationsWorkflowsService, ScanRequestApiError } from './operations-workflows.service';
+import {
+  AlertWorkflowApiError,
+  OperationsWorkflowsService,
+  ScanRequestApiError
+} from './operations-workflows.service';
 
 describe('OperationsWorkflowsService', () => {
   const activeContext: {
@@ -264,7 +268,7 @@ describe('OperationsWorkflowsService', () => {
           date_created: '2026-06-28T11:00:00.000Z',
           business_profile: { id: 'profile-1', company_name: 'Wellar' },
           department: { id: 'department-2', name: 'Safety' },
-          status: 'open',
+          status: 'seen',
           severity: 'critical',
           title: 'Expanded alert',
           message: 'Expanded alert message',
@@ -291,5 +295,134 @@ describe('OperationsWorkflowsService', () => {
     expect(idRow?.reviewed_at).toBeNull();
     expect(expandedRow?.department_name).toBe('Safety');
     expect(expandedRow?.reviewed_at).toBe('2026-06-28T11:05:00.000Z');
+  });
+
+  it('posts alert workflow actions through the secured endpoint with only the supported action field', async () => {
+    const startPromise = firstValueFrom(service.startAlertReview('alert-1'));
+    const startRequest = httpMock.expectOne('https://dash.conntinuity.com/wellar/alerts/alert-1/workflow');
+    expect(startRequest.request.method).toBe('POST');
+    expect(startRequest.request.body).toEqual({ action: 'start_review' });
+    startRequest.flush({
+      data: {
+        alert: {
+          id: 'alert-1',
+          status: 'seen',
+          reviewed_by: null,
+          reviewed_at: null,
+          action_note: null,
+          action_type: null
+        }
+      }
+    });
+    expect((await startPromise).status).toBe('seen');
+
+    const reviewPromise = firstValueFrom(service.markAlertReviewed('alert-1'));
+    const reviewRequest = httpMock.expectOne('https://dash.conntinuity.com/wellar/alerts/alert-1/workflow');
+    expect(reviewRequest.request.method).toBe('POST');
+    expect(reviewRequest.request.body).toEqual({ action: 'mark_reviewed' });
+    reviewRequest.flush({
+      data: {
+        alert: {
+          id: 'alert-1',
+          status: 'reviewed',
+          reviewed_by: {
+            id: 'user-1',
+            email: 'alex@example.com',
+            first_name: 'Alex',
+            last_name: 'Parker'
+          },
+          reviewed_at: '2026-06-28T12:00:00.000Z',
+          action_note: null,
+          action_type: 'none'
+        }
+      }
+    });
+    const reviewed = await reviewPromise;
+    expect(reviewed.status).toBe('reviewed');
+    expect((reviewed.reviewed_by as { id?: string } | null)?.id).toBe('user-1');
+    expect(reviewed.reviewed_at).toBe('2026-06-28T12:00:00.000Z');
+
+    const resolvePromise = firstValueFrom(service.resolveAlert('alert-1'));
+    const resolveRequest = httpMock.expectOne('https://dash.conntinuity.com/wellar/alerts/alert-1/workflow');
+    expect(resolveRequest.request.method).toBe('POST');
+    expect(resolveRequest.request.body).toEqual({ action: 'resolve' });
+    resolveRequest.flush({
+      data: {
+        alert: {
+          id: 'alert-1',
+          status: 'resolved',
+          reviewed_by: {
+            id: 'user-1',
+            email: 'alex@example.com',
+            first_name: 'Alex',
+            last_name: 'Parker'
+          },
+          reviewed_at: '2026-06-28T12:00:00.000Z',
+          action_note: null,
+          action_type: 'none'
+        }
+      }
+    });
+    const resolved = await resolvePromise;
+    expect(resolved.status).toBe('resolved');
+    expect((resolved.reviewed_by as { id?: string } | null)?.id).toBe('user-1');
+  });
+
+  it('maps stale alert workflow transitions into conflict errors', () => {
+    let captured: AlertWorkflowApiError | null = null;
+
+    service.resolveAlert('alert-1').subscribe({
+      next: () => {
+        throw new Error('expected resolveAlert to reject');
+      },
+      error: (error: AlertWorkflowApiError) => {
+        captured = error;
+      }
+    });
+
+    const req = httpMock.expectOne('https://dash.conntinuity.com/wellar/alerts/alert-1/workflow');
+    req.flush(
+      {
+        error: {
+          code: 'CONFLICT',
+          message: 'The alert workflow state changed before the action could be applied.'
+        }
+      },
+      { status: 409, statusText: 'Conflict' }
+    );
+
+    expect(captured).toBeTruthy();
+    const error = captured as unknown as AlertWorkflowApiError;
+    expect(error.code).toBe('conflict');
+    expect(error.status).toBe(409);
+  });
+
+  it('maps forbidden alert workflow responses into a user-safe error', () => {
+    let captured: AlertWorkflowApiError | null = null;
+
+    service.startAlertReview('alert-1').subscribe({
+      next: () => {
+        throw new Error('expected startAlertReview to reject');
+      },
+      error: (error: AlertWorkflowApiError) => {
+        captured = error;
+      }
+    });
+
+    const req = httpMock.expectOne('https://dash.conntinuity.com/wellar/alerts/alert-1/workflow');
+    req.flush(
+      {
+        error: {
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to change this alert.'
+        }
+      },
+      { status: 403, statusText: 'Forbidden' }
+    );
+
+    expect(captured).toBeTruthy();
+    const error = captured as unknown as AlertWorkflowApiError;
+    expect(error.code).toBe('forbidden');
+    expect(error.status).toBe(403);
   });
 });
