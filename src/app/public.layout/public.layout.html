@@ -46,7 +46,11 @@
         <div class="public-nav__links">
           <a routerLink="/" fragment="product" (click)="closeMobileMenu()">Product</a>
           <a routerLink="/pricing" [class.is-active]="isActiveRoute('/pricing')" (click)="closeMobileMenu()">Plan &amp; Support</a>
-          <a routerLink="/download-app" [class.is-active]="isActiveRoute('/download-app')" (click)="closeMobileMenu()">Mobile Scan</a>
+          <a
+            routerLink="/download-app"
+            class="public-nav__mobile-scan"
+            [class.is-active]="isActiveRoute('/download-app')"
+            (click)="closeMobileMenu()">Mobile Scan</a>
           <a routerLink="/contact" [class.is-active]="isActiveRoute('/contact')" (click)="closeMobileMenu()">Contact</a>
         </div>
         <div class="public-nav__actions">

@@ -23,38 +23,51 @@
       </div>
 
       <div class="hero-visual reveal delay-2">
-        <div class="phone">
-          <div class="phone-screen">
-            <div class="scan-pill">Mobile handoff</div>
-            <div class="scan-title">Assigned Scan Request</div>
-            <div class="signal-line"></div>
-            <div class="metric-grid">
-              <div class="metric">
-                <span class="label">Step</span>
-                <span class="value">Open request</span>
+        <div class="handoff-preview">
+          <div class="handoff-preview__intro">
+            <span class="pill pill--preview">Employee path</span>
+            <h2>Assigned request to mobile completion to web review.</h2>
+            <p>
+              Assigned scan work stays outside the desktop shell. Employees complete the task on mobile,
+              and the result returns to authorized web review.
+            </p>
+          </div>
+
+          <div class="handoff-device" aria-label="Mobile handoff workflow preview">
+            <div class="handoff-device__header">
+              <div>
+                <span>Assigned Scan Request</span>
+                <small>Mobile completion</small>
               </div>
-              <div class="metric">
-                <span class="label">Step</span>
-                <span class="value">Complete scan</span>
-              </div>
-              <div class="metric">
-                <span class="label">Step</span>
-                <span class="value">Submit result</span>
-              </div>
-              <div class="metric">
-                <span class="label">Step</span>
-                <span class="value">Web review</span>
-              </div>
+              <span class="handoff-device__tag">Employee path</span>
             </div>
-            <div class="insight">
-              <div class="insight-title">Operational handoff</div>
-              <p>Completion returns to the web application for role-scoped operational review.</p>
+
+            <div class="handoff-device__body">
+              <article class="handoff-step">
+                <span class="handoff-step__index">01</span>
+                <div>
+                  <h3>Assigned request</h3>
+                  <p>The scan request is issued to the employee mobile path.</p>
+                </div>
+              </article>
+              <div class="handoff-connector" aria-hidden="true"></div>
+              <article class="handoff-step handoff-step--accent">
+                <span class="handoff-step__index">02</span>
+                <div>
+                  <h3>Complete on mobile</h3>
+                  <p>The employee scans, checks the task, and submits the result.</p>
+                </div>
+              </article>
+              <div class="handoff-connector" aria-hidden="true"></div>
+              <article class="handoff-step">
+                <span class="handoff-step__index">03</span>
+                <div>
+                  <h3>Authorized web review</h3>
+                  <p>The completed result returns to Scan Requests, Compliance, Alerts, and Reports.</p>
+                </div>
+              </article>
             </div>
           </div>
-        </div>
-        <div class="floating-card">
-          <div class="score">Employee path</div>
-          <p>Employees do not use the desktop operations shell.</p>
         </div>
       </div>
     </div>
