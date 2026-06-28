@@ -1,5 +1,6 @@
 const MAX_TEXT = 255;
 const MAX_COMPANY_NAME = 120;
+const PUSH_WEBHOOK_TIMEOUT_MS = 5000;
 
 const FORBIDDEN_INPUT_KEYS = new Set([
   'user',
@@ -1120,6 +1121,72 @@ async function loadOpenScanRequestForMember(trx, workspaceId, memberId) {
     .first();
 }
 
+async function dispatchScanRequestCreatedWebhook(logger, createdRequest) {
+  const webhookUrl = pickString(process.env.PUSH_NOTIFICATION_WEBHOOK_URL);
+  const webhookSecret = pickString(process.env.PUSH_NOTIFICATION_DIRECTUS_SECRET);
+  const eventName = 'scan_request_created';
+  const scanRequestId = String(createdRequest?.id ?? '');
+  const targetMemberId = String(createdRequest?.target_member ?? '');
+  const businessProfileId = String(createdRequest?.business_profile ?? '');
+
+  if (!webhookUrl || !webhookSecret) {
+    logger?.info?.(
+      `[wellar] scan request webhook skipped event=${eventName} scan_request_id=${scanRequestId} reason=missing_configuration`
+    );
+    return { ok: false, skipped: true };
+  }
+
+  if (typeof fetch !== 'function') {
+    logger?.info?.(
+      `[wellar] scan request webhook skipped event=${eventName} scan_request_id=${scanRequestId} reason=fetch_unavailable`
+    );
+    return { ok: false, skipped: true };
+  }
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), PUSH_WEBHOOK_TIMEOUT_MS) : null;
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Directus-Secret': webhookSecret
+      },
+      body: JSON.stringify({
+        event: eventName,
+        scan_request_id: scanRequestId,
+        target_member: targetMemberId,
+        business_profile: businessProfileId
+      }),
+      signal: controller?.signal
+    });
+
+    if (!response.ok) {
+      logger?.info?.(
+        `[wellar] scan request webhook failed event=${eventName} scan_request_id=${scanRequestId} status=${response.status}`
+      );
+      return { ok: false, status: response.status };
+    }
+
+    logger?.info?.(
+      `[wellar] scan request webhook dispatched event=${eventName} scan_request_id=${scanRequestId} status=${response.status}`
+    );
+    return { ok: true, status: response.status };
+  } catch (error) {
+    logger?.info?.(
+      `[wellar] scan request webhook failed event=${eventName} scan_request_id=${scanRequestId} error_class=${
+        error?.name ?? 'Error'
+      }`
+    );
+    return { ok: false, errorClass: error?.name ?? 'Error' };
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 export default {
   id: 'wellar',
   handler: (router, context) => {
@@ -1663,6 +1730,14 @@ export default {
             request: publicScanRequest(created, targetMember)
           };
         });
+
+        if (result?.request) {
+          await dispatchScanRequestCreatedWebhook(logger, {
+            id: result.request.id,
+            target_member: result.request.target_member?.id ?? null,
+            business_profile: result.request.business_profile?.id ?? null
+          });
+        }
 
         return res.status(201).json({ data: result });
       } catch (error) {
