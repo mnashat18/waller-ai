@@ -179,7 +179,12 @@ function assertRequiredUuidId(table, payload) {
   assert.match(payload.id, uuidPattern, `${table}.id must be a valid UUID`);
 }
 
-function createQueryBuilder(table, calls) {
+function extractEqualityFilters(filters) {
+  return Object.fromEntries(filters.map(({ column, value }) => [String(column).split('.').at(-1), value]));
+}
+
+function createQueryBuilder(table, state, scope) {
+  const filters = [];
   const builder = {
     leftJoin() {
       return builder;
@@ -190,11 +195,18 @@ function createQueryBuilder(table, calls) {
     select() {
       return builder;
     },
-    where() {
+    where(columnOrObject, value) {
+      if (typeof columnOrObject === 'object' && columnOrObject !== null) {
+        for (const [column, filterValue] of Object.entries(columnOrObject)) {
+          filters.push({ column, value: filterValue });
+        }
+      } else {
+        filters.push({ column: columnOrObject, value });
+      }
       return builder;
     },
-    andWhere() {
-      return builder;
+    andWhere(columnOrObject, value) {
+      return builder.where(columnOrObject, value);
     },
     whereIn() {
       return builder;
@@ -208,13 +220,61 @@ function createQueryBuilder(table, calls) {
     count() {
       return builder;
     },
-    first: async () => undefined,
+    first: async () => {
+      const equalityFilters = extractEqualityFilters(filters);
+
+      if (table === 'business_profile_members as member') {
+        if (equalityFilters.id && equalityFilters.user) {
+          return state.scenario.switchMembership;
+        }
+
+        if (equalityFilters.user) {
+          return state.scenario.existingMembership;
+        }
+      }
+
+      if (table === 'business_profile_members') {
+        if (equalityFilters.user && equalityFilters.member_role === 'owner') {
+          return state.scenario.duplicateOwnerMembership;
+        }
+      }
+
+      if (table === 'directus_roles') {
+        if (equalityFilters.id === state.scenario.ownerRoleId && state.scenario.ownerRoleExists !== false) {
+          return { id: state.scenario.ownerRoleId };
+        }
+
+        return undefined;
+      }
+
+      return undefined;
+    },
     update: async (updatePayload) => {
-      calls.push({ type: 'update', table, payload: updatePayload });
+      const call = {
+        type: 'update',
+        table,
+        payload: updatePayload,
+        scope
+      };
+      state.pendingCalls.push(call);
+
+      if (table === 'directus_users' && state.scenario.failDirectusUserUpdate) {
+        throw Object.assign(new Error('directus_users update failed'), {
+          name: 'DatabaseError',
+          code: '23514'
+        });
+      }
+
       return 1;
     },
     insert(insertPayload) {
-      calls.push({ type: 'insert', table, payload: insertPayload });
+      const call = {
+        type: 'insert',
+        table,
+        payload: insertPayload,
+        scope
+      };
+      state.pendingCalls.push(call);
 
       if (table === 'business_profiles') {
         assertRequiredUuidId(table, insertPayload);
@@ -226,16 +286,18 @@ function createQueryBuilder(table, calls) {
 
       if (table === 'activity_events') {
         assertRequiredUuidId(table, insertPayload);
-        throw Object.assign(new Error('audit logging unavailable'), {
-          name: 'DatabaseError',
-          code: '23514'
-        });
+        if (scope === 'outside') {
+          throw Object.assign(new Error('audit logging unavailable'), {
+            name: 'DatabaseError',
+            code: '23514'
+          });
+        }
       }
 
       return builder;
     },
     returning: async () => {
-      const lastInsert = calls.findLast((call) => call.type === 'insert' && call.table === table);
+      const lastInsert = state.pendingCalls.findLast((call) => call.type === 'insert' && call.table === table);
 
       if (table === 'business_profiles') {
         return [
@@ -267,75 +329,327 @@ function createQueryBuilder(table, calls) {
   return builder;
 }
 
-function createFakeDatabase() {
-  const calls = [];
-  const makeDatabase = () => {
-    const database = (table) => createQueryBuilder(table, calls);
-    database.raw = async () => undefined;
-    database.transaction = async (callback) => {
-      const trx = (table) => createQueryBuilder(table, calls);
-      trx.raw = async () => undefined;
-      return callback(trx);
-    };
-    database.calls = calls;
-    return database;
+function createFakeDatabase(scenario = {}) {
+  const committedCalls = [];
+  const state = {
+    committedCalls,
+    pendingCalls: committedCalls,
+    scenario: {
+      ownerRoleId: '44444444-4444-4444-8444-444444444444',
+      ownerRoleExists: true,
+      existingMembership: undefined,
+      duplicateOwnerMembership: undefined,
+      switchMembership: undefined,
+      failDirectusUserUpdate: false,
+      ...scenario
+    }
   };
 
-  return makeDatabase();
+  const database = (table) => createQueryBuilder(table, state, 'outside');
+  database.raw = async () => undefined;
+  database.transaction = async (callback) => {
+    const transactionCalls = [];
+    const previousPendingCalls = state.pendingCalls;
+    state.pendingCalls = transactionCalls;
+
+    const trx = (table) => createQueryBuilder(table, state, 'transaction');
+    trx.raw = async () => undefined;
+
+    try {
+      const result = await callback(trx);
+      committedCalls.push(...transactionCalls);
+      return result;
+    } finally {
+      state.pendingCalls = previousPendingCalls;
+    }
+  };
+  database.calls = committedCalls;
+  database.scenario = state.scenario;
+  return database;
 }
 
-const router = buildFakeRouter();
-const database = createFakeDatabase();
-const routeLoggerCalls = [];
-wellarEndpoint.handler(router, {
-  database,
-  logger: {
-    error(meta, message) {
-      routeLoggerCalls.push({ meta, message });
+function buildTestHarness(scenario = {}) {
+  const router = buildFakeRouter();
+  const database = createFakeDatabase(scenario);
+  const routeLoggerCalls = [];
+
+  wellarEndpoint.handler(router, {
+    database,
+    logger: {
+      error(meta, message) {
+        routeLoggerCalls.push({ meta, message });
+      }
+    }
+  });
+
+  return {
+    database,
+    routeLoggerCalls,
+    createWorkspaceHandler: router.handlers.get('POST /workspaces/create'),
+    switchWorkspaceHandler: router.handlers.get('POST /workspaces/switch')
+  };
+}
+
+async function withOwnerRoleEnv(value, callback) {
+  const previousValue = process.env.WELLAR_OWNER_ROLE_ID;
+  if (value === undefined) {
+    delete process.env.WELLAR_OWNER_ROLE_ID;
+  } else {
+    process.env.WELLAR_OWNER_ROLE_ID = value;
+  }
+
+  try {
+    await callback();
+  } finally {
+    if (previousValue === undefined) {
+      delete process.env.WELLAR_OWNER_ROLE_ID;
+    } else {
+      process.env.WELLAR_OWNER_ROLE_ID = previousValue;
     }
   }
+}
+
+const ownerRoleId = '44444444-4444-4444-8444-444444444444';
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const { database, routeLoggerCalls, createWorkspaceHandler } = buildTestHarness({ ownerRoleId });
+  assert.equal(typeof createWorkspaceHandler, 'function');
+
+  const createResponse = buildFakeResponse();
+  await createWorkspaceHandler(
+    {
+      accountability: { user: 'user-1' },
+      body: {
+        idempotency_key: 'idem-route-1',
+        company_name: 'Northwind Logistics',
+        first_name: 'Jane',
+        last_name: 'Owner',
+        work_email: 'jane.owner@example.com',
+        country: 'Egypt'
+      }
+    },
+    createResponse
+  );
+
+  assert.equal(createResponse.statusCode, 201);
+  assert.equal(createResponse.body.error, undefined);
+  assert.match(createResponse.body.data.workspace.id, uuidPattern);
+  assert.equal(createResponse.body.data.membership.id, '101');
+  assert.equal(createResponse.body.data.membership.businessProfileId, createResponse.body.data.workspace.id);
+
+  const createdProfileInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'business_profiles');
+  const createdMembershipInsert = database.calls.find(
+    (call) => call.type === 'insert' && call.table === 'business_profile_members'
+  );
+  const createdActivityInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'activity_events');
+  const directusUserUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'directus_users');
+
+  assert.match(createdProfileInsert.payload.id, uuidPattern);
+  assert.equal(Object.hasOwn(createdMembershipInsert.payload, 'id'), false);
+  assert.match(createdActivityInsert.payload.id, uuidPattern);
+  assert.equal(createdMembershipInsert.payload.business_profile, createdProfileInsert.payload.id);
+  assert.equal(createdActivityInsert.payload.business_profile, createdProfileInsert.payload.id);
+  assert.equal(directusUserUpdate.scope, 'transaction');
+  assert.equal(directusUserUpdate.payload.role, ownerRoleId);
+  assert.equal(directusUserUpdate.payload.active_business_profile, createdProfileInsert.payload.id);
+  assert.equal(directusUserUpdate.payload.active_department, null);
+  assert.equal(directusUserUpdate.payload.active_member_role, 'owner');
+
+  assert.equal(routeLoggerCalls.length, 1);
+  assert.equal(routeLoggerCalls[0].message, '[wellar] workspace creation audit log failed');
+  assert.equal(routeLoggerCalls[0].meta.table, 'activity_events');
+  assert.equal(routeLoggerCalls[0].meta.errorCode, '23514');
 });
 
-const createWorkspaceHandler = router.handlers.get('POST /workspaces/create');
-assert.equal(typeof createWorkspaceHandler, 'function');
+await withOwnerRoleEnv(undefined, async () => {
+  const { database, createWorkspaceHandler } = buildTestHarness({ ownerRoleId });
+  const createResponse = buildFakeResponse();
 
-const createResponse = buildFakeResponse();
-await createWorkspaceHandler(
-  {
-    accountability: { user: 'user-1' },
-    body: {
-      idempotency_key: 'idem-route-1',
-      company_name: 'Northwind Logistics',
-      first_name: 'Jane',
-      last_name: 'Owner',
-      work_email: 'jane.owner@example.com',
-      country: 'Egypt'
-    }
-  },
-  createResponse
-);
+  await createWorkspaceHandler(
+    {
+      accountability: { user: 'user-2' },
+      body: {
+        idempotency_key: 'idem-missing-owner-role',
+        company_name: 'Missing Role Co',
+        first_name: 'Mina',
+        last_name: 'Config',
+        work_email: 'mina.config@example.com',
+        country: 'Egypt'
+      }
+    },
+    createResponse
+  );
 
-assert.equal(createResponse.statusCode, 201);
-assert.equal(createResponse.body.error, undefined);
-assert.match(createResponse.body.data.workspace.id, uuidPattern);
-assert.equal(createResponse.body.data.membership.id, '101');
-assert.equal(createResponse.body.data.membership.businessProfileId, createResponse.body.data.workspace.id);
+  assert.equal(createResponse.statusCode, 500);
+  assert.equal(createResponse.body.error.code, 'CONFIGURATION_ERROR');
+  assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
+  assert.equal(database.calls.some((call) => call.table === 'business_profile_members'), false);
+});
 
-const createdProfileInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'business_profiles');
-const createdMembershipInsert = database.calls.find(
-  (call) => call.type === 'insert' && call.table === 'business_profile_members'
-);
-const createdActivityInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'activity_events');
+await withOwnerRoleEnv('not-a-uuid', async () => {
+  const { database, createWorkspaceHandler } = buildTestHarness({ ownerRoleId });
+  const createResponse = buildFakeResponse();
 
-assert.match(createdProfileInsert.payload.id, uuidPattern);
-assert.equal(Object.hasOwn(createdMembershipInsert.payload, 'id'), false);
-assert.match(createdActivityInsert.payload.id, uuidPattern);
-assert.equal(createdMembershipInsert.payload.business_profile, createdProfileInsert.payload.id);
-assert.equal(createdActivityInsert.payload.business_profile, createdProfileInsert.payload.id);
+  await createWorkspaceHandler(
+    {
+      accountability: { user: 'user-3' },
+      body: {
+        idempotency_key: 'idem-invalid-owner-role',
+        company_name: 'Invalid Role Co',
+        first_name: 'Nadia',
+        last_name: 'Config',
+        work_email: 'nadia.config@example.com',
+        country: 'Egypt'
+      }
+    },
+    createResponse
+  );
 
-assert.equal(routeLoggerCalls.length, 1);
-assert.equal(routeLoggerCalls[0].message, '[wellar] workspace creation audit log failed');
-assert.equal(routeLoggerCalls[0].meta.table, 'activity_events');
-assert.equal(routeLoggerCalls[0].meta.errorCode, '23514');
+  assert.equal(createResponse.statusCode, 500);
+  assert.equal(createResponse.body.error.code, 'CONFIGURATION_ERROR');
+  assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
+  assert.equal(database.calls.some((call) => call.table === 'business_profile_members'), false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const { database, createWorkspaceHandler } = buildTestHarness({
+    ownerRoleId,
+    ownerRoleExists: false
+  });
+  const createResponse = buildFakeResponse();
+
+  await createWorkspaceHandler(
+    {
+      accountability: { user: 'user-4' },
+      body: {
+        idempotency_key: 'idem-missing-role-row',
+        company_name: 'Missing Role Row Co',
+        first_name: 'Omar',
+        last_name: 'Config',
+        work_email: 'omar.config@example.com',
+        country: 'Egypt'
+      }
+    },
+    createResponse
+  );
+
+  assert.equal(createResponse.statusCode, 500);
+  assert.equal(createResponse.body.error.code, 'CONFIGURATION_ERROR');
+  assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
+  assert.equal(database.calls.some((call) => call.table === 'business_profile_members'), false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const { database, createWorkspaceHandler } = buildTestHarness({
+    ownerRoleId,
+    failDirectusUserUpdate: true
+  });
+  const createResponse = buildFakeResponse();
+
+  await createWorkspaceHandler(
+    {
+      accountability: { user: 'user-5' },
+      body: {
+        idempotency_key: 'idem-atomic-owner-role',
+        company_name: 'Atomic Co',
+        first_name: 'Rana',
+        last_name: 'Atomic',
+        work_email: 'rana.atomic@example.com',
+        country: 'Egypt'
+      }
+    },
+    createResponse
+  );
+
+  assert.equal(createResponse.statusCode, 500);
+  assert.equal(createResponse.body.error.code, 'SERVER_ERROR');
+  assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
+  assert.equal(database.calls.some((call) => call.table === 'business_profile_members'), false);
+  assert.equal(database.calls.some((call) => call.table === 'directus_users'), false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const existingOwnerMembership = {
+    id: 88,
+    business_profile: 'existing-workspace',
+    member_role: 'owner',
+    status: 'active',
+    owner_user: 'user-6',
+    company_name: 'Existing Workspace',
+    is_active: true,
+    plan_code: 'free',
+    billing_status: 'trialing'
+  };
+  const { database, createWorkspaceHandler } = buildTestHarness({
+    ownerRoleId,
+    existingMembership: existingOwnerMembership
+  });
+  const createResponse = buildFakeResponse();
+
+  await createWorkspaceHandler(
+    {
+      accountability: { user: 'user-6' },
+      body: {
+        idempotency_key: 'idem-existing-owner',
+        company_name: 'Existing Workspace',
+        first_name: 'Sara',
+        last_name: 'Owner',
+        work_email: 'sara.owner@example.com',
+        country: 'Egypt'
+      }
+    },
+    createResponse
+  );
+
+  assert.equal(createResponse.statusCode, 200);
+  const directusUserUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'directus_users');
+  assert.equal(directusUserUpdate.payload.role, undefined);
+  assert.equal(directusUserUpdate.payload.active_business_profile, 'existing-workspace');
+  assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
+  assert.equal(database.calls.some((call) => call.table === 'business_profile_members' && call.type === 'insert'), false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const switchMembership = {
+    id: 77,
+    user: 'user-7',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'switch-workspace',
+    department_id: 'department-1',
+    joined_at: now,
+    company_name: 'Switch Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: 'department-1',
+    department_name: 'Operations',
+    department_business_profile: 'switch-workspace',
+    department_is_active: true
+  };
+  const { database, switchWorkspaceHandler } = buildTestHarness({
+    ownerRoleId,
+    switchMembership
+  });
+  assert.equal(typeof switchWorkspaceHandler, 'function');
+
+  const switchResponse = buildFakeResponse();
+  await switchWorkspaceHandler(
+    {
+      accountability: { user: 'user-7' },
+      body: {
+        membership_id: '77'
+      }
+    },
+    switchResponse
+  );
+
+  assert.equal(switchResponse.statusCode, 200);
+  const directusUserUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'directus_users');
+  assert.equal(directusUserUpdate.payload.role, undefined);
+  assert.equal(directusUserUpdate.payload.active_business_profile, 'switch-workspace');
+  assert.equal(directusUserUpdate.payload.active_department, 'department-1');
+  assert.equal(directusUserUpdate.payload.active_member_role, 'hr');
+});
 
 console.log('workspace-create-proof: ok');

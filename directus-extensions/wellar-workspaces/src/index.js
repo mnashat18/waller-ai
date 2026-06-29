@@ -72,6 +72,10 @@ function serverError(res, message) {
   return res.status(500).json({ error: { code: 'SERVER_ERROR', message } });
 }
 
+function configurationError(res, message) {
+  return res.status(500).json({ error: { code: 'CONFIGURATION_ERROR', message } });
+}
+
 function pickString(value, max = MAX_TEXT) {
   if (typeof value !== 'string' && typeof value !== 'number') {
     return null;
@@ -264,6 +268,19 @@ function assertUuid(value, label) {
   if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
     throw new Error(`${label} must be a valid UUID.`);
   }
+}
+
+function readOwnerRoleIdFromEnv(env = process.env) {
+  const ownerRoleId = pickString(env.WELLAR_OWNER_ROLE_ID);
+  if (!ownerRoleId) {
+    return { error: 'WELLAR_OWNER_ROLE_ID must be configured to an existing Directus Owner role UUID.' };
+  }
+
+  if (!UUID_PATTERN.test(ownerRoleId)) {
+    return { error: 'WELLAR_OWNER_ROLE_ID must be a valid UUID.' };
+  }
+
+  return { value: ownerRoleId };
 }
 
 function buildWorkspaceRecordIds(createId = randomUUID) {
@@ -569,6 +586,39 @@ async function syncDirectusUserContext(trx, userId, membershipRow) {
       active_business_profile: membershipRow.workspace_id,
       active_department: membershipRow.department_id ?? null,
       active_member_role: normalizeRole(membershipRow.member_role) ?? null
+    });
+}
+
+async function requireConfiguredOwnerRoleId(trx, env = process.env) {
+  const configuredRole = readOwnerRoleIdFromEnv(env);
+  if (configuredRole.error) {
+    const error = new Error(configuredRole.error);
+    error.code = 'CONFIGURATION_ERROR';
+    throw error;
+  }
+
+  const roleRow = await trx('directus_roles')
+    .select('id')
+    .where({ id: configuredRole.value })
+    .first();
+
+  if (!roleRow?.id) {
+    const error = new Error('WELLAR_OWNER_ROLE_ID does not match an existing Directus role.');
+    error.code = 'CONFIGURATION_ERROR';
+    throw error;
+  }
+
+  return configuredRole.value;
+}
+
+async function syncDirectusUserOwnerContext(trx, userId, businessProfileId, ownerRoleId) {
+  await trx('directus_users')
+    .where({ id: userId })
+    .update({
+      role: ownerRoleId,
+      active_business_profile: businessProfileId,
+      active_department: null,
+      active_member_role: 'owner'
     });
 }
 
@@ -2555,6 +2605,8 @@ export default {
             throw error;
           }
 
+          const ownerRoleId = await requireConfiguredOwnerRoleId(trx);
+
           const [profile] = await trx('business_profiles')
             .insert(buildBusinessProfileInsertPayload(companyPayload.value, recordIds))
             .returning(['id', 'company_name', 'is_active', 'plan_code', 'billing_status']);
@@ -2571,13 +2623,7 @@ export default {
             throw new Error('Owner membership creation did not return an id.');
           }
 
-          await trx('directus_users')
-            .where({ id: userId })
-            .update({
-              active_business_profile: profile.id,
-              active_department: null,
-              active_member_role: 'owner'
-            });
+          await syncDirectusUserOwnerContext(trx, userId, profile.id, ownerRoleId);
 
           return {
             status: 201,
@@ -2600,6 +2646,9 @@ export default {
       } catch (error) {
         if (error?.code === 'EXISTING_MEMBERSHIP' || error?.code === 'EXISTING_OWNER_MEMBERSHIP') {
           return conflict(res, error.message);
+        }
+        if (error?.code === 'CONFIGURATION_ERROR') {
+          return configurationError(res, error.message);
         }
 
         logger?.error?.(error, '[wellar] workspace creation failed');

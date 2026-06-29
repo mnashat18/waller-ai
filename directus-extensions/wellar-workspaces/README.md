@@ -16,7 +16,8 @@ It does not use or depend on `google-mobile-exchange`.
 - Creates `business_profiles`, `business_profile_members`, and `activity_events` in one transaction.
 - Rejects any user who already has a `business_profile_members` row.
 - Grants `owner` only on the newly created `business_profiles` row.
-- Sets `directus_users.active_business_profile` and `active_member_role` only after creating and verifying the membership.
+- On successful new self-service workspace creation only, atomically sets `directus_users.role`, `active_business_profile`, `active_department`, and `active_member_role`.
+- Leaves `directus_users.role` unchanged for workspace switching and self-owned idempotent recovery.
 
 ## Request Body
 
@@ -41,12 +42,14 @@ Only `idempotency_key` and `company_name` are required.
 
 ## Required Environment
 
-No new extension-specific environment variables are required.
+`WELLAR_OWNER_ROLE_ID` is required and must be set to the Directus global Owner role UUID that new self-service company creators should receive.
 
 Directus must have:
 
 - `EXTENSIONS_PATH` configured or using the default `./extensions`.
+- `WELLAR_OWNER_ROLE_ID=<directus_roles.id for the production Owner role>`.
 - `activity_events`, `business_profiles`, `business_profile_members`, and `directus_users` tables available.
+- `directus_roles` table available with the configured Owner role row present.
 - PostgreSQL database, because this endpoint uses `pg_advisory_xact_lock`.
 
 ## Required Directus Admin Step
