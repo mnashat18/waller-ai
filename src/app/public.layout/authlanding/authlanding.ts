@@ -76,6 +76,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   private routeSub?: Subscription;
   private authQuerySub?: Subscription;
   private revealObserver: IntersectionObserver | null = null;
+  private pendingAuthNotice = '';
 
   constructor(
     private auth: AuthService,
@@ -87,6 +88,11 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
+    const authNotice = this.auth.consumeAuthNotice();
+    if (authNotice) {
+      this.pendingAuthNotice = authNotice;
+      this.feedback = authNotice;
+    }
     this.applyRouteAuthMode();
     this.authQuerySub = this.route.queryParamMap.subscribe(() => {
       this.applyRouteAuthMode();
@@ -133,7 +139,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   openAuth(mode: 'signup' | 'login' = 'signup') {
     this.authMode = mode;
-    this.feedback = '';
+    this.feedback = this.pendingAuthNotice;
     this.resolvingOrganizationAccess = false;
     this.cdr.detectChanges();
     this.focusFirstField();
@@ -207,7 +213,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   closeAuth(navigateHome = true) {
     this.authMode = null;
-    this.feedback = '';
+    this.feedback = this.pendingAuthNotice;
     this.submitting = false;
     this.resolvingOrganizationAccess = false;
     this.cdr.detectChanges();
@@ -223,7 +229,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   switchAuth(mode: 'signup' | 'login') {
     this.authMode = mode;
-    this.feedback = '';
+    this.feedback = this.pendingAuthNotice;
     this.resolvingOrganizationAccess = false;
     this.cdr.detectChanges();
     this.focusFirstField();
@@ -386,11 +392,13 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       const nextRoute = await this.postLoginRouting.resolveDestination();
       this.resolvingOrganizationAccess = false;
       this.feedback = '';
+      this.pendingAuthNotice = '';
       this.cdr.detectChanges();
       return nextRoute;
     } catch {
       this.resolvingOrganizationAccess = false;
       this.feedback = '';
+      this.pendingAuthNotice = '';
       this.cdr.detectChanges();
       return '/app/workspace-access';
     }

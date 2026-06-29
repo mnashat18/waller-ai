@@ -141,15 +141,14 @@ export class NotificationsService implements OnDestroy {
   }
 
   initialize(): void {
-    if (this.initialized) {
-      return;
+    if (!this.initialized) {
+      this.initialized = true;
     }
-    this.initialized = true;
     this.handleContextChange(this.toContextSnapshot(this.companyContext.snapshot().context));
   }
 
   refresh(reason = 'manual-refresh'): void {
-    if (!this.currentWorkspaceId) {
+    if (!this.currentWorkspaceId || this.isWorkspaceActivationRouteActive()) {
       return;
     }
     void this.loadForWorkspace(this.currentWorkspaceId, this.currentUserId, reason);
@@ -168,7 +167,7 @@ export class NotificationsService implements OnDestroy {
   }
 
   private handleContextChange(context: ContextSnapshot): void {
-    if (!context.ready || !context.workspaceId) {
+    if (!context.ready || !context.workspaceId || this.isWorkspaceActivationRouteActive()) {
       this.clear();
       return;
     }
@@ -506,6 +505,15 @@ export class NotificationsService implements OnDestroy {
       workspaceId,
       userId
     };
+  }
+
+  private isWorkspaceActivationRouteActive(): boolean {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    const path = window.location.pathname.trim().toLowerCase();
+    return path === '/app/workspace-activating' || path.endsWith('/app/workspace-activating');
   }
 
   private normalizeId(value: unknown): string | null {

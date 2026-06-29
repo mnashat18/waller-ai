@@ -339,8 +339,29 @@ export class AuthService {
     accessToken?: string,
     _options?: { hydrateWorkspace?: boolean }
   ): Observable<any | null> {
+    return this.fetchCurrentUser(null, accessToken);
+  }
+
+  getCurrentUserWithFields(
+    fields: string[],
+    accessToken?: string
+  ): Observable<any | null> {
+    return this.fetchCurrentUser(fields, accessToken);
+  }
+
+  private fetchCurrentUser(
+    fields: string[] | null,
+    accessToken?: string
+  ): Observable<any | null> {
+    const normalizedFields = Array.isArray(fields)
+      ? fields.map((field) => String(field ?? '').trim()).filter(Boolean)
+      : [];
+    const query = normalizedFields.length
+      ? `?fields=${encodeURIComponent(normalizedFields.join(','))}`
+      : '';
+
     return this.http.get<any>(
-      `${this.api}/users/me`,
+      `${this.api}/users/me${query}`,
       {
         headers: this.getAuthHeaders(accessToken),
         withCredentials: true

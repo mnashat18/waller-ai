@@ -12,6 +12,7 @@ import {
 import { InviteService } from '../../services/invites';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import { WorkspaceCreationService } from '../../services/workspace-creation.service';
+import { WorkspaceActivationService } from '../../services/workspace-activation.service';
 import { WorkspaceAccessPageComponent } from './workspace-access';
 
 describe('WorkspaceAccessPageComponent', () => {
@@ -21,6 +22,7 @@ describe('WorkspaceAccessPageComponent', () => {
   let activateFromMembershipSpy: any;
   let refreshAuthAndWorkspaceContextSpy: any;
   let resolveDestinationStrictSpy: any;
+  let startActivationSpy: any;
 
   const noWorkspaceState: WorkspaceAccessState = {
     loading: false,
@@ -55,6 +57,7 @@ describe('WorkspaceAccessPageComponent', () => {
     activateFromMembershipSpy = vi.fn(() => Promise.resolve());
     refreshAuthAndWorkspaceContextSpy = vi.fn(() => Promise.resolve());
     resolveDestinationStrictSpy = vi.fn(() => Promise.resolve('/app/dashboard'));
+    startActivationSpy = vi.fn();
 
     await TestBed.configureTestingModule({
       imports: [WorkspaceAccessPageComponent],
@@ -132,6 +135,12 @@ describe('WorkspaceAccessPageComponent', () => {
         {
           provide: WorkspaceCreationService,
           useValue: workspaceCreationSpy
+        },
+        {
+          provide: WorkspaceActivationService,
+          useValue: {
+            startActivation: startActivationSpy
+          }
         }
       ]
     }).compileComponents();
@@ -165,7 +174,7 @@ describe('WorkspaceAccessPageComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Request organization access');
   });
 
-  it('creates a workspace, activates owner context, and routes to the dashboard', async () => {
+  it('routes brand-new workspace creation through workspace activation', async () => {
     workspaceCreationSpy.createWorkspace.mockReturnValue(
       of({
         status: 201,
@@ -215,12 +224,65 @@ describe('WorkspaceAccessPageComponent', () => {
         country: 'Egypt'
       })
     );
+    expect(startActivationSpy).toHaveBeenCalledWith({
+      businessProfileId: 'profile-1',
+      companyName: 'Northwind Logistics'
+    });
+    expect(activateFromMembershipSpy).not.toHaveBeenCalled();
+    expect(refreshAuthAndWorkspaceContextSpy).not.toHaveBeenCalled();
+    expect(resolveDestinationStrictSpy).not.toHaveBeenCalled();
+    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/workspace-activating', { replaceUrl: true });
+    expect(component.createCompanyError).toBe('');
+  });
+
+  it('keeps existing-workspace recovery on the direct post-create route flow', async () => {
+    workspaceCreationSpy.createWorkspace.mockReturnValue(
+      of({
+        status: 200,
+        context: {
+          workspace: {
+            id: 'profile-1',
+            companyName: 'Northwind Logistics',
+            isActive: true,
+            planCode: 'free',
+            billingStatus: 'trialing'
+          },
+          membership: {
+            id: 'member-1',
+            businessProfileId: 'profile-1',
+            memberRole: 'owner',
+            status: 'active'
+          }
+        }
+      })
+    );
+
+    loadPage();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.openCreateCompany();
+    component.createCompanyForm.companyName = 'Northwind Logistics';
+    component.createCompanyForm.firstName = 'Jane';
+    component.createCompanyForm.lastName = 'Owner';
+    component.createCompanyForm.workEmail = 'jane.owner@example.com';
+    component.createCompanyForm.country = 'Egypt';
+
+    component.createCompany();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await fixture.whenStable();
+    await waitForCondition(() => routerSpy.navigateByUrl.mock.calls.length > 0);
+
+    expect(startActivationSpy).not.toHaveBeenCalled();
     expect(activateFromMembershipSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'member-1',
         business_profile: expect.objectContaining({ id: 'profile-1' })
       })
     );
+    expect(refreshAuthAndWorkspaceContextSpy).toHaveBeenCalledWith({ force: true });
+    expect(resolveDestinationStrictSpy).toHaveBeenCalled();
     expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
     expect(component.createCompanyError).toBe('');
   });

@@ -1,7 +1,7 @@
 import { NO_ERRORS_SCHEMA, Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { NavigationEnd, Router } from '@angular/router';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { BehaviorSubject, Subject } from 'rxjs';
 
 import { CompanyContextService, type CompanyContextState } from '../core/context/company-context.service';
@@ -113,7 +113,7 @@ describe('AppShellComponent', () => {
     })
       .overrideComponent(AppShellComponent, {
         set: {
-          imports: [CommonModule, SidebarStubComponent, TopbarStubComponent]
+          imports: [CommonModule, RouterOutlet, SidebarStubComponent, TopbarStubComponent]
         }
       })
       .compileComponents();
@@ -185,5 +185,17 @@ describe('AppShellComponent', () => {
     await fixture.whenStable();
 
     expect(initializeCallCount).toBe(2);
+  });
+
+  it('does not bootstrap the dashboard shell for workspace activation route', async () => {
+    routerStub.url = '/app/workspace-activating';
+
+    fixture = TestBed.createComponent(AppShellComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.isAuthOnlyRouteActive).toBe(true);
+    expect(initializeCallCount).toBe(0);
   });
 });

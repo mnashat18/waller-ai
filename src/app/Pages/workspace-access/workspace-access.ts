@@ -19,6 +19,7 @@ import {
   type CreatedWorkspaceContext,
   WorkspaceCreationService
 } from '../../services/workspace-creation.service';
+import { WorkspaceActivationService } from '../../services/workspace-activation.service';
 
 @Component({
   selector: 'app-workspace-access-page',
@@ -65,7 +66,8 @@ export class WorkspaceAccessPageComponent implements OnInit {
     private ngZone: NgZone,
     private postLoginRouting: PostLoginRoutingService,
     private invites: InviteService,
-    private workspaceCreation: WorkspaceCreationService
+    private workspaceCreation: WorkspaceCreationService,
+    private workspaceActivation: WorkspaceActivationService
   ) {}
 
   ngOnInit(): void {
@@ -265,22 +267,19 @@ export class WorkspaceAccessPageComponent implements OnInit {
       phone: this.emptyToNull(this.createCompanyForm.phone),
       country: validation.payload.country
     }).pipe(
-      switchMap((result) =>
-        from(this.activateCreatedWorkspaceContext(result.context)).pipe(map(() => result))
-      ),
-      switchMap(() => from(this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true }))),
-      switchMap(() => from(this.postLoginRouting.resolveDestinationStrict())),
+      switchMap((result) => from(this.handleCreatedWorkspace(result))),
       finalize(() => {
         this.createCompanyLoading = false;
       })
     ).subscribe({
       next: async (route) => {
-        this.createCompanySuccessMessage = 'Workspace created. Opening your dashboard...';
+        this.createCompanySuccessMessage = route === '/app/workspace-activating'
+          ? 'Workspace created. Activating your access...'
+          : 'Workspace created. Opening your dashboard...';
         this.createCompanyError = '';
         this.createCompanyErrorCode = '';
         this.createCompanyIdempotencyKey = null;
-        const nextRoute = route === '/app/workspace-access' ? '/app/dashboard' : route;
-        await this.router.navigateByUrl(nextRoute, { replaceUrl: true });
+        await this.router.navigateByUrl(route, { replaceUrl: true });
       },
       error: (error) => {
         const parsed = this.toCreateCompanyError(error);
@@ -303,6 +302,21 @@ export class WorkspaceAccessPageComponent implements OnInit {
       department: null,
       joined_at: null
     });
+  }
+
+  private async handleCreatedWorkspace(result: { status: number; context: CreatedWorkspaceContext }): Promise<string> {
+    if (result.status === 201) {
+      this.workspaceActivation.startActivation({
+        businessProfileId: result.context.workspace.id,
+        companyName: result.context.workspace.companyName
+      });
+      return '/app/workspace-activating';
+    }
+
+    await this.activateCreatedWorkspaceContext(result.context);
+    await this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true });
+    const route = await this.postLoginRouting.resolveDestinationStrict();
+    return route === '/app/workspace-access' ? '/app/dashboard' : route;
   }
 
   startWorkspaceSetup(): void {

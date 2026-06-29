@@ -282,6 +282,7 @@ export const businessOnboardingGuard: CanActivateFn = (_, state) => {
     '/pricing',
     '/payment',
     '/upgrade-plan',
+    '/app/workspace-activating',
     '/app/workspace-access',
     '/app/workspace/request',
     '/app/workspace-restricted'
@@ -690,6 +691,13 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./Pages/workspace-access/workspace-access').then(
             (m) => m.WorkspaceAccessPageComponent
+          )
+      },
+      {
+        path: 'workspace-activating',
+        loadComponent: () =>
+          import('./Pages/workspace-activating/workspace-activating').then(
+            (m) => m.WorkspaceActivatingPageComponent
           )
       },
       {

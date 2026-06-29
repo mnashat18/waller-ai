@@ -1,7 +1,8 @@
 const AUTH_ONLY_PATHS = new Set([
   '/auth-callback',
   '/verify-email',
-  '/download-app'
+  '/download-app',
+  '/app/workspace-activating'
 ]);
 
 export function isAuthOnlyRoute(url: string): boolean {
