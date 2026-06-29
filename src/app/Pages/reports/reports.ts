@@ -226,14 +226,6 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  handleExportToggleKeydown(event: KeyboardEvent): void {
-    if (event.key !== 'Enter' && event.key !== ' ') {
-      return;
-    }
-
-    this.toggleExportMenu(event);
-  }
-
   handleExportMenuKeydown(event: KeyboardEvent): void {
     if (!this.exportMenuOpen) {
       return;

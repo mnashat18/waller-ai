@@ -154,6 +154,14 @@ describe('ReportsPageComponent', () => {
     );
   }
 
+  function activateExportWithNativeKeyboard(key: 'Enter' | ' '): void {
+    const button = exportButton();
+    button.focus();
+    button.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    button.click();
+    fixture.detectChanges();
+  }
+
   it('opens an accessible export menu and routes CSV/PDF exports through the loaded report snapshot', async () => {
     setReadyReport();
     component.filters.dateRange = 'last7';
@@ -236,6 +244,56 @@ describe('ReportsPageComponent', () => {
     expect(component.exportMenuOpen).toBe(false);
     expect(csvExports.length).toBe(0);
     expect(pdfExports.length).toBe(0);
+  });
+
+  it('uses native Enter activation without double-toggling the export menu', () => {
+    setReadyReport();
+
+    activateExportWithNativeKeyboard('Enter');
+    expect(component.exportMenuOpen).toBe(true);
+    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeTruthy();
+
+    activateExportWithNativeKeyboard('Enter');
+    expect(component.exportMenuOpen).toBe(false);
+    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeFalsy();
+  });
+
+  it('uses native Space activation without double-toggling the export menu', () => {
+    setReadyReport();
+
+    activateExportWithNativeKeyboard(' ');
+    expect(component.exportMenuOpen).toBe(true);
+    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeTruthy();
+
+    activateExportWithNativeKeyboard(' ');
+    expect(component.exportMenuOpen).toBe(false);
+    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeFalsy();
+  });
+
+  it('keeps arrow navigation in the export menu and restores focus to Export on Escape', async () => {
+    setReadyReport();
+
+    exportButton().click();
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const [csvButton, pdfButton] = exportMenuItems();
+    expect(document.activeElement).toBe(csvButton);
+
+    csvButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(pdfButton);
+
+    pdfButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(csvButton);
+
+    csvButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(component.exportMenuOpen).toBe(false);
+    expect(document.activeElement).toBe(exportButton());
   });
 
   it('does not allow export while loading or when reports are unavailable', () => {
