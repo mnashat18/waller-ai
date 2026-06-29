@@ -765,7 +765,7 @@
     radial-gradient(440px at 90% 100%, rgba(233, 156, 47, 0.12), transparent 60%),
     linear-gradient(180deg, rgba(7, 11, 22, 0.96), rgba(5, 9, 18, 0.97));
   box-shadow: 0 38px 110px rgba(2, 6, 23, 0.75);
-  padding: clamp(1.25rem, 2.6vw, 1.7rem);
+  padding: clamp(1.1rem, 2.2vw, 1.45rem);
 }
 
 ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--login {
@@ -804,7 +804,7 @@
   min-block-size: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-right: 0.25rem;
+  padding-right: 0.1rem;
 }
 
 .auth-close {
@@ -829,38 +829,39 @@
 
 .auth-header {
   text-align: center;
-  margin-bottom: 1.1rem;
+  margin-bottom: 0.78rem;
   padding-right: 2.5rem;
 }
 
 .auth-logo-img {
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   border-radius: 14px;
   object-fit: cover;
   box-shadow: 0 18px 40px rgba(56, 189, 248, 0.22);
 }
 
 .auth-header h2 {
-  margin: 0.85rem 0 0.46rem;
+  margin: 0.68rem 0 0.34rem;
   color: #f8fafc;
-  font-size: 1.55rem;
+  font-size: 1.42rem;
   letter-spacing: -0.03em;
-  line-height: 1.14;
+  line-height: 1.12;
 }
 
 .auth-header p {
   color: rgba(226, 232, 240, 0.68);
-  font-size: 0.94rem;
-  line-height: 1.62;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .auth-mode-tabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.4rem;
-  padding: 0.3rem;
-  margin-bottom: 1rem;
+  padding: 0.26rem;
+  margin-bottom: 0.8rem;
   min-width: 0;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -890,9 +891,9 @@
 .auth-mode-tabs button {
   border-radius: 999px;
   color: rgba(226, 232, 240, 0.72);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 700;
-  padding: 0.65rem 0.8rem;
+  padding: 0.56rem 0.8rem;
 }
 
 .auth-mode-tabs button.active {
@@ -903,7 +904,7 @@
 
 .auth-form {
   display: grid;
-  gap: 0.68rem;
+  gap: 0.54rem;
   min-width: 0;
 }
 
@@ -920,13 +921,13 @@
 
 .auth-field {
   display: grid;
-  gap: 0.38rem;
+  gap: 0.28rem;
   min-width: 0;
 }
 
 .auth-field span {
   color: rgba(226, 232, 240, 0.8);
-  font-size: 0.79rem;
+  font-size: 0.77rem;
   font-weight: 700;
 }
 
@@ -937,7 +938,7 @@
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(8, 12, 24, 0.86);
   color: #f8fafc;
-  padding: 0.88rem 0.98rem;
+  padding: 0.78rem 0.92rem;
 }
 
 .auth-input:focus {
@@ -971,7 +972,7 @@
   color: #9ed8eb;
   font-size: 0.76rem;
   font-weight: 700;
-  padding: 0.45rem 0.55rem;
+  padding: 0.4rem 0.52rem;
   cursor: pointer;
 }
 
@@ -983,13 +984,13 @@
 
 .auth-field__error {
   color: #fca5a5;
-  font-size: 0.76rem;
-  line-height: 1.4;
+  font-size: 0.74rem;
+  line-height: 1.32;
 }
 
 .auth-password-checklist {
   display: grid;
-  gap: 0.32rem;
+  gap: 0.22rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1000,8 +1001,8 @@
   align-items: center;
   gap: 0.42rem;
   color: rgba(226, 232, 240, 0.6);
-  font-size: 0.76rem;
-  line-height: 1.45;
+  font-size: 0.74rem;
+  line-height: 1.32;
 }
 
 .auth-password-checklist li.is-met {
@@ -1027,10 +1028,10 @@
 }
 
 .trial-note {
-  margin-top: 0.16rem;
+  margin-top: 0.08rem;
   color: rgba(245, 196, 81, 0.96);
-  font-size: 0.78rem;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  line-height: 1.38;
 }
 
 .auth-primary {
@@ -1040,7 +1041,7 @@
   background: linear-gradient(135deg, #f6ca68, #e99c2f);
   color: #08111f;
   font-weight: 800;
-  padding: 0.96rem 1rem;
+  padding: 0.84rem 1rem;
   cursor: pointer;
   box-shadow: 0 18px 40px rgba(233, 156, 47, 0.3);
 }
@@ -1070,7 +1071,7 @@
   display: flex;
   align-items: center;
   gap: 0.7rem;
-  margin: 1rem 0 0.9rem;
+  margin: 0.8rem 0 0.75rem;
   min-width: 0;
   color: rgba(226, 232, 240, 0.5);
   font-size: 0.72rem;
@@ -1093,7 +1094,7 @@
   background: rgba(4, 10, 19, 0.95);
   color: #e5e7eb;
   font-weight: 700;
-  padding: 0.9rem 1rem;
+  padding: 0.82rem 1rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1112,17 +1113,28 @@
 }
 
 .auth-feedback {
-  margin-top: 0.75rem;
+  margin-top: 0.62rem;
   text-align: center;
   color: #f5c451;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
 }
 
 .auth-switch {
-  margin-top: 0.95rem;
+  margin-top: 0.78rem;
   text-align: center;
   color: rgba(226, 232, 240, 0.68);
-  font-size: 0.9rem;
+  font-size: 0.86rem;
+}
+
+@media (min-width: 821px) and (min-height: 768px) {
+  ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--signup {
+    max-block-size: min(44.5rem, calc(100dvh - 1.5rem));
+  }
+
+  ::ng-deep app-viewport-dialog .viewport-dialog__panel.auth-card--signup .auth-card__content {
+    overflow-y: visible;
+    padding-right: 0;
+  }
 }
 
 .auth-switch button {

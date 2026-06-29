@@ -134,10 +134,12 @@ describe('Authlanding', () => {
 
     const form = signupForm();
     const button = signupSubmitButton();
+    const note = document.body.querySelector('.trial-note')?.textContent ?? '';
 
     expect(form.hasAttribute('novalidate')).toBe(true);
     expect(button.disabled).toBe(false);
     expect(button.textContent).toContain('Create account');
+    expect(note).toContain('Create your account, then set up your organization in the next step.');
   });
 
   it('blocks names containing digits or unsupported symbols', async () => {
@@ -246,6 +248,28 @@ describe('Authlanding', () => {
     expect(document.body.querySelector('#signup-password-error')?.textContent).toContain(
       'Password must be 10 to 128 characters and include at least one letter and one number.'
     );
+  });
+
+  it('clears the last name inline error immediately after valid input without another blur or submit', async () => {
+    await renderSignupModal();
+
+    signupSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    const lastNameInput = document.body.querySelector('input[name="lastName"]') as HTMLInputElement;
+    expect(document.body.querySelector('#signup-last-name-error')?.textContent).toContain('Last name is required.');
+    expect(lastNameInput.getAttribute('aria-invalid')).toBe('true');
+    expect(lastNameInput.getAttribute('aria-describedby')).toBe('signup-last-name-error');
+
+    await setSignupInputValue('lastName', 'Carter');
+
+    expect(document.body.querySelector('#signup-last-name-error')).toBeNull();
+    expect(lastNameInput.getAttribute('aria-invalid')).toBeNull();
+    expect(lastNameInput.getAttribute('aria-describedby')).toBeNull();
+    expect(document.body.querySelector('#signup-first-name-error')?.textContent).toContain('First name is required.');
   });
 
   it('submits normalized signup data from a real valid form submit', async () => {

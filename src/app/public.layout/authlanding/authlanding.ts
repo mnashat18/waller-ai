@@ -69,6 +69,12 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     email: false,
     password: false
   };
+  signupErrors: Record<keyof typeof this.signupTouched, string | null> = {
+    firstName: null,
+    lastName: null,
+    email: null,
+    password: null
+  };
 
   signup = {
     firstName: '',
@@ -180,10 +186,10 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   get signupFormValid(): boolean {
     return (
-      this.signupFieldError('firstName') === null &&
-      this.signupFieldError('lastName') === null &&
-      this.signupFieldError('email') === null &&
-      this.signupFieldError('password') === null
+      this.computeSignupFieldError('firstName') === null &&
+      this.computeSignupFieldError('lastName') === null &&
+      this.computeSignupFieldError('email') === null &&
+      this.computeSignupFieldError('password') === null
     );
   }
 
@@ -253,11 +259,18 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
     if (field === 'firstName' || field === 'lastName') {
       this.signup[field] = this.normalizeName(this.signup[field]);
-      return;
+    } else if (field === 'email') {
+      this.signup.email = this.signup.email.trim();
     }
 
-    if (field === 'email') {
-      this.signup.email = this.signup.email.trim();
+    this.refreshSignupFieldError(field);
+  }
+
+  handleSignupFieldInput(field: keyof typeof this.signupTouched, value: string): void {
+    this.signup[field] = value;
+
+    if (this.shouldShowSignupError(field)) {
+      this.refreshSignupFieldError(field);
     }
   }
 
@@ -266,10 +279,14 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   }
 
   hasSignupFieldError(field: keyof typeof this.signupTouched): boolean {
-    return this.shouldShowSignupError(field) && this.signupFieldError(field) !== null;
+    return this.shouldShowSignupError(field) && this.signupErrors[field] !== null;
   }
 
   signupFieldError(field: keyof typeof this.signupTouched): string | null {
+    return this.signupErrors[field] ?? this.computeSignupFieldError(field);
+  }
+
+  private computeSignupFieldError(field: keyof typeof this.signupTouched): string | null {
     if (field === 'firstName') {
       return this.validateName(this.signup.firstName, 'First name');
     }
@@ -308,6 +325,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       password: true
     };
     this.normalizeSignupFields();
+    this.refreshSignupErrors();
 
     if (!this.signupFormValid) {
       this.focusFirstInvalidSignupField();
@@ -690,6 +708,12 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       email: false,
       password: false
     };
+    this.signupErrors = {
+      firstName: null,
+      lastName: null,
+      email: null,
+      password: null
+    };
   }
 
   private focusFirstInvalidSignupField(): void {
@@ -702,10 +726,10 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         'input[name="firstName"], input[name="lastName"], input[name="email"], input[name="password"]'
       ) as HTMLInputElement | null;
       const invalidFields = [
-        { name: 'firstName', invalid: this.signupFieldError('firstName') !== null },
-        { name: 'lastName', invalid: this.signupFieldError('lastName') !== null },
-        { name: 'email', invalid: this.signupFieldError('email') !== null },
-        { name: 'password', invalid: this.signupFieldError('password') !== null }
+        { name: 'firstName', invalid: this.signupErrors.firstName !== null },
+        { name: 'lastName', invalid: this.signupErrors.lastName !== null },
+        { name: 'email', invalid: this.signupErrors.email !== null },
+        { name: 'password', invalid: this.signupErrors.password !== null }
       ];
       const target = invalidFields.find((field) => field.invalid);
       if (!target) {
@@ -715,6 +739,17 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       const input = document.querySelector(`input[name="${target.name}"]`) as HTMLInputElement | null;
       (input ?? firstInvalid)?.focus();
     }, 0);
+  }
+
+  private refreshSignupFieldError(field: keyof typeof this.signupTouched): void {
+    this.signupErrors[field] = this.computeSignupFieldError(field);
+  }
+
+  private refreshSignupErrors(): void {
+    this.refreshSignupFieldError('firstName');
+    this.refreshSignupFieldError('lastName');
+    this.refreshSignupFieldError('email');
+    this.refreshSignupFieldError('password');
   }
 
 }
