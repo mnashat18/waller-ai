@@ -185,6 +185,21 @@ function extractEqualityFilters(filters) {
 
 function createQueryBuilder(table, state, scope) {
   const filters = [];
+  const executeRows = () => {
+    const equalityFilters = extractEqualityFilters(filters);
+
+    if (table === 'business_profile_members as member') {
+      if (equalityFilters.id && equalityFilters.user) {
+        return state.scenario.switchMembership ? [state.scenario.switchMembership] : [];
+      }
+
+      if (equalityFilters.user) {
+        return state.scenario.activeMembershipRows ?? [];
+      }
+    }
+
+    return [];
+  };
   const builder = {
     leftJoin() {
       return builder;
@@ -220,6 +235,9 @@ function createQueryBuilder(table, state, scope) {
     count() {
       return builder;
     },
+    then(resolve, reject) {
+      return Promise.resolve(executeRows()).then(resolve, reject);
+    },
     first: async () => {
       const equalityFilters = extractEqualityFilters(filters);
 
@@ -245,6 +263,10 @@ function createQueryBuilder(table, state, scope) {
         }
 
         return undefined;
+      }
+
+      if (table === 'directus_users' && equalityFilters.id) {
+        return state.scenario.directusUserRow ?? { id: equalityFilters.id };
       }
 
       return undefined;
@@ -284,8 +306,17 @@ function createQueryBuilder(table, state, scope) {
         assert.equal(Object.hasOwn(insertPayload, 'id'), false, 'business_profile_members.id must be database-generated');
       }
 
-      if (table === 'activity_events') {
+      if (table === 'departments') {
         assertRequiredUuidId(table, insertPayload);
+        if (state.scenario.failDepartmentInsert) {
+          throw Object.assign(new Error('department insert failed'), {
+            name: 'DatabaseError',
+            code: '23514'
+          });
+        }
+      }
+
+      if (table === 'activity_events') {
         if (scope === 'outside') {
           throw Object.assign(new Error('audit logging unavailable'), {
             name: 'DatabaseError',
@@ -322,6 +353,20 @@ function createQueryBuilder(table, state, scope) {
         ];
       }
 
+      if (table === 'departments') {
+        return [
+          {
+            id: lastInsert.payload.id,
+            name: lastInsert.payload.name,
+            is_active: lastInsert.payload.is_active,
+            business_profile: lastInsert.payload.business_profile,
+            manager_member: lastInsert.payload.manager_member,
+            date_created: '2026-06-29T00:00:00.000Z',
+            date_updated: '2026-06-29T00:00:00.000Z'
+          }
+        ];
+      }
+
       return [];
     }
   };
@@ -340,6 +385,9 @@ function createFakeDatabase(scenario = {}) {
       existingMembership: undefined,
       duplicateOwnerMembership: undefined,
       switchMembership: undefined,
+      activeMembershipRows: [],
+      directusUserRow: undefined,
+      failDepartmentInsert: false,
       failDirectusUserUpdate: false,
       ...scenario
     }
@@ -386,7 +434,8 @@ function buildTestHarness(scenario = {}) {
     database,
     routeLoggerCalls,
     createWorkspaceHandler: router.handlers.get('POST /workspaces/create'),
-    switchWorkspaceHandler: router.handlers.get('POST /workspaces/switch')
+    switchWorkspaceHandler: router.handlers.get('POST /workspaces/switch'),
+    createDepartmentHandler: router.handlers.get('POST /organization/departments')
   };
 }
 
@@ -650,6 +699,193 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
   assert.equal(directusUserUpdate.payload.active_business_profile, 'switch-workspace');
   assert.equal(directusUserUpdate.payload.active_department, 'department-1');
   assert.equal(directusUserUpdate.payload.active_member_role, 'hr');
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 91,
+    user: 'user-8',
+    status: 'active',
+    member_role: 'owner',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, createDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    directusUserRow: {
+      id: 'user-8',
+      active_business_profile: 'stale-ui-workspace',
+      active_department: null,
+      active_member_role: 'owner'
+    }
+  });
+  assert.equal(typeof createDepartmentHandler, 'function');
+
+  const createResponse = buildFakeResponse();
+  await createDepartmentHandler(
+    {
+      accountability: { user: 'user-8' },
+      body: {
+        name: 'Operations'
+      }
+    },
+    createResponse
+  );
+
+  assert.equal(createResponse.statusCode, 201);
+  assert.equal(createResponse.body.error, undefined);
+  assert.match(createResponse.body.data.department.id, uuidPattern);
+  assert.equal(createResponse.body.data.department.business_profile, 'trusted-workspace');
+
+  const departmentInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'departments');
+  const departmentAuditInsert = database.calls.find(
+    (call) =>
+      call.type === 'insert' &&
+      call.table === 'activity_events' &&
+      call.payload.action === 'organization_department_created'
+  );
+
+  assert.match(departmentInsert.payload.id, uuidPattern);
+  assert.equal(departmentInsert.payload.name, 'Operations');
+  assert.equal(departmentInsert.payload.business_profile, activeMembership.workspace_id);
+  assert.notEqual(departmentInsert.payload.business_profile, 'stale-ui-workspace');
+  assert.equal(departmentInsert.payload.manager_member, null);
+  assert.equal(departmentInsert.payload.is_active, true);
+  assert.equal(departmentAuditInsert.payload.business_profile, activeMembership.workspace_id);
+  assert.equal(departmentAuditInsert.payload.entity_id, departmentInsert.payload.id);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 92,
+    user: 'user-9',
+    status: 'active',
+    member_role: 'employee',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, createDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership]
+  });
+
+  const forbiddenResponse = buildFakeResponse();
+  await createDepartmentHandler(
+    {
+      accountability: { user: 'user-9' },
+      body: {
+        name: 'Operations'
+      }
+    },
+    forbiddenResponse
+  );
+
+  assert.equal(forbiddenResponse.statusCode, 403);
+  assert.equal(database.calls.some((call) => call.table === 'departments'), false);
+  assert.equal(database.calls.some((call) => call.table === 'activity_events'), false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 93,
+    user: 'user-10',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, createDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership]
+  });
+
+  const invalidResponse = buildFakeResponse();
+  await createDepartmentHandler(
+    {
+      accountability: { user: 'user-10' },
+      body: {
+        name: 'Operations',
+        workspace_id: 'browser-value'
+      }
+    },
+    invalidResponse
+  );
+
+  assert.equal(invalidResponse.statusCode, 400);
+  assert.equal(database.calls.some((call) => call.table === 'departments'), false);
+  assert.equal(database.calls.some((call) => call.table === 'activity_events'), false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 94,
+    user: 'user-11',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, routeLoggerCalls, createDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    failDepartmentInsert: true
+  });
+
+  const errorResponse = buildFakeResponse();
+  await createDepartmentHandler(
+    {
+      accountability: { user: 'user-11' },
+      body: {
+        name: 'Operations'
+      }
+    },
+    errorResponse
+  );
+
+  assert.equal(errorResponse.statusCode, 500);
+  assert.equal(errorResponse.body.error.code, 'SERVER_ERROR');
+  assert.equal(errorResponse.body.error.message, 'Department could not be created.');
+  assert.equal(database.calls.some((call) => call.table === 'departments'), false);
+  assert.equal(database.calls.some((call) => call.table === 'activity_events'), false);
+  assert.equal(routeLoggerCalls.at(-1).message, '[wellar] organization department creation failed');
+  assert.equal(routeLoggerCalls.at(-1).meta.code, '23514');
 });
 
 console.log('workspace-create-proof: ok');

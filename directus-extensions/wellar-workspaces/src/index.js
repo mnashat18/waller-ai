@@ -300,6 +300,19 @@ function buildWorkspaceRecordIds(createId = randomUUID) {
   return ids;
 }
 
+function buildDepartmentInsertPayload(name, businessProfileId, createId = randomUUID) {
+  const departmentId = createId();
+  assertUuid(departmentId, 'departments.id');
+
+  return {
+    id: departmentId,
+    business_profile: businessProfileId,
+    name,
+    is_active: true,
+    manager_member: null
+  };
+}
+
 function buildBusinessProfileInsertPayload(companyPayload, recordIds) {
   return {
     id: recordIds.businessProfileId,
@@ -1715,13 +1728,13 @@ export default {
             });
           }
 
+          const departmentInsert = buildDepartmentInsertPayload(
+            validation.payload.name,
+            active.workspace_id
+          );
+
           const [created] = await trx('departments')
-            .insert({
-              business_profile: active.workspace_id,
-              name: validation.payload.name,
-              is_active: true,
-              manager_member: null
-            })
+            .insert(departmentInsert)
             .returning([
               'id',
               'name',
