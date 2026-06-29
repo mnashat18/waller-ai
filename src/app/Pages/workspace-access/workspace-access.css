@@ -262,6 +262,30 @@
   font-size: 0.9rem;
 }
 
+.workspace-access-page__error-code {
+  margin-left: 0.35rem;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.workspace-access-page__status {
+  padding: 0.7rem 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(56, 189, 248, 0.16);
+  background: rgba(56, 189, 248, 0.08);
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.workspace-access-page__success {
+  margin: 0.1rem 0 0;
+  color: #86efac;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
 .workspace-access-page__stack {
   display: grid;
   gap: 0.9rem;
@@ -277,6 +301,10 @@
   gap: 0.9rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 1rem;
+}
+
+.workspace-access-grid--decision {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .workspace-access-card {
@@ -519,6 +547,7 @@
   }
 
   .workspace-access-grid,
+  .workspace-access-grid--decision,
   .workspace-access-page__stack--compact,
   .workspace-access-loading__cards {
     grid-template-columns: 1fr;

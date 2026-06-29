@@ -1,6 +1,8 @@
 const MAX_TEXT = 255;
 const MAX_COMPANY_NAME = 120;
 const PUSH_WEBHOOK_TIMEOUT_MS = 5000;
+const MAX_PERSON_NAME = 80;
+const MAX_PHONE = 30;
 
 const FORBIDDEN_INPUT_KEYS = new Set([
   'user',
@@ -23,6 +25,25 @@ const FORBIDDEN_INPUT_KEYS = new Set([
   'membership',
   'membership_id',
   'membershipId'
+]);
+const WORKSPACE_PLACEHOLDER_VALUES = new Set([
+  'test',
+  'testing',
+  'demo',
+  'sample',
+  'placeholder',
+  'example',
+  'lorem ipsum',
+  'dummy',
+  'temp',
+  'n/a',
+  'na',
+  'none',
+  'first name',
+  'last name',
+  'company name',
+  'your company',
+  'your name'
 ]);
 
 function badRequest(res, message, details = undefined) {
@@ -88,6 +109,146 @@ function normalizeWebsite(value) {
   }
 }
 
+function normalizeWhitespace(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.replace(/\s+/g, ' ');
+}
+
+function isPlaceholderValue(value) {
+  const normalized = normalizeWhitespace(value)?.toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return WORKSPACE_PLACEHOLDER_VALUES.has(normalized);
+}
+
+function validateNameField(value, label) {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return { error: `${label} is required.` };
+  }
+
+  if (normalized.length < 2 || normalized.length > MAX_PERSON_NAME) {
+    return { error: `${label} must be between 2 and ${MAX_PERSON_NAME} characters.` };
+  }
+
+  if (!/^[\p{L}\p{M}][\p{L}\p{M}\p{N}\s.'-]*$/u.test(normalized)) {
+    return { error: `${label} can contain letters, numbers, spaces, apostrophes, periods, and hyphens only.` };
+  }
+
+  if (isPlaceholderValue(normalized)) {
+    return { error: `${label} must use a real value.` };
+  }
+
+  return { value: normalized };
+}
+
+function validateCompanyName(value) {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return { error: 'Company name is required.' };
+  }
+
+  if (normalized.length < 2 || normalized.length > MAX_COMPANY_NAME) {
+    return { error: `Company name must be between 2 and ${MAX_COMPANY_NAME} characters.` };
+  }
+
+  if (!/^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}\s&'.,()\/-]*$/u.test(normalized)) {
+    return { error: 'Company name contains unsupported characters.' };
+  }
+
+  if (isPlaceholderValue(normalized)) {
+    return { error: 'Company name must use a real organization name.' };
+  }
+
+  return { value: normalized };
+}
+
+function validateWorkEmail(value) {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return { error: 'Work email is required.' };
+  }
+
+  if (normalized.length > MAX_TEXT) {
+    return { error: 'Work email is too long.' };
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    return { error: 'Work email must be a valid email address.' };
+  }
+
+  return { value: normalized.toLowerCase() };
+}
+
+function validateCountry(value) {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return { error: 'Country is required.' };
+  }
+
+  if (normalized.length < 2 || normalized.length > 80) {
+    return { error: 'Country must be between 2 and 80 characters.' };
+  }
+
+  if (!/^[\p{L}\p{M}\p{N}\s.'/-]+$/u.test(normalized)) {
+    return { error: 'Country contains unsupported characters.' };
+  }
+
+  if (isPlaceholderValue(normalized)) {
+    return { error: 'Country must use a real value.' };
+  }
+
+  return { value: normalized };
+}
+
+function validateOptionalPhone(value) {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return { value: null };
+  }
+
+  if (normalized.length > MAX_PHONE) {
+    return { error: `Phone number must be between 7 and ${MAX_PHONE} characters.` };
+  }
+
+  if (!/^[+()\d\s.-]+$/.test(normalized)) {
+    return { error: 'Phone number contains unsupported characters.' };
+  }
+
+  if (normalized.replace(/\D/g, '').length < 7) {
+    return { error: 'Phone number must include at least 7 digits.' };
+  }
+
+  return { value: normalized };
+}
+
+function splitLegacyContactName(value) {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const parts = normalized.split(' ').filter(Boolean);
+  if (parts.length < 2) {
+    return null;
+  }
+
+  return {
+    firstName: parts.shift(),
+    lastName: parts.join(' ')
+  };
+}
+
 function hasForbiddenInput(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return false;
@@ -97,24 +258,54 @@ function hasForbiddenInput(body) {
 }
 
 function buildCompanyPayload(body, userId, now) {
-  const companyName = pickString(body?.company_name ?? body?.companyName, MAX_COMPANY_NAME);
-  if (!companyName) {
-    return { error: 'Company name is required.' };
+  const companyNameResult = validateCompanyName(body?.company_name ?? body?.companyName);
+  if (companyNameResult.error) {
+    return { error: companyNameResult.error };
   }
 
-  const userEmail = pickString(body?.work_email ?? body?.workEmail);
-  const contactName = pickString(body?.contact_name ?? body?.contactName) ?? companyName;
+  const legacyContactName = splitLegacyContactName(body?.contact_name ?? body?.contactName);
+  const firstNameResult = validateNameField(
+    body?.first_name ?? body?.firstName ?? legacyContactName?.firstName,
+    'First name'
+  );
+  const lastNameResult = validateNameField(
+    body?.last_name ?? body?.lastName ?? legacyContactName?.lastName,
+    'Last name'
+  );
+
+  if (firstNameResult.error) {
+    return { error: firstNameResult.error };
+  }
+
+  if (lastNameResult.error) {
+    return { error: lastNameResult.error };
+  }
+
+  const workEmailResult = validateWorkEmail(body?.work_email ?? body?.workEmail);
+  if (workEmailResult.error) {
+    return { error: workEmailResult.error };
+  }
+
+  const countryResult = validateCountry(body?.country);
+  if (countryResult.error) {
+    return { error: countryResult.error };
+  }
+
+  const phoneResult = validateOptionalPhone(body?.phone);
+  if (phoneResult.error) {
+    return { error: phoneResult.error };
+  }
 
   return {
     value: {
       owner_user: userId,
-      company_name: companyName,
-      contact_name: contactName,
-      work_email: userEmail ?? 'not-provided@wellar.local',
-      phone: pickString(body?.phone, 30) ?? 'not-provided',
+      company_name: companyNameResult.value,
+      contact_name: `${firstNameResult.value} ${lastNameResult.value}`.trim(),
+      work_email: workEmailResult.value,
+      phone: phoneResult.value,
       industry: pickString(body?.industry, 80),
       team_size: pickInteger(body?.team_size ?? body?.teamSize),
-      country: pickString(body?.country, 80),
+      country: countryResult.value,
       city: pickString(body?.city, 80),
       website: normalizeWebsite(body?.website),
       billing_status: 'trialing',
@@ -170,6 +361,15 @@ function publicMembershipSummary(row) {
     id: String(row.id),
     status: row.status ?? 'active',
     memberRole: normalizeRole(row.member_role) ?? 'employee'
+  };
+}
+
+function publicCreatedMembership(workspaceId, row) {
+  return {
+    id: String(row.id),
+    status: row.status ?? 'active',
+    memberRole: normalizeRole(row.member_role) ?? 'owner',
+    businessProfileId: String(workspaceId)
   };
 }
 
@@ -363,6 +563,52 @@ function publicOrganizationProfile(row) {
     billing_status: row.billing_status ?? null,
     date_created: row.date_created ?? null,
     date_updated: row.date_updated ?? null
+  };
+}
+
+async function logWorkspaceCreatedActivityEvent(database, logger, details) {
+  try {
+    await database('activity_events').insert({
+      actor: details.userId,
+      target_user: details.userId,
+      action: 'workspace_created',
+      entity_type: 'company',
+      entity_id: String(details.businessProfileId),
+      business_profile: details.businessProfileId,
+      payload: JSON.stringify({
+        source: 'web_self_service_onboarding',
+        idempotency_key: details.idempotencyKey,
+        membership_id: details.membershipId,
+        member_role: 'owner'
+      })
+    });
+  } catch (error) {
+    logger?.error?.(
+      {
+        errorClass: error?.name ?? 'Error',
+        errorCode: error?.code ?? null,
+        action: 'workspace_created',
+        table: 'activity_events',
+        entityType: 'company',
+        businessProfileId: String(details.businessProfileId),
+        membershipId: String(details.membershipId)
+      },
+      '[wellar] workspace creation audit log failed'
+    );
+  }
+}
+
+function buildCreatedWorkspaceResponse(profile, membership) {
+  return {
+    workspace: publicWorkspace({
+      workspace_id: profile.id,
+      company_name: profile.company_name,
+      workspace_is_active: profile.is_active,
+      plan_code: profile.plan_code,
+      billing_status: profile.billing_status
+    }),
+    membership: publicCreatedMembership(profile.id, membership),
+    department: null
   };
 }
 
@@ -2221,20 +2467,27 @@ export default {
               existingMembership.status === 'active' &&
               existingMembership.business_profile;
 
-            if (isExistingSelfOwnedWorkspace) {
-              await trx('directus_users')
-                .where({ id: userId })
-                .update({
-                  active_business_profile: existingMembership.business_profile,
-                  active_department: null,
-                  active_member_role: 'owner'
-                });
+          if (isExistingSelfOwnedWorkspace) {
+            await trx('directus_users')
+              .where({ id: userId })
+              .update({
+                active_business_profile: existingMembership.business_profile,
+                active_department: null,
+                active_member_role: 'owner'
+              });
 
-              return {
-                status: 200,
-                data: buildExistingContext(existingMembership)
-              };
-            }
+            const existingContext = buildExistingContext(existingMembership);
+            return {
+              status: 200,
+              data: {
+                ...existingContext,
+                membership: {
+                  ...existingContext.membership,
+                  businessProfileId: String(existingMembership.business_profile)
+                }
+              }
+            };
+          }
 
             const error = new Error('This user already belongs to another workspace.');
             error.code = 'EXISTING_MEMBERSHIP';
@@ -2275,21 +2528,6 @@ export default {
             throw new Error('Owner membership creation did not return an id.');
           }
 
-          await trx('activity_events').insert({
-            actor: userId,
-            target_user: userId,
-            action: 'workspace_created',
-            entity_type: 'company',
-            entity_id: String(profile.id),
-            business_profile: profile.id,
-            payload: JSON.stringify({
-              source: 'web_self_service_onboarding',
-              idempotency_key: idempotencyKey,
-              membership_id: membership.id,
-              member_role: 'owner'
-            })
-          });
-
           await trx('directus_users')
             .where({ id: userId })
             .update({
@@ -2300,23 +2538,19 @@ export default {
 
           return {
             status: 201,
-            data: {
-              workspace: publicWorkspace({
-                workspace_id: profile.id,
-                company_name: profile.company_name,
-                workspace_is_active: profile.is_active,
-                plan_code: profile.plan_code,
-                billing_status: profile.billing_status
-              }),
-              membership: {
-                id: String(membership.id),
-                status: membership.status ?? 'active',
-                memberRole: normalizeRole(membership.member_role) ?? 'owner'
-              },
-              department: null
+            data: buildCreatedWorkspaceResponse(profile, membership),
+            audit: {
+              userId,
+              businessProfileId: profile.id,
+              membershipId: membership.id,
+              idempotencyKey
             }
           };
         });
+
+        if (result.status === 201 && result.audit) {
+          await logWorkspaceCreatedActivityEvent(database, logger, result.audit);
+        }
 
         return res.status(result.status).json({ data: result.data });
       } catch (error) {
@@ -2330,3 +2564,4 @@ export default {
     });
   }
 };
+export { buildCompanyPayload, buildCreatedWorkspaceResponse, logWorkspaceCreatedActivityEvent };

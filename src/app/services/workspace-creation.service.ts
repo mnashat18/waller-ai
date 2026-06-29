@@ -1,7 +1,7 @@
 import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, throwError } from 'rxjs';
+import { map, timeout } from 'rxjs/operators';
 
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth';
@@ -9,12 +9,13 @@ import { AuthService } from './auth';
 export type CreateWorkspaceInput = {
   idempotency_key: string;
   company_name: string;
-  contact_name?: string | null;
-  work_email?: string | null;
+  first_name: string;
+  last_name: string;
+  work_email: string;
+  country: string;
   phone?: string | null;
   industry?: string | null;
   team_size?: number | null;
-  country?: string | null;
   city?: string | null;
   website?: string | null;
   timezone?: string | null;
@@ -44,6 +45,7 @@ export type CreateWorkspaceResult = {
 
 @Injectable({ providedIn: 'root' })
 export class WorkspaceCreationService {
+  private readonly requestTimeoutMs = 15000;
   private readonly endpoint =
     (environment as { WORKSPACE_CREATE_ENDPOINT?: string }).WORKSPACE_CREATE_ENDPOINT ||
     `${environment.API_URL}/wellar/workspaces/create`;
@@ -63,10 +65,21 @@ export class WorkspaceCreationService {
         observe: 'response'
       }
     ).pipe(
+      timeout({
+        first: this.requestTimeoutMs,
+        with: () =>
+          throwError(() => {
+            const error = new Error('Workspace creation timed out.');
+            (error as Error & { code?: string }).code = 'TIMEOUT';
+            return error;
+          })
+      }),
       map((response) => {
         const data = this.extractContext(response);
         if (!data?.workspace?.id || !data?.membership?.businessProfileId) {
-          throw new Error('Workspace creation response was incomplete.');
+          const error = new Error('Workspace creation response was incomplete.');
+          (error as Error & { code?: string }).code = 'INCOMPLETE_RESPONSE';
+          throw error;
         }
         return {
           status: response.status,

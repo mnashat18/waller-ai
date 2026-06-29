@@ -73,7 +73,7 @@
               <h2 *ngIf="vm.mode === 'restricted'">Organization Access Restricted</h2>
 
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'no-workspace'">
-                Join with an invitation or request organization access.
+                Create a company workspace, join with an invitation, or request organization access.
               </p>
               <p class="workspace-access-page__subtitle" *ngIf="vm.mode === 'pending-application'">
                 {{ vm.pendingApplication?.companyName || 'Your organization access request' }} is under review.
@@ -106,14 +106,7 @@
 
             <div
               class="workspace-access-page__header-actions"
-              *ngIf="vm.mode === 'no-workspace' || vm.mode === 'pending-invite'">
-              <button
-                *ngIf="vm.mode === 'no-workspace'"
-                type="button"
-                class="workspace-access-button workspace-access-button--primary"
-                (click)="openCreateCompany()">
-                Create My Company
-              </button>
+              *ngIf="vm.mode === 'pending-invite'">
               <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="startWorkspaceSetup()">
                 Request organization access
               </button>
@@ -125,7 +118,7 @@
 
           <form
             class="workspace-access-page__invite-form"
-            *ngIf="showInviteForm || vm.mode === 'no-workspace' || vm.mode === 'pending-invite'"
+            *ngIf="showInviteForm || vm.mode === 'pending-invite'"
             (ngSubmit)="joinWithInviteCode()"
             #inviteCodeForm="ngForm">
             <label>
@@ -145,73 +138,6 @@
             </button>
           </form>
 
-          <form
-            class="workspace-access-page__create-form"
-            *ngIf="createCompanyOpen && vm.mode === 'no-workspace'"
-            (ngSubmit)="createCompany()"
-            #createCompanyFormRef="ngForm">
-            <div class="workspace-access-page__form-header">
-              <h3>Create your company workspace</h3>
-              <p>You will become Owner only of this new company. Existing companies must be joined by invitation.</p>
-            </div>
-
-            <div class="workspace-access-page__create-grid">
-              <label>
-                <span>Company name</span>
-                <input
-                  class="workspace-access-input"
-                  [(ngModel)]="createCompanyForm.companyName"
-                  name="companyName"
-                  maxlength="120"
-                  required />
-              </label>
-              <label>
-                <span>Contact name</span>
-                <input
-                  class="workspace-access-input"
-                  [(ngModel)]="createCompanyForm.contactName"
-                  name="contactName"
-                  maxlength="100" />
-              </label>
-              <label>
-                <span>Work email</span>
-                <input
-                  class="workspace-access-input"
-                  [(ngModel)]="createCompanyForm.workEmail"
-                  name="workEmail"
-                  type="email"
-                  maxlength="120" />
-              </label>
-              <label>
-                <span>Phone</span>
-                <input
-                  class="workspace-access-input"
-                  [(ngModel)]="createCompanyForm.phone"
-                  name="phone"
-                  maxlength="30" />
-              </label>
-              <label>
-                <span>Country</span>
-                <input
-                  class="workspace-access-input"
-                  [(ngModel)]="createCompanyForm.country"
-                  name="country"
-                  maxlength="80" />
-              </label>
-            </div>
-
-            <p class="workspace-access-page__invite-error" *ngIf="createCompanyError">
-              {{ createCompanyError }}
-            </p>
-
-            <button
-              type="submit"
-              class="workspace-access-button workspace-access-button--primary"
-              [disabled]="createCompanyLoading || createCompanyFormRef.invalid">
-              {{ createCompanyLoading ? 'Creating company...' : 'Create Company Workspace' }}
-            </button>
-          </form>
-
           <p class="workspace-access-page__invite-error" *ngIf="inviteClaimMessage">
             {{ inviteClaimMessage }}
           </p>
@@ -222,31 +148,129 @@
 
           <ng-container [ngSwitch]="vm.mode">
             <section *ngSwitchCase="'no-workspace'" class="workspace-access-page__stack">
+              <div class="workspace-access-grid workspace-access-grid--decision">
                 <article class="workspace-access-card workspace-access-card--primary">
-                  <span class="workspace-access-card__tag">Recommended</span>
-                  <h3>Create your company workspace</h3>
-                  <p>Start a new company workspace for your organization. You become Owner only of this newly created company.</p>
+                  <span class="workspace-access-card__tag">Primary</span>
+                  <h3>Create a company workspace</h3>
+                  <p>Set up a new company you own. Existing organizations stay invitation-only.</p>
                   <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="openCreateCompany()">
-                    Create My Company
+                    Create Company Workspace
                   </button>
                 </article>
 
                 <article class="workspace-access-card">
+                  <span class="workspace-access-card__tag">Secondary</span>
+                  <h3>Join with an invitation</h3>
+                  <p>Use the invitation code from your organization to join an existing workspace.</p>
+                  <button type="button" class="workspace-access-button" (click)="openInviteLink()">
+                    Enter invitation code
+                  </button>
+                </article>
+
+                <article class="workspace-access-card">
+                  <span class="workspace-access-card__tag">Alternative</span>
                   <h3>Request organization access</h3>
-                  <p>Tell us about your organization to manage teams, send scan requests, and track readiness on Wellar AI.</p>
-                  <p class="workspace-access-card__note">Submitting this sends an organization access request that the Wellar team reviews before access is activated.</p>
+                  <p>Ask the Wellar team to review a new organization setup request.</p>
                   <button type="button" class="workspace-access-button workspace-access-button--primary" (click)="startWorkspaceSetup()">
                     Request organization access
                   </button>
                 </article>
+              </div>
 
-              <article class="workspace-access-card">
-                <h3>Join with an invitation</h3>
-                <p>Already invited? Use the invitation link or code from your organization.</p>
-                <button type="button" class="workspace-access-button" (click)="openInviteLink()">
-                  Enter invitation code
-                </button>
-              </article>
+              <form
+                class="workspace-access-page__create-form"
+                *ngIf="createCompanyOpen"
+                (ngSubmit)="createCompany()"
+                #createCompanyFormRef="ngForm">
+                <div class="workspace-access-page__form-header">
+                  <h3>Create your company workspace</h3>
+                  <p>You will become Owner only of this new company. Existing companies must be joined by invitation.</p>
+                </div>
+
+                <div class="workspace-access-page__create-grid">
+                  <label>
+                    <span>Company name</span>
+                    <input
+                      class="workspace-access-input"
+                      [(ngModel)]="createCompanyForm.companyName"
+                      name="companyName"
+                      maxlength="120"
+                      required />
+                  </label>
+                  <label>
+                    <span>First name</span>
+                    <input
+                      class="workspace-access-input"
+                      [(ngModel)]="createCompanyForm.firstName"
+                      name="firstName"
+                      maxlength="80"
+                      required />
+                  </label>
+                  <label>
+                    <span>Last name</span>
+                    <input
+                      class="workspace-access-input"
+                      [(ngModel)]="createCompanyForm.lastName"
+                      name="lastName"
+                      maxlength="80"
+                      required />
+                  </label>
+                  <label>
+                    <span>Work email</span>
+                    <input
+                      class="workspace-access-input"
+                      [(ngModel)]="createCompanyForm.workEmail"
+                      name="workEmail"
+                      type="email"
+                      maxlength="120"
+                      required />
+                  </label>
+                  <label>
+                    <span>Phone</span>
+                    <input
+                      class="workspace-access-input"
+                      [(ngModel)]="createCompanyForm.phone"
+                      name="phone"
+                      maxlength="30" />
+                  </label>
+                  <label>
+                    <span>Country</span>
+                    <input
+                      class="workspace-access-input"
+                      [(ngModel)]="createCompanyForm.country"
+                      name="country"
+                      maxlength="80"
+                      required />
+                  </label>
+                </div>
+
+                <div class="workspace-access-page__status" *ngIf="createCompanyLoading" role="status" aria-live="polite">
+                  Creating your workspace and activating owner access...
+                </div>
+
+                <p class="workspace-access-page__invite-error" *ngIf="createCompanyError">
+                  {{ createCompanyError }}
+                  <span class="workspace-access-page__error-code" *ngIf="createCompanyErrorCode">
+                    [{{ createCompanyErrorCode }}]
+                  </span>
+                </p>
+
+                <p class="workspace-access-page__success" *ngIf="createCompanySuccessMessage">
+                  {{ createCompanySuccessMessage }}
+                </p>
+
+                <div class="workspace-access-page__actions">
+                  <button
+                    type="submit"
+                    class="workspace-access-button workspace-access-button--primary"
+                    [disabled]="createCompanyLoading || createCompanyFormRef.invalid">
+                    {{ createCompanyLoading ? 'Creating workspace...' : createCompanyError ? 'Retry' : 'Create Company Workspace' }}
+                  </button>
+                  <button type="button" class="workspace-access-button" (click)="createCompanyOpen = false" [disabled]="createCompanyLoading">
+                    Hide form
+                  </button>
+                </div>
+              </form>
 
               <p class="workspace-access-page__footer-note">
                 You need active organization access before using operational tools.

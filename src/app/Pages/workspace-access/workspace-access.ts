@@ -40,10 +40,14 @@ export class WorkspaceAccessPageComponent implements OnInit {
   createCompanyOpen = false;
   createCompanyLoading = false;
   createCompanyError = '';
+  createCompanyErrorCode = '';
+  createCompanySuccessMessage = '';
   private recoveryReturnUrl: string | null = null;
+  private createCompanyIdempotencyKey: string | null = null;
   createCompanyForm = {
     companyName: '',
-    contactName: '',
+    firstName: '',
+    lastName: '',
     workEmail: '',
     phone: '',
     country: ''
@@ -145,12 +149,11 @@ export class WorkspaceAccessPageComponent implements OnInit {
         if (payload.currentUser?.email && !this.createCompanyForm.workEmail) {
           this.createCompanyForm.workEmail = String(payload.currentUser.email);
         }
-        const displayName = [payload.currentUser?.first_name, payload.currentUser?.last_name]
-          .filter(Boolean)
-          .join(' ')
-          .trim();
-        if (displayName && !this.createCompanyForm.contactName) {
-          this.createCompanyForm.contactName = displayName;
+        if (payload.currentUser?.first_name && !this.createCompanyForm.firstName) {
+          this.createCompanyForm.firstName = String(payload.currentUser.first_name);
+        }
+        if (payload.currentUser?.last_name && !this.createCompanyForm.lastName) {
+          this.createCompanyForm.lastName = String(payload.currentUser.last_name);
         }
 
         const activeMemberships = state.activeWorkspaces.filter((membership) =>
@@ -230,6 +233,9 @@ export class WorkspaceAccessPageComponent implements OnInit {
   openCreateCompany(): void {
     this.createCompanyOpen = true;
     this.createCompanyError = '';
+    this.createCompanyErrorCode = '';
+    this.createCompanySuccessMessage = '';
+    this.ensureCreateCompanyIdempotencyKey();
   }
 
   createCompany(): void {
@@ -237,22 +243,27 @@ export class WorkspaceAccessPageComponent implements OnInit {
       return;
     }
 
-    const companyName = this.createCompanyForm.companyName.trim();
-    if (!companyName) {
-      this.createCompanyError = 'Company name is required.';
+    const validation = this.validateCreateCompanyDraft();
+    if (!validation.ok) {
+      this.createCompanyError = validation.message;
+      this.createCompanyErrorCode = 'VALIDATION';
       return;
     }
 
     this.createCompanyLoading = true;
     this.createCompanyError = '';
+    this.createCompanyErrorCode = '';
+    this.createCompanySuccessMessage = '';
+    const idempotencyKey = this.ensureCreateCompanyIdempotencyKey();
 
     this.workspaceCreation.createWorkspace({
-      idempotency_key: this.createIdempotencyKey(),
-      company_name: companyName,
-      contact_name: this.emptyToNull(this.createCompanyForm.contactName),
-      work_email: this.emptyToNull(this.createCompanyForm.workEmail),
+      idempotency_key: idempotencyKey,
+      company_name: validation.payload.company_name,
+      first_name: validation.payload.first_name,
+      last_name: validation.payload.last_name,
+      work_email: validation.payload.work_email,
       phone: this.emptyToNull(this.createCompanyForm.phone),
-      country: this.emptyToNull(this.createCompanyForm.country)
+      country: validation.payload.country
     }).pipe(
       switchMap((result) =>
         from(this.activateCreatedWorkspaceContext(result.context)).pipe(map(() => result))
@@ -264,11 +275,17 @@ export class WorkspaceAccessPageComponent implements OnInit {
       })
     ).subscribe({
       next: async (route) => {
+        this.createCompanySuccessMessage = 'Workspace created. Opening your dashboard...';
+        this.createCompanyError = '';
+        this.createCompanyErrorCode = '';
+        this.createCompanyIdempotencyKey = null;
         const nextRoute = route === '/app/workspace-access' ? '/app/dashboard' : route;
         await this.router.navigateByUrl(nextRoute, { replaceUrl: true });
       },
       error: (error) => {
-        this.createCompanyError = this.toCreateCompanyError(error);
+        const parsed = this.toCreateCompanyError(error);
+        this.createCompanyError = parsed.message;
+        this.createCompanyErrorCode = parsed.code;
       }
     });
   }
@@ -613,26 +630,279 @@ export class WorkspaceAccessPageComponent implements OnInit {
     return normalized || null;
   }
 
-  private createIdempotencyKey(): string {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
+  private ensureCreateCompanyIdempotencyKey(): string {
+    if (this.createCompanyIdempotencyKey) {
+      return this.createCompanyIdempotencyKey;
     }
-    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      this.createCompanyIdempotencyKey = crypto.randomUUID();
+      return this.createCompanyIdempotencyKey;
+    }
+
+    this.createCompanyIdempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return this.createCompanyIdempotencyKey;
   }
 
-  private toCreateCompanyError(error: any): string {
-    const code = String(error?.error?.error?.code ?? error?.error?.code ?? '').toUpperCase();
+  private toCreateCompanyError(error: any): { message: string; code: string } {
+    const code = String(
+      error?.code ??
+      error?.error?.error?.code ??
+      error?.error?.code ??
+      error?.error?.error?.error?.code ??
+      ''
+    ).toUpperCase();
     const message =
       error?.error?.error?.message ||
+      error?.error?.message ||
       error?.error?.errors?.[0]?.message ||
       error?.message ||
       '';
 
     if (code === 'CONFLICT' || error?.status === 409) {
-      return 'This account already belongs to an organization. Refresh organization access to continue.';
+      return {
+        message:
+          message ||
+          'This account already belongs to an organization. Refresh organization access to continue.',
+        code: code || 'CONFLICT'
+      };
     }
 
-    return message || 'We could not create your company right now.';
+    if (code === 'BAD_REQUEST' || error?.status === 400) {
+      return {
+        message: message || 'Please check the workspace details and try again.',
+        code: code || 'BAD_REQUEST'
+      };
+    }
+
+    if (code === 'FORBIDDEN' || error?.status === 403) {
+      return {
+        message: message || 'You are not allowed to create a company workspace.',
+        code: code || 'FORBIDDEN'
+      };
+    }
+
+    if (code === 'TIMEOUT') {
+      return {
+        message: 'The request took too long. Please retry.',
+        code: code || 'TIMEOUT'
+      };
+    }
+
+    if (error?.status === 0) {
+      return {
+        message: 'We could not reach the server. Check your connection and retry.',
+        code: 'NETWORK'
+      };
+    }
+
+    return {
+      message: 'We could not create your company right now.',
+      code: code || String(error?.status ?? 'SERVER_ERROR')
+    };
+  }
+
+  private validateCreateCompanyDraft(): {
+    ok: boolean;
+    message: string;
+    payload: {
+      company_name: string;
+      first_name: string;
+      last_name: string;
+      work_email: string;
+      country: string;
+    };
+  } {
+    const companyName = this.normalizeRequiredText(this.createCompanyForm.companyName, 120);
+    const firstName = this.normalizeRequiredText(this.createCompanyForm.firstName, 80);
+    const lastName = this.normalizeRequiredText(this.createCompanyForm.lastName, 80);
+    const workEmail = this.normalizeRequiredText(this.createCompanyForm.workEmail, 120).toLowerCase();
+    const country = this.normalizeRequiredText(this.createCompanyForm.country, 80);
+
+    if (!companyName) {
+      return { ok: false, message: 'Company name is required.', payload: this.emptyCreateCompanyPayload() };
+    }
+    if (companyName.length > 120) {
+      return {
+        ok: false,
+        message: 'Company name must be between 2 and 120 characters.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!firstName) {
+      return { ok: false, message: 'First name is required.', payload: this.emptyCreateCompanyPayload() };
+    }
+    if (firstName.length > 80) {
+      return {
+        ok: false,
+        message: 'First name must be between 2 and 80 characters.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!lastName) {
+      return { ok: false, message: 'Last name is required.', payload: this.emptyCreateCompanyPayload() };
+    }
+    if (lastName.length > 80) {
+      return {
+        ok: false,
+        message: 'Last name must be between 2 and 80 characters.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!this.isValidCompanyName(companyName)) {
+      return {
+        ok: false,
+        message: 'Company name can only include letters, numbers, spaces, and basic punctuation.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!this.isValidPersonName(firstName)) {
+      return {
+        ok: false,
+        message: 'First name must use a real name.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!this.isValidPersonName(lastName)) {
+      return {
+        ok: false,
+        message: 'Last name must use a real name.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!this.isValidEmail(workEmail)) {
+      return {
+        ok: false,
+        message: 'Work email must be a valid email address.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (workEmail.length > 120) {
+      return {
+        ok: false,
+        message: 'Work email must be between 3 and 120 characters.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!country) {
+      return { ok: false, message: 'Country is required.', payload: this.emptyCreateCompanyPayload() };
+    }
+    if (country.length > 80) {
+      return {
+        ok: false,
+        message: 'Country must be between 2 and 80 characters.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+    if (!this.isValidCountry(country)) {
+      return {
+        ok: false,
+        message: 'Country contains unsupported characters.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+
+    const phone = this.normalizeOptionalPhone(this.createCompanyForm.phone);
+    if (phone === null && this.createCompanyForm.phone.trim()) {
+      return {
+        ok: false,
+        message: 'Phone number must contain only valid characters and at least 7 digits.',
+        payload: this.emptyCreateCompanyPayload()
+      };
+    }
+
+    return {
+      ok: true,
+      message: '',
+      payload: {
+        company_name: companyName,
+        first_name: firstName,
+        last_name: lastName,
+        work_email: workEmail,
+        country
+      }
+    };
+  }
+
+  private normalizeRequiredText(value: string, max: number): string {
+    return this.normalizeText(value, max);
+  }
+
+  private normalizeText(value: string, max = 255): string {
+    void max;
+    return value.trim().replace(/\s+/g, ' ');
+  }
+
+  private normalizeOptionalPhone(value: string): string | null {
+    const normalized = this.normalizeText(value, 30);
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized.length > 30) {
+      return null;
+    }
+
+    if (!/^[+()\d\s.-]+$/.test(normalized)) {
+      return null;
+    }
+
+    return normalized.replace(/\s+/g, ' ');
+  }
+
+  private isValidCompanyName(value: string): boolean {
+    return /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N}\s&'.,()/-]*$/u.test(value) && !this.isPlaceholderValue(value);
+  }
+
+  private isValidPersonName(value: string): boolean {
+    return /^[\p{L}\p{M}][\p{L}\p{M}\p{N}\s.'-]*$/u.test(value) && !this.isPlaceholderValue(value);
+  }
+
+  private isValidEmail(value: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  private isValidCountry(value: string): boolean {
+    return /^[\p{L}\p{M}\p{N}\s.'/-]+$/u.test(value) && !this.isPlaceholderValue(value);
+  }
+
+  private isPlaceholderValue(value: string): boolean {
+    const normalized = value.toLowerCase().trim();
+    return new Set([
+      'test',
+      'testing',
+      'demo',
+      'sample',
+      'placeholder',
+      'example',
+      'lorem ipsum',
+      'dummy',
+      'temp',
+      'n/a',
+      'na',
+      'none',
+      'first name',
+      'last name',
+      'company name',
+      'your company',
+      'your name'
+    ]).has(normalized);
+  }
+
+  private emptyCreateCompanyPayload(): {
+    company_name: string;
+    first_name: string;
+    last_name: string;
+    work_email: string;
+    country: string;
+  } {
+    return {
+      company_name: '',
+      first_name: '',
+      last_name: '',
+      work_email: '',
+      country: ''
+    };
   }
 
   private async completeInviteClaim(
