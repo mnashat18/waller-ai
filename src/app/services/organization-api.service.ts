@@ -81,7 +81,8 @@ export type OrganizationProfileUpdateInput = Partial<Pick<
 >>;
 
 export type OrganizationDepartmentInput = {
-  name: string;
+  name?: string;
+  manager_member_id?: string | number | null;
 };
 
 export type OrganizationApiErrorCode =
@@ -168,7 +169,12 @@ export class OrganizationApiService {
       return throwError(() => new OrganizationApiError('validation', 400, 'Department name is required.'));
     }
 
-    return this.http.post<unknown>(`${this.api}/wellar/organization/departments`, { name }, {
+    const payload = {
+      name,
+      manager_member_id: this.pickString(input.manager_member_id) ?? null
+    };
+
+    return this.http.post<unknown>(`${this.api}/wellar/organization/departments`, payload, {
       headers: this.auth.getAuthHeaders(this.requireToken()),
       withCredentials: true
     }).pipe(
@@ -180,15 +186,27 @@ export class OrganizationApiService {
 
   updateDepartment(departmentId: string, input: OrganizationDepartmentInput): Observable<OrganizationDepartment> {
     const id = this.pickString(departmentId);
-    const name = this.pickString(input?.name);
     if (!id) {
       return throwError(() => new OrganizationApiError('validation', 400, 'Department id is required.'));
     }
-    if (!name) {
-      return throwError(() => new OrganizationApiError('validation', 400, 'Department name is required.'));
+
+    const payload: Record<string, unknown> = {};
+    if (Object.prototype.hasOwnProperty.call(input ?? {}, 'name')) {
+      const name = this.pickString(input?.name);
+      if (!name) {
+        return throwError(() => new OrganizationApiError('validation', 400, 'Department name is required.'));
+      }
+      payload['name'] = name;
+    }
+    if (Object.prototype.hasOwnProperty.call(input ?? {}, 'manager_member_id')) {
+      payload['manager_member_id'] = this.pickString(input?.manager_member_id) ?? null;
     }
 
-    return this.http.patch<unknown>(`${this.api}/wellar/organization/departments/${encodeURIComponent(id)}`, { name }, {
+    if (!Object.keys(payload).length) {
+      return throwError(() => new OrganizationApiError('validation', 400, 'No editable department fields were provided.'));
+    }
+
+    return this.http.patch<unknown>(`${this.api}/wellar/organization/departments/${encodeURIComponent(id)}`, payload, {
       headers: this.auth.getAuthHeaders(this.requireToken()),
       withCredentials: true
     }).pipe(

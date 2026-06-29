@@ -23,7 +23,7 @@ import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewpor
 type DepartmentForm = {
   name: string;
   is_active: boolean;
-  manager_member: string;
+  manager_member_id: string;
 };
 
 @Component({
@@ -115,7 +115,7 @@ export class DepartmentsPageComponent implements OnInit {
     this.form = {
       name: row.name,
       is_active: row.is_active,
-      manager_member: this.departmentManagerMemberId(row.manager_member)
+      manager_member_id: this.departmentManagerMemberId(row.manager_member)
     };
     this.showEditModal = true;
   }
@@ -125,7 +125,7 @@ export class DepartmentsPageComponent implements OnInit {
     this.form = {
       name: row.name,
       is_active: row.is_active,
-      manager_member: this.departmentManagerMemberId(row.manager_member)
+      manager_member_id: this.departmentManagerMemberId(row.manager_member)
     };
     this.showManagerModal = true;
   }
@@ -149,7 +149,7 @@ export class DepartmentsPageComponent implements OnInit {
     const payload: DepartmentMutationInput = {
       name: this.form.name.trim(),
       is_active: this.form.is_active,
-      manager_member: this.toNullable(this.form.manager_member)
+      manager_member_id: this.toNullable(this.form.manager_member_id)
     };
 
     this.operationsAdmin.createDepartment(payload).subscribe({
@@ -177,7 +177,7 @@ export class DepartmentsPageComponent implements OnInit {
     const payload: Partial<DepartmentMutationInput> = {
       name: this.form.name.trim(),
       is_active: this.form.is_active,
-      manager_member: this.toNullable(this.form.manager_member)
+      manager_member_id: this.toNullable(this.form.manager_member_id)
     };
 
     this.operationsAdmin.updateDepartment(this.selectedDepartment.id, payload).subscribe({
@@ -203,7 +203,7 @@ export class DepartmentsPageComponent implements OnInit {
     this.feedbackMessage = '';
 
     this.operationsAdmin
-      .assignDepartmentManager(this.selectedDepartment.id, this.toNullable(this.form.manager_member))
+      .assignDepartmentManager(this.selectedDepartment.id, this.toNullable(this.form.manager_member_id))
       .subscribe({
         next: () => {
           this.saving = false;
@@ -236,8 +236,6 @@ export class DepartmentsPageComponent implements OnInit {
       finalize(() => {
         queueMicrotask(() => {
           this.loading = false;
-          console.log('departments loading', this.loading);
-          console.log('departments data', this.pageData);
           this.cdr.detectChanges();
         });
       })
@@ -256,7 +254,7 @@ export class DepartmentsPageComponent implements OnInit {
     return {
       name: '',
       is_active: true,
-      manager_member: ''
+      manager_member_id: ''
     };
   }
 
@@ -306,6 +304,13 @@ export class DepartmentsPageComponent implements OnInit {
     if (normalized.includes('departments') && normalized.includes('business_profile') && normalized.includes('unique')) {
       return 'Remove unique constraint from departments.business_profile because a company must have many departments.';
     }
-    return String(message || fallback);
+    const normalizedFallback = fallback || 'Department change could not be completed.';
+    if (normalized.includes('selected manager is not eligible')) {
+      return 'Selected manager is not eligible for this department.';
+    }
+    if (normalized.includes('owner or hr') || normalized.includes('permission') || normalized.includes('forbidden')) {
+      return 'Only Owner or HR can manage departments.';
+    }
+    return normalizedFallback;
   }
 }

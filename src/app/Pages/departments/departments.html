@@ -188,11 +188,15 @@
             </select>
           </label>
           <label class="grid gap-2 text-sm font-medium text-slate-700">
-            Manager
-            <select [(ngModel)]="form.manager_member" name="departmentManagerCreate" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
-              <option value="">No manager</option>
+            Department manager (optional)
+            <select [(ngModel)]="form.manager_member_id" name="departmentManagerCreate" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+              <option value="">No manager assigned</option>
               <option *ngFor="let option of pageData?.managerOptions ?? []" [value]="option.id">{{ option.label }}</option>
             </select>
+            <span class="text-xs font-normal text-slate-500">Choose an active Owner, HR, or Manager from this organization.</span>
+            <span *ngIf="!(pageData?.managerOptions?.length)" class="text-xs font-normal text-amber-700">
+              No eligible managers are available. Add or promote a manager in Workforce first.
+            </span>
           </label>
         </div>
       </form>
@@ -244,11 +248,15 @@
             </select>
           </label>
           <label class="grid gap-2 text-sm font-medium text-slate-700">
-            Manager
-            <select [(ngModel)]="form.manager_member" name="departmentManagerEdit" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
-              <option value="">No manager</option>
+            Department manager (optional)
+            <select [(ngModel)]="form.manager_member_id" name="departmentManagerEdit" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+              <option value="">No manager assigned</option>
               <option *ngFor="let option of pageData?.managerOptions ?? []" [value]="option.id">{{ option.label }}</option>
             </select>
+            <span class="text-xs font-normal text-slate-500">Choose an active Owner, HR, or Manager from this organization.</span>
+            <span *ngIf="!(pageData?.managerOptions?.length)" class="text-xs font-normal text-amber-700">
+              No eligible managers are available. Add or promote a manager in Workforce first.
+            </span>
           </label>
         </div>
       </form>
@@ -287,11 +295,15 @@
       </div>
 
       <label class="mt-6 grid gap-2 text-sm font-medium text-slate-700">
-        Manager
-        <select [(ngModel)]="form.manager_member" name="departmentManagerAssign" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
-          <option value="">No manager</option>
+        Department manager (optional)
+        <select [(ngModel)]="form.manager_member_id" name="departmentManagerAssign" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
+          <option value="">No manager assigned</option>
           <option *ngFor="let option of pageData?.managerOptions ?? []" [value]="option.id">{{ option.label }}</option>
         </select>
+        <span class="text-xs font-normal text-slate-500">Choose an active Owner, HR, or Manager from this organization.</span>
+        <span *ngIf="!(pageData?.managerOptions?.length)" class="text-xs font-normal text-amber-700">
+          No eligible managers are available. Add or promote a manager in Workforce first.
+        </span>
       </label>
 
       <div class="mt-6 flex flex-wrap items-center justify-end gap-3">

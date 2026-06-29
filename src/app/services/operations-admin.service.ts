@@ -296,9 +296,9 @@ export type DepartmentsPageData = {
 };
 
 export type DepartmentMutationInput = {
-  name: string;
+  name?: string;
   is_active?: boolean | null;
-  manager_member?: string | number | null;
+  manager_member_id?: string | number | null;
 };
 
 export type InviteRow = {
@@ -1035,20 +1035,70 @@ export class OperationsAdminService {
   }
 
   createDepartment(input: DepartmentMutationInput): Observable<void> {
-    void input;
-    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+    const name = this.pickString(input.name);
+    if (!name) {
+      return throwError(() => new Error('Department name is required.'));
+    }
+
+    const payload = {
+      name,
+      manager_member_id: this.normalizeId(input.manager_member_id) ?? null
+    };
+
+    return this.http.post(
+      `${this.api}/wellar/organization/departments`,
+      payload,
+      {
+        headers: this.headers(this.requireToken()),
+        withCredentials: true
+      }
+    ).pipe(
+      timeout(12000),
+      map(() => undefined),
+      catchError((error) => throwError(() => this.toOrganizationDepartmentError(error, 'Failed to create department.')))
+    );
   }
 
   updateDepartment(departmentId: string, input: Partial<DepartmentMutationInput>): Observable<void> {
-    void departmentId;
-    void input;
-    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+    const id = this.normalizeId(departmentId);
+    if (!id) {
+      return throwError(() => new Error('Department id is required.'));
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (Object.prototype.hasOwnProperty.call(input, 'name')) {
+      const name = this.pickString(input.name);
+      if (!name) {
+        return throwError(() => new Error('Department name is required.'));
+      }
+      payload['name'] = name;
+    }
+    if (Object.prototype.hasOwnProperty.call(input, 'manager_member_id')) {
+      payload['manager_member_id'] = this.normalizeId(input.manager_member_id) ?? null;
+    }
+
+    if (!Object.keys(payload).length) {
+      return throwError(() => new Error('At least one editable department field is required.'));
+    }
+
+    return this.http.patch(
+      `${this.api}/wellar/organization/departments/${encodeURIComponent(id)}`,
+      payload,
+      {
+        headers: this.headers(this.requireToken()),
+        withCredentials: true
+      }
+    ).pipe(
+      timeout(12000),
+      map(() => undefined),
+      catchError((error) => throwError(() => this.toOrganizationDepartmentError(error, 'Failed to update department.')))
+    );
   }
 
   assignDepartmentManager(departmentId: string, managerId: string | null): Observable<void> {
-    void departmentId;
-    void managerId;
-    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+    return this.updateDepartment(departmentId, {
+      manager_member_id: this.normalizeId(managerId) ?? null
+    });
   }
 
   getInvitesPageData(): Observable<InvitesPageData> {
@@ -1132,6 +1182,14 @@ export class OperationsAdminService {
 
   private organizationWorkflowPrerequisiteMessage(): string {
     return 'Coming next: controlled access workflow.';
+  }
+
+  private requireToken(): string {
+    const token = this.auth.getStoredAccessToken();
+    if (!token) {
+      throw new Error('Session expired. Please sign in again.');
+    }
+    return token;
   }
 
   private ensureScopedContext(): Observable<ScopedContext> {
@@ -2269,12 +2327,14 @@ export class OperationsAdminService {
       .filter((member) => {
         const role = this.normalizeText(member.member_role);
         const status = this.normalizeText(member.status);
-        const canManageDepartment = role === 'owner' || role === 'hr' || role === 'admin' || role === 'manager' || role === 'manger';
-        return canManageDepartment && status === 'active';
+        const memberId = this.normalizeId(member.id);
+        const userId = this.normalizeId(member.user?.id);
+        const canManageDepartment = role === 'owner' || role === 'hr' || role === 'manager';
+        return Boolean(memberId && userId) && canManageDepartment && status === 'active';
       })
       .map((member) => ({
         id: this.normalizeId(member.id) ?? '',
-        label: `${this.userLabel(member.user)} - ${this.toDisplayLabel(this.normalizeMemberRole(member.member_role))}`
+        label: `${this.userLabel(member.user)} — ${this.managerOptionRoleLabel(member.member_role)}`
       }))
       .filter((item) => item.id);
 
@@ -2778,6 +2838,11 @@ export class OperationsAdminService {
     return normalized || 'employee';
   }
 
+  private managerOptionRoleLabel(value: unknown): string {
+    const normalized = this.normalizeMemberRole(value);
+    return normalized === 'hr' ? 'HR' : this.toDisplayLabel(normalized);
+  }
+
   private toBackendMemberRole(value: unknown): string {
     const normalized = this.normalizeMemberRole(value);
     return normalized;
@@ -2902,6 +2967,28 @@ export class OperationsAdminService {
       .map((part) => this.pickString(part))
       .filter((part): part is string => Boolean(part))
       .join(' ');
+  }
+
+  private toOrganizationDepartmentError(error: unknown, fallback: string): Error {
+    if (error instanceof HttpErrorResponse) {
+      const status = Number(error.status ?? 0);
+      const detail = this.directusErrorText(error).toLowerCase();
+      if (status === 401) {
+        return new Error('Session expired. Please sign in again.');
+      }
+      if (status === 403) {
+        return new Error('Only Owner or HR can manage departments.');
+      }
+      if (status === 400 && detail.includes('selected manager is not eligible')) {
+        return new Error('Selected manager is not eligible for this department.');
+      }
+    }
+
+    if (error instanceof Error && error.message === 'Session expired. Please sign in again.') {
+      return error;
+    }
+
+    return new Error(fallback);
   }
 
   private inviteManagementFlowPrerequisiteMessage(): string {

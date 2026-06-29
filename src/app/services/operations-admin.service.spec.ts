@@ -1,0 +1,136 @@
+import { provideHttpClient } from '@angular/common/http';
+import { HttpHeaders } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+
+import { environment } from '../../environments/environment';
+import { CompanyContextService } from '../core/context/company-context.service';
+import { AuthService } from './auth';
+import { OperationsAdminService } from './operations-admin.service';
+import { WorkforceRosterApiService } from './workforce-roster-api.service';
+
+describe('OperationsAdminService department manager assignment', () => {
+  let service: OperationsAdminService;
+  let httpMock: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        OperationsAdminService,
+        {
+          provide: AuthService,
+          useValue: {
+            getStoredAccessToken: () => 'access-token',
+            getAuthHeaders: () => new HttpHeaders({ Authorization: 'Bearer access-token' })
+          }
+        },
+        { provide: CompanyContextService, useValue: {} },
+        { provide: WorkforceRosterApiService, useValue: {} }
+      ]
+    });
+
+    service = TestBed.inject(OperationsAdminService);
+    httpMock = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    httpMock.verify();
+  });
+
+  it('sends null manager_member_id when creating a department without a manager', () => {
+    service.createDepartment({ name: ' Operations ' }).subscribe();
+
+    const req = httpMock.expectOne(`${environment.API_URL}/wellar/organization/departments`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({
+      name: 'Operations',
+      manager_member_id: null
+    });
+    req.flush({ data: { department: { id: 'department-1' } } });
+  });
+
+  it('sends the selected membership id in the exact create payload', () => {
+    service.createDepartment({ name: 'Operations', manager_member_id: 'member-1' }).subscribe();
+
+    const req = httpMock.expectOne(`${environment.API_URL}/wellar/organization/departments`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({
+      name: 'Operations',
+      manager_member_id: 'member-1'
+    });
+    req.flush({ data: { department: { id: 'department-1' } } });
+  });
+
+  it('sends null when clearing a department manager', () => {
+    service.assignDepartmentManager('department-1', null).subscribe();
+
+    const req = httpMock.expectOne(`${environment.API_URL}/wellar/organization/departments/department-1`);
+    expect(req.request.method).toBe('PATCH');
+    expect(req.request.body).toEqual({
+      manager_member_id: null
+    });
+    req.flush({ data: { department: { id: 'department-1' } } });
+  });
+
+  it('only exposes active owner hr and manager members as manager options', () => {
+    const data = (service as any).buildDepartmentsPageData(
+      [
+        {
+          id: 'department-1',
+          name: 'Operations',
+          is_active: true,
+          business_profile: 'workspace-1',
+          manager_member: 'member-owner'
+        }
+      ],
+      [
+        {
+          id: 'member-owner',
+          status: 'active',
+          member_role: 'owner',
+          department: 'department-1',
+          user: { id: 'user-owner', first_name: 'Olivia', last_name: 'Owner', email: 'owner@example.com' }
+        },
+        {
+          id: 'member-hr',
+          status: 'active',
+          member_role: 'hr',
+          department: null,
+          user: { id: 'user-hr', first_name: 'Harper', last_name: 'HR', email: 'hr@example.com' }
+        },
+        {
+          id: 'member-manager',
+          status: 'active',
+          member_role: 'manager',
+          department: null,
+          user: { id: 'user-manager', first_name: 'Mina', last_name: 'Manager', email: 'manager@example.com' }
+        },
+        {
+          id: 'member-employee',
+          status: 'active',
+          member_role: 'employee',
+          department: null,
+          user: { id: 'user-employee', first_name: 'Eli', last_name: 'Employee', email: 'employee@example.com' }
+        },
+        {
+          id: 'member-inactive',
+          status: 'inactive',
+          member_role: 'manager',
+          department: null,
+          user: { id: 'user-inactive', first_name: 'Ivy', last_name: 'Inactive', email: 'inactive@example.com' }
+        }
+      ],
+      [],
+      []
+    );
+
+    expect(data.managerOptions).toEqual([
+      { id: 'member-owner', label: 'Olivia Owner — Owner' },
+      { id: 'member-hr', label: 'Harper HR — HR' },
+      { id: 'member-manager', label: 'Mina Manager — Manager' }
+    ]);
+    expect(data.rows[0].manager_name).toBe('Olivia Owner');
+  });
+});

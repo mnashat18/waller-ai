@@ -193,6 +193,11 @@ function createQueryBuilder(table, state, scope) {
         return state.scenario.switchMembership ? [state.scenario.switchMembership] : [];
       }
 
+      if (equalityFilters.id) {
+        const manager = state.scenario.managerMembersById?.[String(equalityFilters.id)];
+        return manager ? [manager] : [];
+      }
+
       if (equalityFilters.user) {
         return state.scenario.activeMembershipRows ?? [];
       }
@@ -246,8 +251,18 @@ function createQueryBuilder(table, state, scope) {
           return state.scenario.switchMembership;
         }
 
+        if (equalityFilters.id) {
+          return state.scenario.managerMembersById?.[String(equalityFilters.id)];
+        }
+
         if (equalityFilters.user) {
           return state.scenario.existingMembership;
+        }
+      }
+
+      if (table === 'departments') {
+        if (equalityFilters.id && equalityFilters.business_profile) {
+          return state.scenario.departmentRowsById?.[String(equalityFilters.id)];
         }
       }
 
@@ -285,6 +300,18 @@ function createQueryBuilder(table, state, scope) {
           name: 'DatabaseError',
           code: '23514'
         });
+      }
+
+      if (table === 'departments' && filters.some((filter) => String(filter.column).split('.').at(-1) === 'id')) {
+        const equalityFilters = extractEqualityFilters(filters);
+        const departmentId = String(equalityFilters.id);
+        const current = state.scenario.departmentRowsById?.[departmentId];
+        if (current) {
+          state.scenario.departmentRowsById[departmentId] = {
+            ...current,
+            ...updatePayload
+          };
+        }
       }
 
       return 1;
@@ -387,6 +414,8 @@ function createFakeDatabase(scenario = {}) {
       duplicateOwnerMembership: undefined,
       switchMembership: undefined,
       activeMembershipRows: [],
+      managerMembersById: {},
+      departmentRowsById: {},
       directusUserRow: undefined,
       failDepartmentInsert: false,
       failDirectusUserUpdate: false,
@@ -436,7 +465,8 @@ function buildTestHarness(scenario = {}) {
     routeLoggerCalls,
     createWorkspaceHandler: router.handlers.get('POST /workspaces/create'),
     switchWorkspaceHandler: router.handlers.get('POST /workspaces/switch'),
-    createDepartmentHandler: router.handlers.get('POST /organization/departments')
+    createDepartmentHandler: router.handlers.get('POST /organization/departments'),
+    updateDepartmentHandler: router.handlers.get('PATCH /organization/departments/:departmentId')
   };
 }
 
@@ -771,6 +801,296 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
 
 await withOwnerRoleEnv(ownerRoleId, async () => {
   const activeMembership = {
+    id: 95,
+    user: 'user-12',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, createDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    managerMembersById: {
+      'manager-1': {
+        id: 'manager-1',
+        status: 'active',
+        member_role: 'manager',
+        business_profile: 'trusted-workspace',
+        user_id: 'directus-user-1'
+      }
+    }
+  });
+
+  const createResponse = buildFakeResponse();
+  await createDepartmentHandler(
+    {
+      accountability: { user: 'user-12' },
+      body: {
+        name: 'Safety',
+        manager_member_id: 'manager-1',
+        workspace_id: 'browser-value'
+      }
+    },
+    createResponse
+  );
+  assert.equal(createResponse.statusCode, 400);
+  assert.equal(database.calls.some((call) => call.table === 'departments'), false);
+
+  const validResponse = buildFakeResponse();
+  await createDepartmentHandler(
+    {
+      accountability: { user: 'user-12' },
+      body: {
+        name: 'Safety',
+        manager_member_id: 'manager-1'
+      }
+    },
+    validResponse
+  );
+
+  assert.equal(validResponse.statusCode, 201);
+  assert.equal(validResponse.body.data.department.manager_member_id, 'manager-1');
+
+  const departmentInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'departments');
+  const departmentAuditInsert = database.calls.find(
+    (call) =>
+      call.type === 'insert' &&
+      call.table === 'activity_events' &&
+      call.payload.action === 'organization_department_created'
+  );
+
+  assert.match(departmentInsert.payload.id, uuidPattern);
+  assert.equal(departmentInsert.payload.business_profile, 'trusted-workspace');
+  assert.equal(departmentInsert.payload.manager_member, 'manager-1');
+  assert.match(departmentAuditInsert.payload.id, uuidPattern);
+  assert.notEqual(departmentAuditInsert.payload.id, departmentInsert.payload.id);
+  assert.equal(departmentAuditInsert.payload.business_profile, 'trusted-workspace');
+});
+
+for (const [scenarioName, managerRow] of [
+  [
+    'cross-workspace',
+    {
+      id: 'manager-cross',
+      status: 'active',
+      member_role: 'manager',
+      business_profile: 'other-workspace',
+      user_id: 'directus-user-2'
+    }
+  ],
+  [
+    'inactive',
+    {
+      id: 'manager-inactive',
+      status: 'inactive',
+      member_role: 'manager',
+      business_profile: 'trusted-workspace',
+      user_id: 'directus-user-3'
+    }
+  ],
+  [
+    'employee',
+    {
+      id: 'manager-employee',
+      status: 'active',
+      member_role: 'employee',
+      business_profile: 'trusted-workspace',
+      user_id: 'directus-user-4'
+    }
+  ],
+  [
+    'missing-user',
+    {
+      id: 'manager-missing-user',
+      status: 'active',
+      member_role: 'manager',
+      business_profile: 'trusted-workspace',
+      user_id: null
+    }
+  ]
+]) {
+  await withOwnerRoleEnv(ownerRoleId, async () => {
+    const activeMembership = {
+      id: `active-${scenarioName}`,
+      user: `user-${scenarioName}`,
+      status: 'active',
+      member_role: 'owner',
+      workspace_id: 'trusted-workspace',
+      department_id: null,
+      joined_at: now,
+      company_name: 'Trusted Workspace',
+      workspace_is_active: true,
+      plan_code: 'pro',
+      billing_status: 'active',
+      department_match_id: null,
+      department_name: null,
+      department_business_profile: null,
+      department_is_active: null
+    };
+    const { database, createDepartmentHandler } = buildTestHarness({
+      ownerRoleId,
+      activeMembershipRows: [activeMembership],
+      managerMembersById: {
+        [String(managerRow.id)]: managerRow
+      }
+    });
+
+    const response = buildFakeResponse();
+    await createDepartmentHandler(
+      {
+        accountability: { user: `user-${scenarioName}` },
+        body: {
+          name: 'Operations',
+          manager_member_id: managerRow.id
+        }
+      },
+      response
+    );
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.body.error.code, 'BAD_REQUEST');
+    assert.equal(response.body.error.message, 'Selected manager is not eligible for this department.');
+    assert.equal(database.calls.some((call) => call.table === 'departments'), false);
+    assert.equal(database.calls.some((call) => call.table === 'activity_events'), false);
+  });
+}
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 96,
+    user: 'user-unknown-manager',
+    status: 'active',
+    member_role: 'owner',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, createDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    managerMembersById: {}
+  });
+
+  const response = buildFakeResponse();
+  await createDepartmentHandler(
+    {
+      accountability: { user: 'user-unknown-manager' },
+      body: {
+        name: 'Operations',
+        manager_member_id: 'unknown-member'
+      }
+    },
+    response
+  );
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.error.message, 'Selected manager is not eligible for this department.');
+  assert.equal(database.calls.some((call) => call.table === 'departments'), false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 97,
+    user: 'user-update-manager',
+    status: 'active',
+    member_role: 'owner',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, updateDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    managerMembersById: {
+      'hr-1': {
+        id: 'hr-1',
+        status: 'active',
+        member_role: 'hr',
+        business_profile: 'trusted-workspace',
+        user_id: 'directus-user-5'
+      }
+    },
+    departmentRowsById: {
+      'department-1': {
+        id: 'department-1',
+        name: 'Operations',
+        is_active: true,
+        business_profile: 'trusted-workspace',
+        manager_member: null,
+        date_created: now,
+        date_updated: now
+      }
+    }
+  });
+
+  assert.equal(typeof updateDepartmentHandler, 'function');
+
+  const assignResponse = buildFakeResponse();
+  await updateDepartmentHandler(
+    {
+      accountability: { user: 'user-update-manager' },
+      params: { departmentId: 'department-1' },
+      body: {
+        manager_member_id: 'hr-1'
+      }
+    },
+    assignResponse
+  );
+
+  assert.equal(assignResponse.statusCode, 200);
+  assert.equal(assignResponse.body.data.department.manager_member_id, 'hr-1');
+  assert.equal(database.scenario.departmentRowsById['department-1'].manager_member, 'hr-1');
+
+  const clearResponse = buildFakeResponse();
+  await updateDepartmentHandler(
+    {
+      accountability: { user: 'user-update-manager' },
+      params: { departmentId: 'department-1' },
+      body: {
+        name: 'Operations',
+        manager_member_id: null
+      }
+    },
+    clearResponse
+  );
+
+  assert.equal(clearResponse.statusCode, 200);
+  assert.equal(clearResponse.body.data.department.manager_member_id, null);
+  assert.equal(database.scenario.departmentRowsById['department-1'].manager_member, null);
+
+  const updateCalls = database.calls.filter((call) => call.type === 'update' && call.table === 'departments');
+  assert.deepEqual(updateCalls[0].payload, { manager_member: 'hr-1' });
+  assert.deepEqual(updateCalls[1].payload, { name: 'Operations', manager_member: null });
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
     id: 92,
     user: 'user-9',
     status: 'active',
@@ -797,7 +1117,8 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
     {
       accountability: { user: 'user-9' },
       body: {
-        name: 'Operations'
+        name: 'Operations',
+        manager_member_id: 'manager-1'
       }
     },
     forbiddenResponse

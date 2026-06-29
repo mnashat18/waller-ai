@@ -300,7 +300,7 @@ function buildWorkspaceRecordIds(createId = randomUUID) {
   return ids;
 }
 
-function buildDepartmentInsertPayload(name, businessProfileId, createId = randomUUID) {
+function buildDepartmentInsertPayload(name, businessProfileId, managerMemberId = null, createId = randomUUID) {
   const departmentId = createId();
   assertUuid(departmentId, 'departments.id');
 
@@ -309,7 +309,7 @@ function buildDepartmentInsertPayload(name, businessProfileId, createId = random
     business_profile: businessProfileId,
     name,
     is_active: true,
-    manager_member: null
+    manager_member: managerMemberId
   };
 }
 
@@ -1102,14 +1102,28 @@ function validateOrganizationProfilePayload(body) {
   return { ok: true, payload };
 }
 
-function validateDepartmentPayload(body) {
+function normalizeDepartmentManagerInput(value) {
+  if (value === null || value === undefined || value === '') {
+    return { ok: true, value: null };
+  }
+
+  const managerMemberId = pickString(value);
+  if (!managerMemberId) {
+    return { ok: false, message: 'manager_member_id must be a valid membership id or null.' };
+  }
+
+  return { ok: true, value: managerMemberId };
+}
+
+function validateDepartmentCreatePayload(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return { ok: false, message: 'Request body must be a JSON object.' };
   }
 
+  const allowed = new Set(['name', 'manager_member_id']);
   const keys = Object.keys(body);
-  if (keys.length !== 1 || keys[0] !== 'name') {
-    return { ok: false, message: 'Only name can be changed for departments in this release.' };
+  if (!keys.length || keys.some((key) => !allowed.has(key))) {
+    return { ok: false, message: 'Request contains unsupported department fields.' };
   }
 
   const name = pickString(body.name, MAX_COMPANY_NAME);
@@ -1117,7 +1131,47 @@ function validateDepartmentPayload(body) {
     return { ok: false, message: 'Department name is required.' };
   }
 
-  return { ok: true, payload: { name } };
+  const managerMember = normalizeDepartmentManagerInput(body.manager_member_id);
+  if (!managerMember.ok) {
+    return { ok: false, message: managerMember.message };
+  }
+
+  return { ok: true, payload: { name, managerMemberId: managerMember.value } };
+}
+
+function validateDepartmentUpdatePayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const allowed = new Set(['name', 'manager_member_id']);
+  const keys = Object.keys(body);
+  if (!keys.length) {
+    return { ok: false, message: 'At least one editable department field is required.' };
+  }
+
+  if (keys.some((key) => !allowed.has(key))) {
+    return { ok: false, message: 'Request contains unsupported department fields.' };
+  }
+
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(body, 'name')) {
+    const name = pickString(body.name, MAX_COMPANY_NAME);
+    if (!name) {
+      return { ok: false, message: 'Department name is required.' };
+    }
+    payload.name = name;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'manager_member_id')) {
+    const managerMember = normalizeDepartmentManagerInput(body.manager_member_id);
+    if (!managerMember.ok) {
+      return { ok: false, message: managerMember.message };
+    }
+    payload.managerMemberId = managerMember.value;
+  }
+
+  return { ok: true, payload };
 }
 
 function validateScanRequestPayload(body) {
@@ -1431,6 +1485,51 @@ async function loadDepartmentById(trx, workspaceId, departmentId) {
     .first();
 }
 
+async function resolveDepartmentManagerMemberId(trx, workspaceId, managerMemberId) {
+  if (managerMemberId === null || managerMemberId === undefined || managerMemberId === '') {
+    return null;
+  }
+
+  const member = await trx('business_profile_members as member')
+    .leftJoin('directus_users as user', 'user.id', 'member.user')
+    .select(
+      'member.id',
+      'member.status',
+      'member.member_role',
+      'member.business_profile',
+      'user.id as user_id'
+    )
+    .where('member.id', managerMemberId)
+    .first();
+
+  const error = Object.assign(new Error('Selected manager is not eligible for this department.'), {
+    code: 'BAD_REQUEST'
+  });
+
+  if (!member) {
+    throw error;
+  }
+
+  if (pickString(member.business_profile) !== pickString(workspaceId)) {
+    throw error;
+  }
+
+  if (String(member.status ?? '').toLowerCase() !== 'active') {
+    throw error;
+  }
+
+  if (!member.user_id) {
+    throw error;
+  }
+
+  const role = normalizeRole(member.member_role);
+  if (!['owner', 'hr', 'manager'].includes(role ?? '')) {
+    throw error;
+  }
+
+  return String(member.id);
+}
+
 async function loadScanRequestTargetMember(trx, workspaceId, memberId) {
   return trx('business_profile_members as member')
     .innerJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
@@ -1703,7 +1802,7 @@ export default {
         return unauthorized(res, 'Authentication is required.');
       }
 
-      const validation = validateDepartmentPayload(req.body ?? {});
+      const validation = validateDepartmentCreatePayload(req.body ?? {});
       if (!validation.ok) {
         return badRequest(res, validation.message);
       }
@@ -1728,9 +1827,16 @@ export default {
             });
           }
 
+          const managerMemberId = await resolveDepartmentManagerMemberId(
+            trx,
+            active.workspace_id,
+            validation.payload.managerMemberId
+          );
+
           const departmentInsert = buildDepartmentInsertPayload(
             validation.payload.name,
-            active.workspace_id
+            active.workspace_id,
+            managerMemberId
           );
 
           const [created] = await trx('departments')
@@ -1765,7 +1871,8 @@ export default {
             business_profile: active.workspace_id,
             payload: JSON.stringify({
               source: 'web_organization_admin',
-              department_name: validation.payload.name
+              department_name: validation.payload.name,
+              manager_member_id: managerMemberId
             })
           });
 
@@ -1779,6 +1886,9 @@ export default {
         }
         if (error?.code === 'NOT_FOUND') {
           return notFound(res, error.message);
+        }
+        if (error?.code === 'BAD_REQUEST') {
+          return badRequest(res, error.message);
         }
 
         logger?.error?.(error, '[wellar] organization department creation failed');
@@ -1797,7 +1907,7 @@ export default {
         return badRequest(res, 'departmentId is required.');
       }
 
-      const validation = validateDepartmentPayload(req.body ?? {});
+      const validation = validateDepartmentUpdatePayload(req.body ?? {});
       if (!validation.ok) {
         return badRequest(res, validation.message);
       }
@@ -1829,12 +1939,36 @@ export default {
             });
           }
 
+          const updatePayload = {};
+          const changedFields = [];
+
+          if (Object.prototype.hasOwnProperty.call(validation.payload, 'name')) {
+            updatePayload.name = validation.payload.name;
+            changedFields.push('name');
+          }
+
+          if (Object.prototype.hasOwnProperty.call(validation.payload, 'managerMemberId')) {
+            updatePayload.manager_member = await resolveDepartmentManagerMemberId(
+              trx,
+              active.workspace_id,
+              validation.payload.managerMemberId
+            );
+            changedFields.push('manager_member');
+          }
+
           await trx('departments')
             .where({ id: departmentId, business_profile: active.workspace_id })
-            .update({ name: validation.payload.name });
+            .update(updatePayload);
 
           const updatedDepartment = await loadDepartmentById(trx, active.workspace_id, departmentId);
+          const activityEventId = randomUUID();
+          assertUuid(activityEventId, 'activity_events.id');
+          if (activityEventId === String(departmentId)) {
+            throw new Error('Generated department update activity event id must be unique.');
+          }
+
           await trx('activity_events').insert({
+            id: activityEventId,
             actor: userId,
             target_user: userId,
             action: 'organization_department_updated',
@@ -1843,7 +1977,7 @@ export default {
             business_profile: active.workspace_id,
             payload: JSON.stringify({
               source: 'web_organization_admin',
-              changed_fields: ['name']
+              changed_fields: changedFields
             })
           });
 
@@ -1857,6 +1991,9 @@ export default {
         }
         if (error?.code === 'NOT_FOUND') {
           return notFound(res, error.message);
+        }
+        if (error?.code === 'BAD_REQUEST') {
+          return badRequest(res, error.message);
         }
 
         logger?.error?.(error, '[wellar] organization department update failed');
