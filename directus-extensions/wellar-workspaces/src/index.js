@@ -1,8 +1,11 @@
+import { randomUUID } from 'node:crypto';
+
 const MAX_TEXT = 255;
 const MAX_COMPANY_NAME = 120;
 const PUSH_WEBHOOK_TIMEOUT_MS = 5000;
 const MAX_PERSON_NAME = 80;
 const MAX_PHONE = 30;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const FORBIDDEN_INPUT_KEYS = new Set([
   'user',
@@ -255,6 +258,49 @@ function hasForbiddenInput(body) {
   }
 
   return Object.keys(body).some((key) => FORBIDDEN_INPUT_KEYS.has(key));
+}
+
+function assertUuid(value, label) {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+    throw new Error(`${label} must be a valid UUID.`);
+  }
+}
+
+function buildWorkspaceRecordIds(createId = randomUUID) {
+  const ids = {
+    businessProfileId: createId(),
+    membershipId: createId(),
+    activityEventId: createId()
+  };
+  const values = Object.values(ids);
+
+  assertUuid(ids.businessProfileId, 'business_profiles.id');
+  assertUuid(ids.membershipId, 'business_profile_members.id');
+  assertUuid(ids.activityEventId, 'activity_events.id');
+
+  if (new Set(values).size !== values.length) {
+    throw new Error('Generated workspace record ids must be unique.');
+  }
+
+  return ids;
+}
+
+function buildBusinessProfileInsertPayload(companyPayload, recordIds) {
+  return {
+    id: recordIds.businessProfileId,
+    ...companyPayload
+  };
+}
+
+function buildOwnerMembershipInsertPayload(userId, businessProfileId, now, recordIds) {
+  return {
+    id: recordIds.membershipId,
+    user: userId,
+    business_profile: businessProfileId,
+    member_role: 'owner',
+    status: 'active',
+    joined_at: now
+  };
 }
 
 function buildCompanyPayload(body, userId, now) {
@@ -568,20 +614,7 @@ function publicOrganizationProfile(row) {
 
 async function logWorkspaceCreatedActivityEvent(database, logger, details) {
   try {
-    await database('activity_events').insert({
-      actor: details.userId,
-      target_user: details.userId,
-      action: 'workspace_created',
-      entity_type: 'company',
-      entity_id: String(details.businessProfileId),
-      business_profile: details.businessProfileId,
-      payload: JSON.stringify({
-        source: 'web_self_service_onboarding',
-        idempotency_key: details.idempotencyKey,
-        membership_id: details.membershipId,
-        member_role: 'owner'
-      })
-    });
+    await database('activity_events').insert(buildWorkspaceCreatedActivityEventPayload(details));
   } catch (error) {
     logger?.error?.(
       {
@@ -596,6 +629,24 @@ async function logWorkspaceCreatedActivityEvent(database, logger, details) {
       '[wellar] workspace creation audit log failed'
     );
   }
+}
+
+function buildWorkspaceCreatedActivityEventPayload(details) {
+  return {
+    id: details.activityEventId,
+    actor: details.userId,
+    target_user: details.userId,
+    action: 'workspace_created',
+    entity_type: 'company',
+    entity_id: String(details.businessProfileId),
+    business_profile: details.businessProfileId,
+    payload: JSON.stringify({
+      source: 'web_self_service_onboarding',
+      idempotency_key: details.idempotencyKey,
+      membership_id: details.membershipId,
+      member_role: 'owner'
+    })
+  };
 }
 
 function buildCreatedWorkspaceResponse(profile, membership) {
@@ -2437,6 +2488,7 @@ export default {
       if (companyPayload.error) {
         return badRequest(res, companyPayload.error);
       }
+      const recordIds = buildWorkspaceRecordIds();
 
       try {
         const result = await database.transaction(async (trx) => {
@@ -2507,7 +2559,7 @@ export default {
           }
 
           const [profile] = await trx('business_profiles')
-            .insert(companyPayload.value)
+            .insert(buildBusinessProfileInsertPayload(companyPayload.value, recordIds))
             .returning(['id', 'company_name', 'is_active', 'plan_code', 'billing_status']);
 
           if (!profile?.id) {
@@ -2515,13 +2567,7 @@ export default {
           }
 
           const [membership] = await trx('business_profile_members')
-            .insert({
-              user: userId,
-              business_profile: profile.id,
-              member_role: 'owner',
-              status: 'active',
-              joined_at: now
-            })
+            .insert(buildOwnerMembershipInsertPayload(userId, profile.id, now, recordIds))
             .returning(['id', 'business_profile', 'member_role', 'status']);
 
           if (!membership?.id) {
@@ -2543,6 +2589,7 @@ export default {
               userId,
               businessProfileId: profile.id,
               membershipId: membership.id,
+              activityEventId: recordIds.activityEventId,
               idempotencyKey
             }
           };
@@ -2564,4 +2611,12 @@ export default {
     });
   }
 };
-export { buildCompanyPayload, buildCreatedWorkspaceResponse, logWorkspaceCreatedActivityEvent };
+export {
+  buildBusinessProfileInsertPayload,
+  buildCompanyPayload,
+  buildCreatedWorkspaceResponse,
+  buildOwnerMembershipInsertPayload,
+  buildWorkspaceCreatedActivityEventPayload,
+  buildWorkspaceRecordIds,
+  logWorkspaceCreatedActivityEvent
+};
