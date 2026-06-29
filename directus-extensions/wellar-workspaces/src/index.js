@@ -1749,7 +1749,14 @@ export default {
             throw new Error('Department creation did not return an id.');
           }
 
+          const activityEventId = randomUUID();
+          assertUuid(activityEventId, 'activity_events.id');
+          if (activityEventId === String(created.id)) {
+            throw new Error('Generated department activity event id must be unique.');
+          }
+
           await trx('activity_events').insert({
+            id: activityEventId,
             actor: userId,
             target_user: userId,
             action: 'organization_department_created',

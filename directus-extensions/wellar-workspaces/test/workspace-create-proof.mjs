@@ -317,6 +317,7 @@ function createQueryBuilder(table, state, scope) {
       }
 
       if (table === 'activity_events') {
+        assertRequiredUuidId(table, insertPayload);
         if (scope === 'outside') {
           throw Object.assign(new Error('audit logging unavailable'), {
             name: 'DatabaseError',
@@ -761,7 +762,10 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
   assert.notEqual(departmentInsert.payload.business_profile, 'stale-ui-workspace');
   assert.equal(departmentInsert.payload.manager_member, null);
   assert.equal(departmentInsert.payload.is_active, true);
+  assert.match(departmentAuditInsert.payload.id, uuidPattern);
+  assert.notEqual(departmentAuditInsert.payload.id, departmentInsert.payload.id);
   assert.equal(departmentAuditInsert.payload.business_profile, activeMembership.workspace_id);
+  assert.notEqual(departmentAuditInsert.payload.business_profile, 'stale-ui-workspace');
   assert.equal(departmentAuditInsert.payload.entity_id, departmentInsert.payload.id);
 });
 
