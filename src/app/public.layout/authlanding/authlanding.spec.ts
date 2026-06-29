@@ -141,6 +141,17 @@ describe('Authlanding', () => {
     expect(modal?.textContent).toContain('Welcome back');
   });
 
+  it('shows a forgot password action in the login state', async () => {
+    await renderLoginModal();
+
+    const forgotLink = Array.from(document.body.querySelectorAll('a')).find(
+      (link) => link.textContent?.trim() === 'Forgot password?'
+    ) as HTMLAnchorElement | undefined;
+
+    expect(forgotLink).toBeTruthy();
+    expect(forgotLink?.getAttribute('href')).toContain('/reset-password');
+  });
+
   it('opens the signup modal when the auth query param is present', async () => {
     await renderSignupModal();
 

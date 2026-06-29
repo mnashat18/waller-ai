@@ -332,7 +332,7 @@
             </button>
           </div>
         </label>
-        <a routerLink="/contact" class="auth-forgot">Forgot password? Contact support</a>
+        <a routerLink="/reset-password" class="auth-forgot">Forgot password?</a>
         <button class="auth-primary" type="submit" [disabled]="authBusy || !loginFormValid">
           {{ resolvingOrganizationAccess ? 'Preparing your organization access...' : (submitting ? 'Signing in...' : (inviteMode ? 'Log in to join your organization' : 'Log in')) }}
         </button>

@@ -583,6 +583,13 @@ export const routes: Routes = [
           import('./public.layout/upgrade-plan/upgrade-plan').then(
             (m) => m.UpgradePlanComponent
           )
+      },
+      {
+        path: 'reset-password',
+        loadComponent: () =>
+          import('./public.layout/reset-password/reset-password').then(
+            (m) => m.ResetPasswordComponent
+          )
       }
     ]
   },

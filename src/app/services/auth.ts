@@ -226,6 +226,34 @@ export class AuthService {
     );
   }
 
+  requestPasswordReset(email: string) {
+    return this.http.post(
+      `${this.api}/auth/password/request`,
+      {
+        email,
+        reset_url: environment.PASSWORD_RESET_URL
+      },
+      {
+        headers: new HttpHeaders({ 'Content-Type': 'application/json' }),
+        withCredentials: true
+      }
+    );
+  }
+
+  resetPassword(token: string, password: string) {
+    return this.http.post(
+      `${this.api}/auth/password/reset`,
+      {
+        token,
+        password
+      },
+      {
+        headers: new HttpHeaders({ 'Content-Type': 'application/json' }),
+        withCredentials: true
+      }
+    );
+  }
+
   requestPhoneOtp(phone: string) {
     // Placeholder endpoint for future OTP driver integration.
     return this.http.post(
