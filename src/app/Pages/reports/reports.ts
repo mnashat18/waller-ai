@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 
@@ -12,6 +12,7 @@ import {
   type ReportsFilters,
   type ReportsViewData
 } from '../../services/reports.service';
+import { ReportsPdfExportService, type ReportsPdfExportContext } from '../../services/reports-pdf-export.service';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
 import { DashboardSectionComponent } from '../../shared/ui/dashboard-section/dashboard-section.component';
 import { ErrorStateComponent } from '../../shared/ui/error-state/error-state.component';
@@ -53,13 +54,17 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
   partialWarning = '';
   report: ReportsViewData | null = null;
   feedback: FeedbackMessage | null = null;
+  exportMenuOpen = false;
 
   filters: ReportsFilters = this.defaultFilters();
 
+  @ViewChild('exportMenuRoot') private exportMenuRoot?: ElementRef<HTMLElement>;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private exportBusy = false;
 
   constructor(
     private reportsService: ReportsService,
+    private reportsPdfExportService: ReportsPdfExportService,
     private companyContext: CompanyContextService,
     private router: Router,
     private cdr: ChangeDetectorRef
@@ -145,6 +150,10 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     return this.report?.scanRequestPerformance?.available === true;
   }
 
+  get canExport(): boolean {
+    return this.viewState === 'ready' && Boolean(this.report) && !this.loading && !this.exportBusy;
+  }
+
   get coverageRateDisplay(): string {
     const rate = this.report?.executiveSummary?.averageComplianceRate;
     return rate === null || rate === undefined ? 'Unavailable' : `${rate}%`;
@@ -181,13 +190,68 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
 
   applyFilters(): void {
     this.enforceScopeSafeFilters();
+    this.exportMenuOpen = false;
     void this.loadReports(false);
   }
 
   clearFilters(): void {
     this.filters = this.defaultFilters();
     this.enforceScopeSafeFilters();
+    this.exportMenuOpen = false;
     void this.loadReports(false);
+  }
+
+  toggleExportMenu(event?: MouseEvent): void {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (!this.canExport) {
+      this.exportMenuOpen = false;
+      return;
+    }
+    this.exportMenuOpen = !this.exportMenuOpen;
+  }
+
+  async exportCsv(): Promise<void> {
+    if (!this.canExport || !this.report) {
+      return;
+    }
+
+    this.exportMenuOpen = false;
+    this.exportBusy = true;
+
+    try {
+      this.reportsService.exportReportsCsv(this.report);
+      this.pushFeedback('info', 'CSV export downloaded.');
+    } catch {
+      this.pushFeedback('error', 'Export failed. Try again.');
+    } finally {
+      this.exportBusy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  async exportPdf(): Promise<void> {
+    if (!this.canExport || !this.report) {
+      return;
+    }
+
+    this.exportMenuOpen = false;
+    this.exportBusy = true;
+
+    try {
+      const exportContext: ReportsPdfExportContext = {
+        workspaceName: this.report.workspaceName,
+        activeRole: this.currentRole,
+        scopeLabel: this.scopeLabel
+      };
+      await this.reportsPdfExportService.exportReportsPdf(this.report, this.report.filters, exportContext);
+      this.pushFeedback('info', 'PDF export downloaded.');
+    } catch {
+      this.pushFeedback('error', 'Export failed. Try again.');
+    } finally {
+      this.exportBusy = false;
+      this.cdr.markForCheck();
+    }
   }
 
   trackByDepartment(index: number, row: DepartmentPerformanceRow): string {
@@ -229,6 +293,7 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     this.viewState = 'loading';
     this.errorMessage = '';
     this.partialWarning = '';
+    this.exportMenuOpen = false;
 
     try {
       const context = await this.companyContext.ensureActiveContext();
@@ -307,6 +372,24 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
       this.feedback = null;
       this.cdr.markForCheck();
     }, 3500);
+  }
+
+  @HostListener('document:click', ['$event'])
+  handleDocumentClick(event: MouseEvent): void {
+    if (!this.exportMenuOpen) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      this.exportMenuOpen = false;
+      return;
+    }
+
+    if (!this.exportMenuRoot?.nativeElement.contains(target)) {
+      this.exportMenuOpen = false;
+      this.cdr.markForCheck();
+    }
   }
 
   private normalizeId(value: unknown): string | null {

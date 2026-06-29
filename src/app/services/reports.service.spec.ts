@@ -139,4 +139,71 @@ describe('ReportsService status mapping', () => {
     expect(engineering?.missingScans).toBe(1);
     expect(engineering?.complianceRate).toBe(50);
   });
+
+  it('exports unavailable coverage as Unavailable and names the file with the selected date range', () => {
+    const service = new ReportsService({} as any, {} as any, {} as any);
+    const downloads: Array<[string, string[]]> = [];
+    (service as any).todayDateKey = () => '2026-06-29';
+    (service as any).downloadCsv = (filename: string, rows: string[]) => {
+      downloads.push([filename, rows]);
+    };
+
+    const viewState = {
+      workspaceName: 'Wellar',
+      role: 'owner',
+      filters: {
+        dateRange: 'last30',
+        department: '',
+        readiness: 'all',
+        alertSeverity: 'all'
+      },
+      executiveSummary: {
+        averageComplianceRate: null,
+        totalCompletedScans: 0,
+        missingScans: null,
+        stableOutcomes: 0,
+        attentionOutcomes: 0,
+        openAlerts: 0,
+        overdueRequests: 0,
+        scanEligibleMembers: 0
+      },
+      readinessTrends: { distribution: [], daily: [], hasData: false },
+      complianceTrend: [],
+      missingScanDetails: { foundCount: 0, shownCount: 0, hiddenCount: 0, rows: [] },
+      departmentPerformance: [],
+      alertsBreakdown: { byStatus: [], bySeverity: [], byDepartment: [], rows: [] },
+      scanRequestPerformance: {
+        totalRequestsSent: 0,
+        completedRequests: 0,
+        pendingRequests: 0,
+        overdueRequests: 0,
+        cancelledRequests: 0,
+        completionRate: 0,
+        requestTypeBreakdown: [],
+        available: true
+      },
+      overdueRequestDetails: [],
+      departmentOptions: [],
+      partialWarning: null,
+      permissionDenied: false,
+      hasAnyData: true,
+      sourceCounts: {
+        members: 0,
+        departments: 0,
+        wellnessScans: 0,
+        scanResults: 0,
+        scanRequests: 0,
+        alerts: 0
+      }
+    };
+
+    service.exportReportsCsv(viewState as any);
+
+    expect(downloads.length).toBe(1);
+    expect(downloads[0][0]).toBe('wellar-ai-reports-summary-last-30-days-2026-06-29.csv');
+    expect(downloads[0][1]).toContain('Section 1: Executive Summary');
+    expect(downloads[0][1]).toContain('"Average Compliance Rate","Unavailable"');
+    expect(downloads[0][1]).toContain('"Missing Scans","Unavailable"');
+    expect(downloads[0][1]).toContain('"Eligible Current Members","0"');
+  });
 });

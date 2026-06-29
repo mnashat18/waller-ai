@@ -229,7 +229,7 @@ export class ReportsPdfExportService {
       doc.text(`Generated ${generatedLabel}`, pageWidth - marginX, pageHeight - 20, { align: 'right' });
     }
 
-    doc.save(`wellar-reports-summary-${this.todayDateKey(generatedAt)}.pdf`);
+    doc.save(this.buildExportFileName('reports-summary', filters.dateRange, generatedAt, 'pdf'));
   }
 
   private drawSectionTitle(doc: jsPDF, marginX: number, y: number, title: string): void {
@@ -353,6 +353,22 @@ export class ReportsPdfExportService {
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const dd = String(date.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
+  }
+
+  private buildExportFileName(
+    reportType: string,
+    dateRange: ReportsFilters['dateRange'],
+    generatedAt: Date,
+    extension: 'pdf'
+  ): string {
+    return `wellar-ai-${reportType}-${this.dateRangeSlug(dateRange)}-${this.todayDateKey(generatedAt)}.${extension}`;
+  }
+
+  private dateRangeSlug(value: ReportsFilters['dateRange']): string {
+    if (value === 'today') return 'today';
+    if (value === 'last7') return 'last-7-days';
+    if (value === 'last30') return 'last-30-days';
+    return 'custom-range';
   }
 
   private formatOptionalPercent(value: number | null | undefined): string {

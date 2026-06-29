@@ -58,42 +58,61 @@
       (retry)="refresh()">
     </app-error-state>
   } @else {
+    <app-filter-bar-shell>
+      <select [(ngModel)]="filters.dateRange" name="reportsDateRange" class="app-form-control" aria-label="Date range">
+        <option value="today">Today</option>
+        <option value="last7">Last 7 days</option>
+        <option value="last30">Last 30 days</option>
+      </select>
+
+      @if (isOwnerOrHr && (report?.departmentOptions?.length ?? 0) > 0) {
+        <select [(ngModel)]="filters.department" name="reportsDepartment" class="app-form-control" aria-label="Department">
+          <option value="">All departments</option>
+          <option value="unassigned">Unassigned</option>
+          @for (department of report?.departmentOptions ?? []; track department.id) {
+            <option [value]="department.id">{{ department.name }}</option>
+          }
+        </select>
+      }
+
+      <select [(ngModel)]="filters.alertSeverity" name="reportsAlertSeverity" class="app-form-control" aria-label="Alert severity">
+        <option value="all">All alert severities</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+        <option value="critical">Critical</option>
+      </select>
+
+      <button type="button" class="dashboard-action-button" (click)="applyFilters()">Apply</button>
+      <button type="button" class="dashboard-action-button" (click)="clearFilters()">Clear</button>
+
+      <div #exportMenuRoot class="reports-export-control">
+        <button
+          type="button"
+          class="dashboard-action-button dashboard-action-button--primary reports-export-control__toggle"
+          [disabled]="!canExport"
+          aria-haspopup="menu"
+          [attr.aria-expanded]="exportMenuOpen"
+          (click)="toggleExportMenu($event)">
+          <span>Export</span>
+          <span aria-hidden="true">▾</span>
+        </button>
+
+        @if (exportMenuOpen) {
+          <div class="reports-export-control__menu" role="menu" aria-label="Export report">
+            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportCsv()">Export CSV</button>
+            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportPdf()">Export PDF</button>
+          </div>
+        }
+      </div>
+    </app-filter-bar-shell>
+
     @if (showReportEmpty) {
       <section class="reports-state-card">
         <p class="reports-state-card__title">Report empty</p>
         <p>{{ isManager ? 'No department reporting activity was returned for the active scope.' : 'No organization reporting activity was returned for the authorized scope.' }}</p>
       </section>
     } @else {
-      <app-filter-bar-shell>
-        <select [(ngModel)]="filters.dateRange" name="reportsDateRange" class="app-form-control" aria-label="Date range">
-          <option value="today">Today</option>
-          <option value="last7">Last 7 days</option>
-          <option value="last30">Last 30 days</option>
-        </select>
-
-        @if (isOwnerOrHr && (report?.departmentOptions?.length ?? 0) > 0) {
-          <select [(ngModel)]="filters.department" name="reportsDepartment" class="app-form-control" aria-label="Department">
-            <option value="">All departments</option>
-            <option value="unassigned">Unassigned</option>
-            @for (department of report?.departmentOptions ?? []; track department.id) {
-              <option [value]="department.id">{{ department.name }}</option>
-            }
-          </select>
-        }
-
-        <select [(ngModel)]="filters.alertSeverity" name="reportsAlertSeverity" class="app-form-control" aria-label="Alert severity">
-          <option value="all">All alert severities</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="critical">Critical</option>
-        </select>
-
-        <button type="button" class="dashboard-action-button dashboard-action-button--primary" (click)="applyFilters()">Apply</button>
-        <button type="button" class="dashboard-action-button" (click)="clearFilters()">Clear</button>
-        <span class="reports-action-note">Export is not available in this release.</span>
-      </app-filter-bar-shell>
-
       <app-dashboard-section
         eyebrow="Overview"
         title="Operational Summary"

@@ -1015,7 +1015,7 @@ export class ReportsService {
       ]));
     }
 
-    this.downloadCsv(`wellar-reports-summary-${this.todayDateKey()}.csv`, rows);
+    this.downloadCsv(this.buildExportFileName('reports-summary', viewState.filters.dateRange, 'csv'), rows);
   }
 
   exportDepartmentReportCsv(viewState: ReportsViewData): void {
@@ -1042,7 +1042,7 @@ export class ReportsService {
         ])
       );
     }
-    this.downloadCsv(`wellar-department-report-${this.todayDateKey()}.csv`, rows);
+    this.downloadCsv(this.buildExportFileName('department-report', viewState.filters.dateRange, 'csv'), rows);
   }
 
   exportAlertsReportCsv(viewState: ReportsViewData): void {
@@ -1069,7 +1069,7 @@ export class ReportsService {
         ])
       );
     }
-    this.downloadCsv(`wellar-alerts-report-${this.todayDateKey()}.csv`, rows);
+    this.downloadCsv(this.buildExportFileName('alerts-report', viewState.filters.dateRange, 'csv'), rows);
   }
 
   private computeAll(rawData: RawReportsData, filters: ReportsFilters): ReportsComputedState {
@@ -1904,6 +1904,17 @@ export class ReportsService {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  private buildExportFileName(reportType: string, dateRange: ReportsFilters['dateRange'], extension: 'csv'): string {
+    return `wellar-ai-${reportType}-${this.dateRangeSlug(dateRange)}-${this.todayDateKey()}.${extension}`;
+  }
+
+  private dateRangeSlug(value: ReportsFilters['dateRange']): string {
+    if (value === 'today') return 'today';
+    if (value === 'last7') return 'last-7-days';
+    if (value === 'last30') return 'last-30-days';
+    return 'custom-range';
   }
 
   private toCsvLine(values: string[]): string {
