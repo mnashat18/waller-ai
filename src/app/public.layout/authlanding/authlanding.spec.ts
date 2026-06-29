@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
-import { BehaviorSubject, of, throwError } from 'rxjs';
+import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 
 import { AuthService } from '../../services/auth';
@@ -104,6 +104,10 @@ describe('Authlanding', () => {
 
   function loginSubmitButton(): HTMLButtonElement {
     return document.body.querySelector('form.auth-form button[type="submit"]') as HTMLButtonElement;
+  }
+
+  function loginFeedbackText(): string {
+    return (document.body.querySelector('.auth-feedback')?.textContent ?? '').trim();
   }
 
   async function setLoginInputValue(name: string, value: string): Promise<void> {
@@ -386,6 +390,94 @@ describe('Authlanding', () => {
     expect(text).toContain('Email or password is incorrect.');
     expect(text).not.toContain('INVALID_PROVIDER');
     expect(text).not.toContain('Directus');
+  });
+
+  it('clears busy state and does not route after a 401 login failure', async () => {
+    const navigateByUrlSpy = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
+    authSpy.login = vi.fn(() =>
+      throwError(() => ({
+        status: 401,
+        error: {
+          errors: [
+            {
+              message: 'Invalid user credentials.'
+            }
+          ]
+        }
+      }))
+    );
+
+    await renderLoginModal();
+    await setLoginInputValue('loginEmail', 'owner@gmail.com');
+    await setLoginInputValue('loginPassword', 'WrongPassword123');
+
+    loginSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(authSpy.login).toHaveBeenCalledTimes(1);
+    expect(loginFeedbackText()).toBe('Email or password is incorrect.');
+    expect(component.submitting).toBe(false);
+    expect(component.authBusy).toBe(false);
+    expect(loginSubmitButton().disabled).toBe(false);
+    expect(loginSubmitButton().textContent).toContain('Log in');
+    expect(navigateByUrlSpy).not.toHaveBeenCalled();
+  });
+
+  it('applies the bounded timeout, clears loading state, and avoids routing when login hangs', async () => {
+    vi.useFakeTimers();
+    const navigateByUrlSpy = vi.spyOn(TestBed.inject(Router), 'navigateByUrl');
+    authSpy.login = vi.fn(() => NEVER);
+
+    try {
+      await renderLoginModal();
+      await setLoginInputValue('loginEmail', 'owner@gmail.com');
+      await setLoginInputValue('loginPassword', 'WrongPassword123');
+
+      loginSubmitButton().click();
+      fixture.detectChanges();
+
+      await vi.advanceTimersByTimeAsync(20001);
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(authSpy.login).toHaveBeenCalledTimes(1);
+      expect(loginFeedbackText()).toBe('Unable to sign in right now. Please try again.');
+      expect(component.submitting).toBe(false);
+      expect(component.authBusy).toBe(false);
+      expect(loginSubmitButton().disabled).toBe(false);
+      expect(navigateByUrlSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears loading state and does not expose backend text on network failure', async () => {
+    authSpy.login = vi.fn(() =>
+      throwError(() => ({
+        status: 0,
+        error: {
+          error: 'ECONNREFUSED from directus auth/login'
+        }
+      }))
+    );
+
+    await renderLoginModal();
+    await setLoginInputValue('loginEmail', 'owner@gmail.com');
+    await setLoginInputValue('loginPassword', 'WrongPassword123');
+
+    loginSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const feedback = loginFeedbackText();
+    expect(feedback).toBe('Unable to sign in right now. Please try again.');
+    expect(feedback).not.toContain('ECONNREFUSED');
+    expect(feedback).not.toContain('directus');
+    expect(component.submitting).toBe(false);
+    expect(component.authBusy).toBe(false);
   });
 
   it('keeps the normal successful login path unchanged', async () => {

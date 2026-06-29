@@ -4,7 +4,7 @@ import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/ro
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../services/auth';
 import { of, Subscription } from 'rxjs';
-import { catchError, filter, map, switchMap, timeout } from 'rxjs/operators';
+import { catchError, filter, finalize, map, switchMap, timeout } from 'rxjs/operators';
 import { InviteService } from '../../services/invites';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
@@ -408,15 +408,16 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       timeout(this.authTimeoutMs),
       catchError((err) => {
         this.feedback = this.resolveLoginError(err);
-        this.submitting = false;
         return of(null);
+      }),
+      finalize(() => {
+        this.submitting = false;
+        this.cdr.detectChanges();
       })
     ).subscribe(async (result) => {
       if (!result) {
         return;
       }
-
-      this.submitting = false;
 
       const inviteToken = this.resolveInviteTokenFromContext();
       if (inviteToken) {
@@ -596,21 +597,23 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   }
 
   private resolveLoginError(err: any): string {
-    const message =
+    const message = this.extractAuthErrorMessage(err);
+    const normalized = String(message).toLowerCase();
+
+    if (err?.status === 401 || normalized.includes('invalid')) {
+      return 'Email or password is incorrect.';
+    }
+    return 'Unable to sign in right now. Please try again.';
+  }
+
+  private extractAuthErrorMessage(err: any): string {
+    return (
       err?.error?.errors?.[0]?.extensions?.reason ||
       err?.error?.errors?.[0]?.message ||
       err?.error?.error ||
       err?.message ||
-      '';
-    const normalized = String(message).toLowerCase();
-
-    if (normalized.includes('timeout')) {
-      return 'Login is taking too long. Please try again.';
-    }
-    if (err?.status === 401 || normalized.includes('invalid')) {
-      return 'Email or password is incorrect.';
-    }
-    return 'Unable to login right now.';
+      ''
+    );
   }
 
   private resolvePostSignupLoginError(err: any): string {

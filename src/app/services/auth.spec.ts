@@ -1,11 +1,14 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { firstValueFrom } from 'rxjs';
+import { vi } from 'vitest';
 
 import { AuthService } from './auth';
 
 describe('AuthService', () => {
   let service: AuthService;
+  let httpMock: HttpTestingController;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -15,6 +18,15 @@ describe('AuthService', () => {
       ]
     });
     service = TestBed.inject(AuthService);
+    httpMock = TestBed.inject(HttpTestingController);
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    httpMock.verify();
+    localStorage.clear();
+    sessionStorage.clear();
   });
 
   it('should be created', () => {
@@ -60,5 +72,47 @@ describe('AuthService', () => {
     expect(service.getSafeAuthCallbackFailureNotice('provider_error')).toBe(
       'We couldn’t complete sign-in. Please try again.'
     );
+  });
+  it('fails login when the current user cannot be resolved after auth/login succeeds', async () => {
+    const loginPromise = firstValueFrom(service.login('owner@example.com', 'WrongPassword123'));
+
+    const loginRequest = httpMock.expectOne((req) => req.url.endsWith('/auth/login'));
+    expect(loginRequest.request.method).toBe('POST');
+    loginRequest.flush({ data: { access_token: 'header.payload.signature' } });
+
+    const meRequest = httpMock.expectOne((req) => req.url.endsWith('/users/me'));
+    expect(meRequest.request.method).toBe('GET');
+    meRequest.flush(
+      { errors: [{ message: 'Invalid user credentials.' }] },
+      { status: 401, statusText: 'Unauthorized' }
+    );
+
+    await expect(loginPromise).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('times out login requests after the bounded auth timeout', async () => {
+    let capturedError: any;
+    let emitted = false;
+
+    vi.useFakeTimers();
+    try {
+      service.login('owner@example.com', 'WrongPassword123').subscribe({
+        next: () => {
+          emitted = true;
+        },
+        error: (err) => {
+          capturedError = err;
+        }
+      });
+
+      httpMock.expectOne((req) => req.url.endsWith('/auth/login'));
+
+      await vi.advanceTimersByTimeAsync(20001);
+
+      expect(emitted).toBe(false);
+      expect(capturedError?.name).toBe('TimeoutError');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

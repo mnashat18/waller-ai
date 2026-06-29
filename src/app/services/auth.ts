@@ -22,6 +22,7 @@ type StoredTokens = {
 export class AuthService {
   private readonly api = environment.API_URL;
   private readonly refreshEndpointMissingSessionKey = 'auth_refresh_endpoint_missing';
+  private readonly loginTimeoutMs = 20000;
 
   constructor(private http: HttpClient) {}
 
@@ -192,13 +193,14 @@ export class AuthService {
         withCredentials: true
       }
     ).pipe(
+      timeout(this.loginTimeoutMs),
       tap((res) => {
         this.storeTokensFromAuthResponse(res);
         localStorage.setItem('user_email', email);
       }),
       switchMap((res) =>
         this.getCurrentUser(this.getStoredAccessToken() ?? undefined).pipe(
-          map(() => res)
+          switchMap((user) => user ? of(res) : throwError(() => ({ status: 401 })))
         )
       ),
       catchError((err) => {
