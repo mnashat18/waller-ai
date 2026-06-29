@@ -61,9 +61,10 @@ export class ReportsPdfExportService {
       startY: cursorY,
       head: [['Metric', 'Value']],
       body: [
-        ['Average Compliance Rate', `${viewState.executiveSummary.averageComplianceRate}%`],
+        ['Average Compliance Rate', this.formatOptionalPercent(viewState.executiveSummary.averageComplianceRate)],
         ['Total Completed Scans', String(viewState.executiveSummary.totalCompletedScans)],
-        ['Missing Scans', String(viewState.executiveSummary.missingScans)],
+        ['Missing Scans', this.formatOptionalNumber(viewState.executiveSummary.missingScans)],
+        ['Eligible Current Members', String(viewState.executiveSummary.scanEligibleMembers)],
         ['Stable Outcomes', String(viewState.executiveSummary.stableOutcomes)],
         ['Attention Outcomes', String(viewState.executiveSummary.attentionOutcomes)],
         ['Open Alerts', String(viewState.executiveSummary.openAlerts)],
@@ -124,7 +125,7 @@ export class ReportsPdfExportService {
         String(row.activeMembers),
         String(row.completedScans),
         String(row.missingScans),
-        `${row.complianceRate}%`,
+        row.activeMembers > 0 ? `${row.complianceRate}%` : 'Unavailable',
         String(row.attentionOutcomes),
         String(row.openAlerts)
       ]),
@@ -352,5 +353,13 @@ export class ReportsPdfExportService {
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const dd = String(date.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
+  }
+
+  private formatOptionalPercent(value: number | null | undefined): string {
+    return value === null || value === undefined ? 'Unavailable' : `${value}%`;
+  }
+
+  private formatOptionalNumber(value: number | null | undefined): string {
+    return value === null || value === undefined ? 'Unavailable' : String(value);
   }
 }

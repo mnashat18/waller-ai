@@ -344,4 +344,201 @@ describe('ComplianceService', () => {
     const overview = await overviewPromise;
     expect(overview.coverageProven).toBe(mockMembers.length > 0 && overview.summary.scanEligibleMembersToday > 0);
   });
+
+  it('keeps compliance coverage aligned with the same eligible roster semantics as Reports', () => {
+    const todayIso = new Date().toISOString();
+    const normalizedSource = {
+      members: [
+        {
+          id: 'member-1',
+          status: 'active',
+          member_role: 'employee',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-1',
+          user_first_name: 'Alex',
+          user_last_name: 'Parker',
+          user_email: 'alex@example.com',
+          todays_scan: true,
+          readiness_label: 'Stable',
+          last_scan_at: todayIso
+        },
+        {
+          id: 'member-2',
+          status: 'active',
+          member_role: 'manager',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-2',
+          user_first_name: 'Jordan',
+          user_last_name: 'Smith',
+          user_email: 'jordan@example.com',
+          todays_scan: false,
+          readiness_label: 'Stable',
+          last_scan_at: null
+        },
+        {
+          id: 'member-3',
+          status: 'active',
+          member_role: 'hr',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-3',
+          user_first_name: 'Sam',
+          user_last_name: 'Ng',
+          user_email: 'sam@example.com',
+          todays_scan: false,
+          readiness_label: 'Stable',
+          last_scan_at: null
+        },
+        {
+          id: 'member-4',
+          status: 'active',
+          member_role: 'employee',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-4',
+          user_first_name: 'Taylor',
+          user_last_name: 'Lee',
+          user_email: 'taylor@example.com',
+          todays_scan: false,
+          readiness_label: 'Stable',
+          last_scan_at: null
+        },
+        {
+          id: 'member-dup',
+          status: 'active',
+          member_role: 'employee',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-4',
+          user_first_name: 'Taylor',
+          user_last_name: 'Lee',
+          user_email: 'taylor@example.com',
+          todays_scan: false,
+          readiness_label: 'Stable',
+          last_scan_at: null
+        },
+        {
+          id: 'member-pending',
+          status: 'pending',
+          member_role: 'employee',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-5',
+          user_first_name: 'Pending',
+          user_last_name: 'Person',
+          user_email: 'pending@example.com',
+          todays_scan: false,
+          readiness_label: 'No scan',
+          last_scan_at: null
+        },
+        {
+          id: 'member-inactive',
+          status: 'inactive',
+          member_role: 'employee',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-6',
+          user_first_name: 'Inactive',
+          user_last_name: 'Person',
+          user_email: 'inactive@example.com',
+          todays_scan: false,
+          readiness_label: 'No scan',
+          last_scan_at: null
+        },
+        {
+          id: 'member-unlinked',
+          status: 'active',
+          member_role: 'employee',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: null,
+          user_first_name: 'Unlinked',
+          user_last_name: 'Member',
+          user_email: 'unlinked@example.com',
+          todays_scan: false,
+          readiness_label: 'No scan',
+          last_scan_at: null
+        },
+        {
+          id: 'member-broken',
+          status: 'active',
+          member_role: 'employee',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-7',
+          user_first_name: 'Broken',
+          user_last_name: 'Member',
+          user_email: '',
+          todays_scan: false,
+          readiness_label: 'No scan',
+          last_scan_at: null
+        },
+        {
+          id: 'member-owner',
+          status: 'active',
+          member_role: 'owner',
+          joined_at: '2026-06-01T10:00:00.000Z',
+          business_profile: 'profile-1',
+          department_id: 'dept-1',
+          department_name: 'Engineering',
+          user_id: 'user-8',
+          user_first_name: 'Owner',
+          user_last_name: 'Account',
+          user_email: 'owner@example.com',
+          todays_scan: false,
+          readiness_label: 'No scan',
+          last_scan_at: null
+        }
+      ],
+      departments: [{ id: 'dept-1', name: 'Engineering', isActive: true }],
+      scanRequests: [],
+      alerts: [],
+      wellnessScans: [
+        { id: 'scan-1', member: 'member-1', date_created: todayIso, completed_at: todayIso, status: 'completed', user: 'user-1', department: 'dept-1' }
+      ],
+      scanResults: [],
+      memberLastRiskById: new Map<string, string>(),
+      filters: {
+        dateRange: 'today',
+        department: '',
+        status: 'all',
+        readiness: 'all'
+      },
+      departmentMetadataBlocked: false,
+      departmentMetadataUnreadable: false,
+      scanResultsAccess: 'available'
+    } as any;
+
+    const summary = service.buildComplianceSummary(normalizedSource);
+    const departmentRows = service.buildDepartmentCompliance(normalizedSource);
+
+    expect(summary.scanEligibleMembersToday).toBe(4);
+    expect(summary.completedScans).toBe(1);
+    expect(summary.missingScans).toBe(3);
+    expect(summary.complianceRate).toBe(25);
+    expect(departmentRows[0].activeMembers).toBe(4);
+    expect(departmentRows[0].completedToday).toBe(1);
+    expect(departmentRows[0].missingScans).toBe(3);
+    expect(departmentRows[0].complianceRate).toBe(25);
+  });
 });

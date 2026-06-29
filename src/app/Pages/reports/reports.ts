@@ -145,6 +145,36 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     return this.report?.scanRequestPerformance?.available === true;
   }
 
+  get coverageRateDisplay(): string {
+    const rate = this.report?.executiveSummary?.averageComplianceRate;
+    return rate === null || rate === undefined ? 'Unavailable' : `${rate}%`;
+  }
+
+  get coverageRateTone(): 'success' | 'warning' | 'neutral' {
+    const rate = this.report?.executiveSummary?.averageComplianceRate;
+    if (rate === null || rate === undefined) {
+      return 'neutral';
+    }
+    return rate >= 80 ? 'success' : 'warning';
+  }
+
+  get completedScansDisplay(): string {
+    return String(this.report?.executiveSummary?.totalCompletedScans ?? 0);
+  }
+
+  get missingScansDisplay(): string {
+    const missing = this.report?.executiveSummary?.missingScans;
+    return missing === null || missing === undefined ? 'Unavailable' : String(missing);
+  }
+
+  get missingScansTone(): 'success' | 'warning' | 'neutral' {
+    const missing = this.report?.executiveSummary?.missingScans;
+    if (missing === null || missing === undefined) {
+      return 'neutral';
+    }
+    return missing > 0 ? 'warning' : 'success';
+  }
+
   refresh(): void {
     void this.loadReports(true);
   }

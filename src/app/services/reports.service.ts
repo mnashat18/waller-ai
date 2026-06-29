@@ -26,13 +26,14 @@ export type ReportsFilters = {
 };
 
 export type ExecutiveSummary = {
-  averageComplianceRate: number;
+  averageComplianceRate: number | null;
   totalCompletedScans: number;
-  missingScans: number;
+  missingScans: number | null;
   stableOutcomes: number;
   attentionOutcomes: number;
   openAlerts: number;
   overdueRequests: number;
+  scanEligibleMembers: number;
 };
 
 export type ReadinessDistributionRow = {
@@ -172,6 +173,9 @@ export type ReportsViewData = {
 type BusinessMemberRecord = {
   id?: string | number;
   status?: string | null;
+  type?: string | null;
+  state?: string | null;
+  is_targetable?: boolean | null;
   user?: string | number | { id?: string | number; first_name?: string | null; last_name?: string | null; email?: string | null } | null;
   business_profile?: string | number | { id?: string | number } | null;
   member_role?: string | null;
@@ -521,21 +525,19 @@ export class ReportsService {
     const filteredAlerts = this.filterAlerts(rawData.alerts, filters, range);
     const filteredRequests = this.filterRequests(rawData.scanRequests, filters, range);
 
-    const dayCount = this.dayKeys(range.start, range.end).length;
     const eligibleMemberCount = filteredMembers.length;
-    const expectedChecks = eligibleMemberCount * dayCount;
 
-    const completedMemberDayKeys = new Set<string>();
+    const completedMemberIds = new Set<string>();
     for (const scan of filteredScans) {
       if (!this.isCompletedScanStatus(scan.status)) continue;
       const memberId = scan.memberId;
       if (!memberId) continue;
       const ts = this.scanTimestamp(scan);
       if (!ts || ts < range.start || ts >= range.end) continue;
-      completedMemberDayKeys.add(`${memberId}:${this.dayKey(ts)}`);
+      completedMemberIds.add(memberId);
     }
 
-    const completedScans = filteredScans.filter((scan) => this.isCompletedScanStatus(scan.status)).length;
+    const completedScans = completedMemberIds.size;
     const stableOutcomes = filteredResults.filter((item) => this.normalizeText(item.riskLevel) === 'stable').length;
     const attentionOutcomes = filteredResults.filter((item) => {
       const risk = this.normalizeText(item.riskLevel);
@@ -543,16 +545,17 @@ export class ReportsService {
     }).length;
     const openAlerts = filteredAlerts.filter((item) => this.isOpenAlertStatus(item.status)).length;
     const overdueRequests = filteredRequests.filter((item) => this.isOverdueRequest(item)).length;
-    const missingScans = Math.max(expectedChecks - completedMemberDayKeys.size, 0);
+    const missingScans = eligibleMemberCount > 0 ? Math.max(eligibleMemberCount - completedScans, 0) : null;
 
     return {
-      averageComplianceRate: expectedChecks > 0 ? Math.round((completedMemberDayKeys.size / expectedChecks) * 100) : 0,
+      averageComplianceRate: eligibleMemberCount > 0 ? Math.round((completedScans / eligibleMemberCount) * 100) : null,
       totalCompletedScans: completedScans,
       missingScans,
       stableOutcomes,
       attentionOutcomes,
       openAlerts,
-      overdueRequests
+      overdueRequests,
+      scanEligibleMembers: eligibleMemberCount
     };
   }
 
@@ -700,8 +703,7 @@ export class ReportsService {
 
   computeDepartmentPerformance(rawData: RawReportsData, filters: ReportsFilters): DepartmentPerformanceRow[] {
     const range = this.resolveDateRange(filters.dateRange);
-    const dayCount = this.dayKeys(range.start, range.end).length;
-    const activeMembers = rawData.members.filter((member) => member.status === 'active');
+    const activeMembers = this.filteredActiveMembers(rawData.members, '');
     const filteredScans = this.filterScans(rawData, { ...filters, department: '' }, range);
     const filteredResults = this.filterResults(rawData, { ...filters, department: '' }, range);
     const filteredAlerts = this.filterAlerts(rawData.alerts, { ...filters, department: '', alertSeverity: 'all', readiness: 'all', dateRange: filters.dateRange }, range);
@@ -733,14 +735,14 @@ export class ReportsService {
         department.id ? member.departmentId === department.id : !member.departmentId
       );
       const memberIds = new Set(deptMembers.map((member) => member.id));
-      const completedMemberDay = new Set<string>();
+      const completedMemberIds = new Set<string>();
 
       for (const scan of filteredScans) {
         if (!this.isCompletedScanStatus(scan.status)) continue;
         if (!scan.memberId || !memberIds.has(scan.memberId)) continue;
         const ts = this.scanTimestamp(scan);
         if (ts < range.start || ts >= range.end) continue;
-        completedMemberDay.add(`${scan.memberId}:${this.dayKey(ts)}`);
+        completedMemberIds.add(scan.memberId);
       }
 
       let openAlerts = 0;
@@ -765,9 +767,8 @@ export class ReportsService {
       }
 
       const activeCount = deptMembers.length;
-      const expectedChecks = activeCount * dayCount;
-      const completedScans = completedMemberDay.size;
-      const missingScans = Math.max(expectedChecks - completedScans, 0);
+      const completedScans = completedMemberIds.size;
+      const missingScans = Math.max(activeCount - completedScans, 0);
       rows.push({
         key,
         departmentId: department.id,
@@ -775,7 +776,7 @@ export class ReportsService {
         activeMembers: activeCount,
         completedScans,
         missingScans,
-        complianceRate: expectedChecks > 0 ? Math.round((completedScans / expectedChecks) * 100) : 0,
+        complianceRate: activeCount > 0 ? Math.round((completedScans / activeCount) * 100) : 0,
         attentionOutcomes,
         openAlerts
       });
@@ -894,9 +895,10 @@ export class ReportsService {
     const rows: string[] = [];
     rows.push('Section 1: Executive Summary');
     rows.push(this.toCsvLine(['Metric', 'Value']));
-    rows.push(this.toCsvLine(['Average Compliance Rate', `${viewState.executiveSummary.averageComplianceRate}%`]));
+    rows.push(this.toCsvLine(['Average Compliance Rate', this.formatOptionalPercent(viewState.executiveSummary.averageComplianceRate)]));
     rows.push(this.toCsvLine(['Total Completed Scans', String(viewState.executiveSummary.totalCompletedScans)]));
-    rows.push(this.toCsvLine(['Missing Scans', String(viewState.executiveSummary.missingScans)]));
+    rows.push(this.toCsvLine(['Missing Scans', this.formatOptionalNumber(viewState.executiveSummary.missingScans)]));
+    rows.push(this.toCsvLine(['Eligible Current Members', String(viewState.executiveSummary.scanEligibleMembers)]));
     rows.push(this.toCsvLine(['Stable Outcomes', String(viewState.executiveSummary.stableOutcomes)]));
     rows.push(this.toCsvLine(['Attention Outcomes', String(viewState.executiveSummary.attentionOutcomes)]));
     rows.push(this.toCsvLine(['Open Alerts', String(viewState.executiveSummary.openAlerts)]));
@@ -912,7 +914,7 @@ export class ReportsService {
           String(item.activeMembers),
           String(item.completed),
           String(item.missing),
-          `${item.complianceRate}%`
+          item.activeMembers > 0 ? `${item.complianceRate}%` : 'Unavailable'
         ])
       );
     }
@@ -1034,7 +1036,7 @@ export class ReportsService {
           String(item.activeMembers),
           String(item.completedScans),
           String(item.missingScans),
-          `${item.complianceRate}%`,
+          item.activeMembers > 0 ? `${item.complianceRate}%` : 'Unavailable',
           String(item.attentionOutcomes),
           String(item.openAlerts)
         ])
@@ -1075,10 +1077,6 @@ export class ReportsService {
     const readinessTrends = this.computeReadinessTrends(rawData, filters);
     const complianceTrend = this.computeComplianceTrend(rawData, filters);
     const missingScanDetails = this.computeMissingScanDetails(rawData, filters);
-    const reconciledSummary: ExecutiveSummary = {
-      ...executiveSummary,
-      missingScans: missingScanDetails.foundCount
-    };
     const departmentPerformance = this.computeDepartmentPerformance(rawData, filters);
     const alertsBreakdown = this.computeAlertsBreakdown(rawData, filters);
     const scanRequestPerformance = this.computeScanRequestPerformance(rawData, filters);
@@ -1086,7 +1084,7 @@ export class ReportsService {
 
     return {
       filters,
-      executiveSummary: reconciledSummary,
+      executiveSummary,
       readinessTrends,
       complianceTrend,
       missingScanDetails,
@@ -1294,6 +1292,9 @@ export class ReportsService {
     return {
       id,
       status: row.status,
+      type: row.type,
+      state: row.state,
+      is_targetable: row.is_targetable,
       member_role: row.member_role,
       department: row.department_id
         ? {
@@ -1344,30 +1345,50 @@ export class ReportsService {
   }
 
   private normalizeMembers(rows: BusinessMemberRecord[]): NormalizedMember[] {
+    const seen = new Set<string>();
+
     return (rows ?? [])
       .map((row) => {
         const id = this.normalizeId(row.id);
         if (!id) return null;
+        const status = this.normalizeText(row.status);
+        const type = this.normalizeText(row.type);
+        const state = this.normalizeText(row.state);
+        const isTargetable = row.is_targetable !== false;
         const userRecord = this.objectRecord(row.user);
         const email = sanitizeDisplayValue(userRecord?.['email'], '-') || '-';
+        const userId = this.normalizeId(userRecord?.['id'] ?? row.user);
         const userLabel = formatUserName(userRecord, '');
         const departmentRecord = this.objectRecord(row.department);
         const departmentId = this.normalizeId(departmentRecord?.['id'] ?? row.department);
         const departmentName = formatDepartment(departmentRecord ?? row.department, 'Unassigned');
+        const memberRole = this.normalizeText(row.member_role);
+
+        if (status !== 'active') return null;
+        if (type && type !== 'member') return null;
+        if (state && state !== 'verified_member') return null;
+        if (!isTargetable) return null;
+        if (!userId || email === '-') return null;
+        if (!['employee', 'manager', 'hr'].includes(memberRole)) return null;
+
+        const dedupeKey = userId || id;
+        if (seen.has(dedupeKey)) return null;
+        seen.add(dedupeKey);
+
         return {
           id,
           name: userLabel || email || 'Unknown member',
           email,
-          status: this.normalizeText(row.status),
-          memberRole: this.normalizeText(row.member_role),
+          status,
+          memberRole,
           departmentId,
           departmentName: departmentId ? departmentName : 'Unassigned',
-          userId: this.normalizeId(userRecord?.['id'] ?? row.user),
+          userId,
           lastScanAt: row.last_scan_at ?? null,
           lastRiskLevel: this.pickString(row.last_risk_level)
         } satisfies NormalizedMember;
       })
-      .filter((row): row is NormalizedMember => Boolean(row));
+      .filter((row) => Boolean(row)) as NormalizedMember[];
   }
 
   private normalizeDepartments(
@@ -1555,14 +1576,26 @@ export class ReportsService {
   }
 
   private filteredActiveMembers(members: NormalizedMember[], departmentFilter: string): NormalizedMember[] {
+    const seen = new Set<string>();
+
     return members.filter((member) => {
       if (member.status !== 'active') return false;
+      if (!member.userId || !member.email || member.email === '-') return false;
+      const role = this.normalizeText(member.memberRole);
+      if (!['employee', 'manager', 'hr'].includes(role)) return false;
       if (departmentFilter) {
         if (departmentFilter === 'unassigned') {
-          return !member.departmentId;
+          if (member.departmentId) return false;
+        } else if (member.departmentId !== departmentFilter) {
+          return false;
         }
-        return member.departmentId === departmentFilter;
       }
+
+      const dedupeKey = member.userId || member.id;
+      if (seen.has(dedupeKey)) {
+        return false;
+      }
+      seen.add(dedupeKey);
       return true;
     });
   }
@@ -1919,5 +1952,13 @@ export class ReportsService {
     if (!value) return 0;
     const parsed = new Date(value).getTime();
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private formatOptionalPercent(value: number | null | undefined): string {
+    return value === null || value === undefined ? 'Unavailable' : `${value}%`;
+  }
+
+  private formatOptionalNumber(value: number | null | undefined): string {
+    return value === null || value === undefined ? 'Unavailable' : String(value);
   }
 }

@@ -101,23 +101,23 @@
         <div class="reports-summary-grid">
           <app-kpi-card
             label="Coverage"
-            [value]="(report?.executiveSummary?.averageComplianceRate ?? 0) + '%'"
-            helper="Completed expected checks divided by expected checks in returned data."
-            [tone]="(report?.executiveSummary?.averageComplianceRate ?? 0) < 80 ? 'warning' : 'success'"
+            [value]="coverageRateDisplay"
+            helper="Completed checks divided by eligible current members in the selected scope."
+            [tone]="coverageRateTone"
             toneLabel="Coverage"></app-kpi-card>
 
           <app-kpi-card
             label="Completed"
-            [value]="(report?.executiveSummary?.totalCompletedScans ?? 0).toString()"
+            [value]="completedScansDisplay"
             helper="Returned completed checks in the selected range."
             tone="success"
             toneLabel="Completed"></app-kpi-card>
 
           <app-kpi-card
             label="Missing"
-            [value]="(report?.executiveSummary?.missingScans ?? 0).toString()"
-            helper="Expected checks without returned completion."
-            [tone]="(report?.executiveSummary?.missingScans ?? 0) > 0 ? 'warning' : 'success'"
+            [value]="missingScansDisplay"
+            helper="Eligible current members without a returned completion."
+            [tone]="missingScansTone"
             toneLabel="Missing"></app-kpi-card>
 
           <app-kpi-card
@@ -193,7 +193,7 @@
                       <td>{{ row.activeMembers }}</td>
                       <td>{{ row.completedScans }}</td>
                       <td>{{ row.missingScans }}</td>
-                      <td>{{ row.complianceRate }}%</td>
+                      <td>{{ row.activeMembers > 0 ? row.complianceRate + '%' : 'Unavailable' }}</td>
                       <td>{{ row.openAlerts }}</td>
                     </tr>
                   }

@@ -439,9 +439,7 @@ export class ComplianceService {
   }
 
   buildComplianceSummary(data: NormalizedSource): ComplianceSummaryCardData {
-    const members = this.applyDepartmentFilterToMembers(data.members, data.filters.department).filter(
-      (member) => this.normalizeText(member.status) === 'active'
-    );
+    const members = this.eligibleMembers(data.members, data.filters.department);
     const range = this.resolveDateRange(data.filters.dateRange);
     const scansInRange = this.applyDepartmentFilterToWellnessScans(data.wellnessScans, data.filters.department).filter((scan) => {
       const happenedAt = this.pickString(scan.completed_at) || this.pickString(scan.date_created);
@@ -491,7 +489,7 @@ export class ComplianceService {
       departmentMetadataUnreadable: data.departmentMetadataUnreadable
     });
 
-    const members = data.members.filter((member) => this.normalizeText(member.status) === 'active');
+    const members = this.eligibleMembers(data.members, data.filters.department);
     const alerts = data.alerts.filter((alert) => this.isOpenAlertStatus(alert.status));
     const range = this.resolveDateRange(data.filters.dateRange);
     const scansInRange = this.applyDepartmentFilterToWellnessScans(data.wellnessScans, data.filters.department).filter((scan) => {
@@ -552,8 +550,7 @@ export class ComplianceService {
   buildComplianceExceptions(data: NormalizedSource): ComplianceExceptionRow[] {
     const memberRiskLevelById = this.memberRiskLevelById(data);
     const memberSuggestedActionById = this.memberSuggestedActionById(data);
-    const activeMembers = this.applyDepartmentFilterToMembers(data.members, data.filters.department)
-      .filter((member) => this.normalizeText(member.status) === 'active');
+    const activeMembers = this.eligibleMembers(data.members, data.filters.department);
 
     const requestsByMember = new Map<string, RequestRow[]>();
     for (const request of this.applyDepartmentFilterToRequests(data.scanRequests, data.filters.department)) {
@@ -1343,6 +1340,31 @@ export class ComplianceService {
     }
 
     return (members ?? []).filter((member) => member.department_id === departmentFilter);
+  }
+
+  private eligibleMembers(members: WorkforceMemberRow[], departmentFilter: string): WorkforceMemberRow[] {
+    const seen = new Set<string>();
+
+    return this.applyDepartmentFilterToMembers(members, departmentFilter).filter((member) => {
+      if (this.normalizeText(member.status) !== 'active') {
+        return false;
+      }
+
+      if (!['employee', 'manager', 'hr'].includes(this.normalizeText(member.member_role))) {
+        return false;
+      }
+
+      if (!member.user_id || !member.user_email) {
+        return false;
+      }
+
+      const dedupeKey = member.user_id || member.id;
+      if (seen.has(dedupeKey)) {
+        return false;
+      }
+      seen.add(dedupeKey);
+      return true;
+    });
   }
 
   private applyDepartmentFilterToRequests(requests: RequestRow[], departmentFilter: string): RequestRow[] {
