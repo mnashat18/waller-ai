@@ -191,6 +191,17 @@
                 <span>Department name</span>
                 <input name="department_name" [(ngModel)]="departmentForm.name" [disabled]="savingDepartment" />
               </label>
+              <label class="company-field">
+                <span>Department manager (optional)</span>
+                <select name="department_manager" [(ngModel)]="departmentForm.manager_member_id" [disabled]="savingDepartment">
+                  <option value="">No manager assigned</option>
+                  <option *ngFor="let option of departmentManagerOptions" [value]="option.id">{{ option.label }}</option>
+                </select>
+                <span class="company-field__help">Choose an active Owner, HR, or Manager from this organization.</span>
+                <span *ngIf="!departmentManagerOptions.length" class="company-field__empty">
+                  No eligible managers are available. Add or promote a manager in Workforce first.
+                </span>
+              </label>
               <div class="company-form-actions company-form-actions--full">
                 <button type="button" class="btn-secondary" (click)="cancelDepartmentForm()" [disabled]="savingDepartment">Cancel</button>
                 <button type="submit" class="dashboard-action-button" [disabled]="!canSubmitDepartmentForm">
@@ -255,7 +266,7 @@
               <p class="company-eyebrow">Deactivate department</p>
               <h2>{{ pendingDeactivateDepartment.name }}</h2>
               <p>
-                This action is blocked while active members are still assigned. Reassignment must happen before deactivation.
+                Deactivate the department after reassigning its active members.
               </p>
             </div>
           </div>

@@ -353,6 +353,41 @@
   cursor: not-allowed;
 }
 
+.company-field select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  padding: 0 12px;
+  background: rgba(2, 6, 23, 0.62);
+  color: #f8fafc;
+  outline: none;
+}
+
+.company-field select:focus {
+  border-color: rgba(56, 189, 248, 0.56);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+}
+
+.company-field select:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.company-field__help {
+  color: rgba(203, 213, 225, 0.7);
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.company-field__empty {
+  color: rgb(254 240 138);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .company-form-actions {
   display: flex;
   gap: 10px;

@@ -178,6 +178,7 @@ describe('ReportsPageComponent', () => {
     fixture.detectChanges();
 
     expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect((fixture.nativeElement.querySelector('app-filter-bar-shell > div') as HTMLElement).style.overflow).toBe('visible');
     const menu = fixture.nativeElement.querySelector('#reports-export-menu') as HTMLElement;
     expect(menu?.getAttribute('role')).toBe('menu');
     const menuItems = exportMenuItems();

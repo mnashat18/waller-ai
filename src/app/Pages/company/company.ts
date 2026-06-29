@@ -38,6 +38,7 @@ type ProfileDraft = {
 
 type DepartmentDraft = {
   name: string;
+  manager_member_id: string;
 };
 
 const EMPTY_PERMISSIONS: OrganizationPermissions = {
@@ -75,8 +76,9 @@ export class CompanyPageComponent implements OnInit {
   departmentFormMode: DepartmentFormMode = null;
   departmentFormDepartmentId: string | null = null;
   private departmentFormBaseline = '';
-  departmentForm: DepartmentDraft = { name: '' };
+  departmentForm: DepartmentDraft = { name: '', manager_member_id: '' };
   pendingDeactivateDepartment: OrganizationDepartment | null = null;
+  departmentManagerOptions: Array<{ id: string; label: string }> = [];
 
   private loadRunId = 0;
 
@@ -253,7 +255,7 @@ export class CompanyPageComponent implements OnInit {
 
     this.departmentFormMode = 'create';
     this.departmentFormDepartmentId = null;
-    this.departmentForm = { name: '' };
+    this.departmentForm = { name: '', manager_member_id: '' };
     this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
     this.pendingDeactivateDepartment = null;
     this.feedback = null;
@@ -267,7 +269,10 @@ export class CompanyPageComponent implements OnInit {
 
     this.departmentFormMode = 'edit';
     this.departmentFormDepartmentId = department.id;
-    this.departmentForm = { name: department.name ?? '' };
+    this.departmentForm = {
+      name: department.name ?? '',
+      manager_member_id: this.departmentManagerMemberId(department.manager_member_id)
+    };
     this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
     this.pendingDeactivateDepartment = null;
     this.feedback = null;
@@ -277,7 +282,7 @@ export class CompanyPageComponent implements OnInit {
     if (this.savingDepartment) return;
     this.departmentFormMode = null;
     this.departmentFormDepartmentId = null;
-    this.departmentForm = { name: '' };
+    this.departmentForm = { name: '', manager_member_id: '' };
     this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
   }
 
@@ -304,16 +309,17 @@ export class CompanyPageComponent implements OnInit {
     this.cdr.markForCheck();
 
     const mode = this.departmentFormMode;
+    const managerMemberId = this.toNullable(this.departmentForm.manager_member_id);
     const request = mode === 'edit' && this.departmentFormDepartmentId
-      ? this.organizationApi.updateDepartment(this.departmentFormDepartmentId, { name })
-      : this.organizationApi.createDepartment({ name });
+      ? this.organizationApi.updateDepartment(this.departmentFormDepartmentId, { name, manager_member_id: managerMemberId })
+      : this.organizationApi.createDepartment({ name, manager_member_id: managerMemberId });
 
     void firstValueFrom(request)
       .then((department) => {
         this.upsertDepartment(department);
         this.departmentFormMode = null;
         this.departmentFormDepartmentId = null;
-        this.departmentForm = { name: '' };
+        this.departmentForm = { name: '', manager_member_id: '' };
         this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
         this.feedback = {
           type: 'success',
@@ -363,7 +369,7 @@ export class CompanyPageComponent implements OnInit {
         this.feedback = { type: 'success', text: 'Department deactivated.' };
       })
       .catch((error: unknown) => {
-        this.feedback = { type: 'error', text: this.toUserMessage(error, 'Department could not be deactivated.') };
+        this.feedback = { type: 'error', text: this.toDeactivateDepartmentMessage(error, 'Department could not be deactivated.') };
       })
       .finally(() => {
         this.departmentActionBusy = false;
@@ -387,12 +393,12 @@ export class CompanyPageComponent implements OnInit {
 
   managerLabel(department: OrganizationDepartment): string {
     const managerId = department.manager_member_id;
-    if (!managerId) return 'No manager assigned';
+    if (!managerId) return 'Unassigned';
 
     const manager = this.members.find((member) => member.id === managerId);
-    if (!manager) return 'Assigned';
+    if (!manager) return 'Unassigned';
 
-    return manager.user_name || manager.user_email || 'Assigned';
+    return manager.user_name || manager.user_email || 'Unassigned';
   }
 
   formatDate(value: string | null | undefined): string {
@@ -432,9 +438,10 @@ export class CompanyPageComponent implements OnInit {
       this.pageData = data;
       this.departmentFormMode = null;
       this.departmentFormDepartmentId = null;
-      this.departmentForm = { name: '' };
+      this.departmentForm = { name: '', manager_member_id: '' };
       this.departmentFormBaseline = this.departmentSignature(this.departmentForm);
       this.pendingDeactivateDepartment = null;
+      this.rebuildDepartmentManagerOptions();
 
       if (!data.profile) {
         this.viewState = 'error';
@@ -537,7 +544,7 @@ export class CompanyPageComponent implements OnInit {
   }
 
   private departmentSignature(form: DepartmentDraft): string {
-    return this.normalizeText(form.name);
+    return [this.normalizeText(form.name), this.normalizeText(form.manager_member_id)].join('||');
   }
 
   private createEmptyProfileDraft(): ProfileDraft {
@@ -580,6 +587,48 @@ export class CompanyPageComponent implements OnInit {
     return '';
   }
 
+  private departmentManagerMemberId(value: unknown): string {
+    if (typeof value === 'string' || typeof value === 'number') {
+      return String(value);
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      const id = record['id'];
+      if (typeof id === 'string' || typeof id === 'number') {
+        return String(id);
+      }
+    }
+    return '';
+  }
+
+  private isEligibleDepartmentManager(member: OrganizationMember): boolean {
+    const status = this.normalizeText(member.status).toLowerCase();
+    const role = this.normalizeText(member.member_role).toLowerCase();
+    return status === 'active' && ['owner', 'hr', 'manager'].includes(role) && Boolean(member.user_name || member.user_email);
+  }
+
+  private departmentManagerRoleLabel(role: string | null): string {
+    const normalized = this.normalizeText(role).toLowerCase();
+    if (normalized === 'hr') return 'HR';
+    if (normalized === 'owner') return 'Owner';
+    if (normalized === 'manager') return 'Manager';
+    return 'Member';
+  }
+
+  private toNullable(value: string | null | undefined): string | null {
+    const normalized = this.normalizeText(value);
+    return normalized ? normalized : null;
+  }
+
+  private rebuildDepartmentManagerOptions(): void {
+    this.departmentManagerOptions = this.members
+      .filter((member) => this.isEligibleDepartmentManager(member))
+      .map((member) => ({
+        id: member.id,
+        label: `${member.user_name || member.user_email || 'Member'} — ${this.departmentManagerRoleLabel(member.member_role)}`
+      }));
+  }
+
   private toUserMessage(error: unknown, fallback: string): string {
     if (error instanceof OrganizationApiError) {
       if (error.code === 'forbidden') {
@@ -593,6 +642,39 @@ export class CompanyPageComponent implements OnInit {
 
     if (error instanceof Error && error.message) {
       return error.message;
+    }
+
+    return fallback;
+  }
+
+  private toDeactivateDepartmentMessage(error: unknown, fallback: string): string {
+    if (error instanceof OrganizationApiError) {
+      if (error.code === 'unauthorized') {
+        return 'Session expired. Please sign in again.';
+      }
+      if (error.code === 'forbidden') {
+        return 'This organization action is not available for your access level.';
+      }
+
+      const message = this.normalizeText(error.userMessage).toLowerCase();
+      if (message.includes('active members')) {
+        return 'Deactivate the department after reassigning its active members.';
+      }
+
+      return fallback;
+    }
+
+    if (error instanceof Error && error.message) {
+      const message = error.message.toLowerCase();
+      if (message.includes('active members')) {
+        return 'Deactivate the department after reassigning its active members.';
+      }
+      if (message.includes('unauthorized') || message.includes('session expired')) {
+        return 'Session expired. Please sign in again.';
+      }
+      if (message.includes('forbidden') || message.includes('permission')) {
+        return 'This organization action is not available for your access level.';
+      }
     }
 
     return fallback;

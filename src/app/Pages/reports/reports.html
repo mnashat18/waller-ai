@@ -58,7 +58,7 @@
       (retry)="refresh()">
     </app-error-state>
   } @else {
-    <app-filter-bar-shell>
+    <app-filter-bar-shell [overflowVisible]="true">
       <select [(ngModel)]="filters.dateRange" name="reportsDateRange" class="app-form-control" aria-label="Date range">
         <option value="today">Today</option>
         <option value="last7">Last 7 days</option>
