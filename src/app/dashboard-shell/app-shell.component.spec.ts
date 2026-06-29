@@ -143,6 +143,36 @@ describe('AppShellComponent', () => {
     expect(component.shellMounted).toBe(true);
   });
 
+  it('mounts the shell for authenticated users without an active workspace once context is ready', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    contextState$.next(createContextState({
+      context: {
+        currentUser: baseContext.currentUser,
+        userId: baseContext.userId,
+        userDisplayName: baseContext.userDisplayName,
+        userEmail: baseContext.userEmail,
+        isAuthenticated: true,
+        authInitialized: true,
+        workspaceInitialized: true,
+        activeBusinessProfileId: null,
+        activeBusinessProfileName: null,
+        activeDepartmentId: null,
+        activeDepartmentName: null,
+        activeMemberRole: null,
+        availableCompanies: [],
+        hubReason: null
+      }
+    }));
+
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.shellMounted).toBe(true);
+    expect(component.showRetryAction).toBe(false);
+  });
+
   it('shows retry after the bootstrap timeout and retries without a browser refresh', async () => {
     (component as any).bootstrapTimeoutMs = 1;
     fixture.detectChanges();

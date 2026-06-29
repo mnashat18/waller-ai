@@ -355,8 +355,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       const hasResolvedContext =
         state.context.isAuthenticated &&
         state.context.authInitialized &&
-        state.context.workspaceInitialized &&
-        Boolean(state.context.activeBusinessProfileId);
+        state.context.workspaceInitialized;
 
       if (hasResolvedContext) {
         this.shellMounted = true;
