@@ -14,8 +14,7 @@ const now = '2026-06-29T00:00:00.000Z';
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const deterministicIds = [
   '11111111-1111-4111-8111-111111111111',
-  '22222222-2222-4222-8222-222222222222',
-  '33333333-3333-4333-8333-333333333333'
+  '22222222-2222-4222-8222-222222222222'
 ];
 
 const payload = buildCompanyPayload(
@@ -41,24 +40,17 @@ assert.equal(payload.value.country, 'Egypt');
 const recordIds = buildWorkspaceRecordIds(() => deterministicIds.shift());
 
 assert.match(recordIds.businessProfileId, uuidPattern);
-assert.match(recordIds.membershipId, uuidPattern);
 assert.match(recordIds.activityEventId, uuidPattern);
-assert.notEqual(recordIds.businessProfileId, recordIds.membershipId);
 assert.notEqual(recordIds.businessProfileId, recordIds.activityEventId);
-assert.notEqual(recordIds.membershipId, recordIds.activityEventId);
+assert.equal(recordIds.membershipId, undefined);
 
 const businessProfileInsert = buildBusinessProfileInsertPayload(payload.value, recordIds);
 assert.match(businessProfileInsert.id, uuidPattern);
 assert.equal(businessProfileInsert.company_name, 'Northwind Logistics');
 assert.equal(businessProfileInsert.owner_user, 'user-1');
 
-const ownerMembershipInsert = buildOwnerMembershipInsertPayload(
-  'user-1',
-  businessProfileInsert.id,
-  now,
-  recordIds
-);
-assert.match(ownerMembershipInsert.id, uuidPattern);
+const ownerMembershipInsert = buildOwnerMembershipInsertPayload('user-1', businessProfileInsert.id, now);
+assert.equal(Object.hasOwn(ownerMembershipInsert, 'id'), false);
 assert.equal(ownerMembershipInsert.business_profile, businessProfileInsert.id);
 assert.equal(ownerMembershipInsert.user, 'user-1');
 assert.equal(ownerMembershipInsert.member_role, 'owner');
@@ -67,14 +59,14 @@ assert.equal(ownerMembershipInsert.status, 'active');
 const activityInsert = buildWorkspaceCreatedActivityEventPayload({
   userId: 'user-1',
   businessProfileId: businessProfileInsert.id,
-  membershipId: ownerMembershipInsert.id,
+  membershipId: 101,
   activityEventId: recordIds.activityEventId,
   idempotencyKey: 'idem-1'
 });
 assert.match(activityInsert.id, uuidPattern);
 assert.equal(activityInsert.business_profile, businessProfileInsert.id);
 assert.equal(activityInsert.entity_id, businessProfileInsert.id);
-assert.equal(JSON.parse(activityInsert.payload).membership_id, ownerMembershipInsert.id);
+assert.equal(JSON.parse(activityInsert.payload).membership_id, 101);
 
 const placeholderResult = buildCompanyPayload(
   {
@@ -136,6 +128,7 @@ await logWorkspaceCreatedActivityEvent(
     userId: 'user-1',
     businessProfileId: 'profile-1',
     membershipId: 'member-1',
+    activityEventId: '33333333-3333-4333-8333-333333333333',
     idempotencyKey: 'idem-1'
   }
 );
@@ -228,7 +221,7 @@ function createQueryBuilder(table, calls) {
       }
 
       if (table === 'business_profile_members') {
-        assertRequiredUuidId(table, insertPayload);
+        assert.equal(Object.hasOwn(insertPayload, 'id'), false, 'business_profile_members.id must be database-generated');
       }
 
       if (table === 'activity_events') {
@@ -259,7 +252,7 @@ function createQueryBuilder(table, calls) {
       if (table === 'business_profile_members') {
         return [
           {
-            id: lastInsert.payload.id,
+            id: 101,
             business_profile: lastInsert.payload.business_profile,
             member_role: lastInsert.payload.member_role,
             status: lastInsert.payload.status
@@ -325,7 +318,7 @@ await createWorkspaceHandler(
 assert.equal(createResponse.statusCode, 201);
 assert.equal(createResponse.body.error, undefined);
 assert.match(createResponse.body.data.workspace.id, uuidPattern);
-assert.match(createResponse.body.data.membership.id, uuidPattern);
+assert.equal(createResponse.body.data.membership.id, '101');
 assert.equal(createResponse.body.data.membership.businessProfileId, createResponse.body.data.workspace.id);
 
 const createdProfileInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'business_profiles');
@@ -335,7 +328,7 @@ const createdMembershipInsert = database.calls.find(
 const createdActivityInsert = database.calls.find((call) => call.type === 'insert' && call.table === 'activity_events');
 
 assert.match(createdProfileInsert.payload.id, uuidPattern);
-assert.match(createdMembershipInsert.payload.id, uuidPattern);
+assert.equal(Object.hasOwn(createdMembershipInsert.payload, 'id'), false);
 assert.match(createdActivityInsert.payload.id, uuidPattern);
 assert.equal(createdMembershipInsert.payload.business_profile, createdProfileInsert.payload.id);
 assert.equal(createdActivityInsert.payload.business_profile, createdProfileInsert.payload.id);

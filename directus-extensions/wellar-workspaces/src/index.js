@@ -269,13 +269,11 @@ function assertUuid(value, label) {
 function buildWorkspaceRecordIds(createId = randomUUID) {
   const ids = {
     businessProfileId: createId(),
-    membershipId: createId(),
     activityEventId: createId()
   };
   const values = Object.values(ids);
 
   assertUuid(ids.businessProfileId, 'business_profiles.id');
-  assertUuid(ids.membershipId, 'business_profile_members.id');
   assertUuid(ids.activityEventId, 'activity_events.id');
 
   if (new Set(values).size !== values.length) {
@@ -292,9 +290,8 @@ function buildBusinessProfileInsertPayload(companyPayload, recordIds) {
   };
 }
 
-function buildOwnerMembershipInsertPayload(userId, businessProfileId, now, recordIds) {
+function buildOwnerMembershipInsertPayload(userId, businessProfileId, now) {
   return {
-    id: recordIds.membershipId,
     user: userId,
     business_profile: businessProfileId,
     member_role: 'owner',
@@ -2567,7 +2564,7 @@ export default {
           }
 
           const [membership] = await trx('business_profile_members')
-            .insert(buildOwnerMembershipInsertPayload(userId, profile.id, now, recordIds))
+            .insert(buildOwnerMembershipInsertPayload(userId, profile.id, now))
             .returning(['id', 'business_profile', 'member_role', 'status']);
 
           if (!membership?.id) {
