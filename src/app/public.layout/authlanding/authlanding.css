@@ -912,6 +912,13 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+@media (min-width: 521px) {
+  .auth-form:has(input[name='firstName']) .auth-field:nth-of-type(-n + 2) {
+    align-content: start;
+    grid-template-rows: auto auto minmax(0.98rem, auto);
+  }
+}
+
 .auth-form:has(input[name='firstName']) .auth-field:nth-of-type(3),
 .auth-form:has(input[name='firstName']) .auth-field:nth-of-type(4),
 .auth-form:has(input[name='firstName']) .trial-note,
