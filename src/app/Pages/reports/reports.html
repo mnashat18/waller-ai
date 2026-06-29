@@ -91,17 +91,28 @@
           type="button"
           class="dashboard-action-button dashboard-action-button--primary reports-export-control__toggle"
           [disabled]="!canExport"
+          [attr.title]="!canExport ? exportUnavailableMessage : null"
           aria-haspopup="menu"
           [attr.aria-expanded]="exportMenuOpen"
-          (click)="toggleExportMenu($event)">
+          aria-controls="reports-export-menu"
+          (click)="toggleExportMenu($event)"
+          (keydown)="handleExportToggleKeydown($event)">
           <span>Export</span>
           <span aria-hidden="true">▾</span>
         </button>
+        @if (!canExport && showReportEmpty) {
+          <p class="reports-export-control__helper">{{ exportUnavailableMessage }}</p>
+        }
 
         @if (exportMenuOpen) {
-          <div class="reports-export-control__menu" role="menu" aria-label="Export report">
-            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportCsv()">Export CSV</button>
-            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportPdf()">Export PDF</button>
+          <div
+            id="reports-export-menu"
+            class="reports-export-control__menu"
+            role="menu"
+            aria-label="Export report"
+            (keydown)="handleExportMenuKeydown($event)">
+            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportCsv()">Download CSV</button>
+            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportPdf()">Download PDF</button>
           </div>
         }
       </div>

@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { NavigationStart, Router, RouterModule } from '@angular/router';
+import { Subscription } from 'rxjs';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import {
@@ -61,6 +62,7 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
   @ViewChild('exportMenuRoot') private exportMenuRoot?: ElementRef<HTMLElement>;
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private exportBusy = false;
+  private routerEventsSub?: Subscription;
 
   constructor(
     private reportsService: ReportsService,
@@ -71,10 +73,16 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.routerEventsSub = this.router.events.subscribe((event) => {
+      if (event instanceof NavigationStart) {
+        this.closeExportMenu();
+      }
+    });
     void this.loadReports();
   }
 
   ngOnDestroy(): void {
+    this.routerEventsSub?.unsubscribe();
     if (this.feedbackTimer) {
       clearTimeout(this.feedbackTimer);
       this.feedbackTimer = null;
@@ -151,7 +159,11 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
   }
 
   get canExport(): boolean {
-    return this.viewState === 'ready' && Boolean(this.report) && !this.loading && !this.exportBusy;
+    return this.viewState === 'ready' && this.report?.hasAnyData === true && !this.loading && !this.exportBusy;
+  }
+
+  get exportUnavailableMessage(): string {
+    return 'Export is available when report data is available.';
   }
 
   get coverageRateDisplay(): string {
@@ -201,7 +213,7 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     void this.loadReports(false);
   }
 
-  toggleExportMenu(event?: MouseEvent): void {
+  toggleExportMenu(event?: Event): void {
     event?.preventDefault();
     event?.stopPropagation();
     if (!this.canExport) {
@@ -209,6 +221,46 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.exportMenuOpen = !this.exportMenuOpen;
+    if (this.exportMenuOpen) {
+      this.focusFirstExportMenuItem();
+    }
+  }
+
+  handleExportToggleKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+
+    this.toggleExportMenu(event);
+  }
+
+  handleExportMenuKeydown(event: KeyboardEvent): void {
+    if (!this.exportMenuOpen) {
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.closeExportMenu(true);
+      return;
+    }
+
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return;
+    }
+
+    event.preventDefault();
+    const items = this.exportMenuItems();
+    if (!items.length) {
+      return;
+    }
+
+    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    const nextIndex =
+      event.key === 'ArrowDown'
+        ? (currentIndex + 1) % items.length
+        : (currentIndex <= 0 ? items.length : currentIndex) - 1;
+    items[nextIndex]?.focus();
   }
 
   async exportCsv(): Promise<void> {
@@ -382,14 +434,53 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
 
     const target = event.target;
     if (!(target instanceof Node)) {
-      this.exportMenuOpen = false;
+      this.closeExportMenu();
       return;
     }
 
     if (!this.exportMenuRoot?.nativeElement.contains(target)) {
-      this.exportMenuOpen = false;
-      this.cdr.markForCheck();
+      this.closeExportMenu();
     }
+  }
+
+  @HostListener('document:keydown.escape', ['$event'])
+  handleEscapeKey(event: Event): void {
+    if (!this.exportMenuOpen) {
+      return;
+    }
+
+    event.preventDefault();
+    this.closeExportMenu(true);
+  }
+
+  private closeExportMenu(restoreFocus = false): void {
+    if (!this.exportMenuOpen) {
+      return;
+    }
+
+    this.exportMenuOpen = false;
+    this.cdr.markForCheck();
+
+    if (restoreFocus) {
+      setTimeout(() => {
+        const trigger = this.exportMenuRoot?.nativeElement.querySelector<HTMLButtonElement>(
+          '.reports-export-control__toggle'
+        );
+        trigger?.focus();
+      }, 0);
+    }
+  }
+
+  private focusFirstExportMenuItem(): void {
+    setTimeout(() => {
+      this.exportMenuItems()[0]?.focus();
+    }, 0);
+  }
+
+  private exportMenuItems(): HTMLButtonElement[] {
+    return Array.from(
+      this.exportMenuRoot?.nativeElement.querySelectorAll<HTMLButtonElement>('.reports-export-control__item') ?? []
+    );
   }
 
   private normalizeId(value: unknown): string | null {

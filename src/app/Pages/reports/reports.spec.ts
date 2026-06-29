@@ -137,34 +137,57 @@ describe('ReportsPageComponent', () => {
     fixture.detectChanges();
   });
 
-  it('keeps export controls visible and routes CSV/PDF exports through the loaded report snapshot', async () => {
+  function setReadyReport(report: ReportsViewData = baseReport): void {
     component.viewState = 'ready';
-    component.report = baseReport;
+    component.report = report;
     component.loading = false;
     fixture.detectChanges();
+  }
+
+  function exportButton(): HTMLButtonElement {
+    return fixture.nativeElement.querySelector('.reports-export-control__toggle') as HTMLButtonElement;
+  }
+
+  function exportMenuItems(): HTMLButtonElement[] {
+    return Array.from(
+      fixture.nativeElement.querySelectorAll('.reports-export-control__item') as NodeListOf<HTMLButtonElement>
+    );
+  }
+
+  it('opens an accessible export menu and routes CSV/PDF exports through the loaded report snapshot', async () => {
+    setReadyReport();
     component.filters.dateRange = 'last7';
     fixture.detectChanges();
 
-    const exportButton = fixture.nativeElement.querySelector('.reports-export-control__toggle') as HTMLButtonElement;
-    expect(exportButton).toBeTruthy();
+    const button = exportButton();
+    expect(button).toBeTruthy();
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-haspopup')).toBe('menu');
+    expect(button.getAttribute('aria-controls')).toBe('reports-export-menu');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
 
-    exportButton.click();
+    button.click();
     fixture.detectChanges();
 
-    const csvButton = fixture.nativeElement.querySelector('.reports-export-control__item') as HTMLButtonElement;
-    expect(csvButton?.textContent?.trim()).toBe('Export CSV');
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    const menu = fixture.nativeElement.querySelector('#reports-export-menu') as HTMLElement;
+    expect(menu?.getAttribute('role')).toBe('menu');
+    const menuItems = exportMenuItems();
+    expect(menuItems.map((item) => item.textContent?.trim())).toEqual(['Download CSV', 'Download PDF']);
+
+    const csvButton = menuItems[0];
     csvButton.click();
     fixture.detectChanges();
 
     expect(csvExports.length).toBe(1);
     expect(csvExports[0]).toBe(baseReport);
     expect(component.feedback?.text).toBe('CSV export downloaded.');
+    expect(component.exportMenuOpen).toBe(false);
 
-    exportButton.click();
+    button.click();
     fixture.detectChanges();
 
-    const menuItems = Array.from(fixture.nativeElement.querySelectorAll('.reports-export-control__item') as NodeListOf<HTMLButtonElement>);
-    const pdfButton = menuItems.find((button) => button.textContent?.includes('Export PDF'));
+    const pdfButton = exportMenuItems().find((item) => item.textContent?.includes('Download PDF'));
     expect(pdfButton).toBeTruthy();
     pdfButton!.click();
     await fixture.whenStable();
@@ -179,9 +202,43 @@ describe('ReportsPageComponent', () => {
       scopeLabel: 'Organization scope'
     });
     expect(component.feedback?.text).toBe('PDF export downloaded.');
+    expect(component.exportMenuOpen).toBe(false);
   });
 
-  it('hides export controls while loading or when reports are unavailable', () => {
+  it('disables export with a clear helper when the loaded report has no exportable data', async () => {
+    const emptyReport: ReportsViewData = {
+      ...baseReport,
+      hasAnyData: false,
+      sourceCounts: {
+        members: 0,
+        departments: 0,
+        wellnessScans: 0,
+        scanResults: 0,
+        scanRequests: 0,
+        alerts: 0
+      }
+    };
+
+    setReadyReport(emptyReport);
+
+    const button = exportButton();
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('title')).toBe('Export is available when report data is available.');
+    expect(fixture.nativeElement.querySelector('.reports-export-control__helper')?.textContent).toContain(
+      'Export is available when report data is available.'
+    );
+
+    button.click();
+    fixture.detectChanges();
+    await component.exportCsv();
+    await component.exportPdf();
+
+    expect(component.exportMenuOpen).toBe(false);
+    expect(csvExports.length).toBe(0);
+    expect(pdfExports.length).toBe(0);
+  });
+
+  it('does not allow export while loading or when reports are unavailable', () => {
     component.viewState = 'loading';
     component.report = null;
     component.loading = true;
@@ -195,6 +252,42 @@ describe('ReportsPageComponent', () => {
     expect(component.canExport).toBeFalsy();
   });
 
+  it('closes the export menu on Escape and outside click', () => {
+    setReadyReport();
+
+    exportButton().click();
+    fixture.detectChanges();
+    expect(component.exportMenuOpen).toBe(true);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    fixture.detectChanges();
+    expect(component.exportMenuOpen).toBe(false);
+
+    exportButton().click();
+    fixture.detectChanges();
+    expect(component.exportMenuOpen).toBe(true);
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    fixture.detectChanges();
+    expect(component.exportMenuOpen).toBe(false);
+  });
+
+  it('keeps existing filter behavior while closing the export menu', async () => {
+    setReadyReport();
+    component.exportMenuOpen = true;
+    component.filters = {
+      ...component.filters,
+      dateRange: 'today'
+    };
+
+    component.applyFilters();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.filters.dateRange).toBe('today');
+    expect(component.exportMenuOpen).toBe(false);
+  });
+
   it('shows a safe retryable error when PDF export fails', async () => {
     pdfShouldFail = true;
     component.viewState = 'ready';
@@ -202,13 +295,10 @@ describe('ReportsPageComponent', () => {
     component.loading = false;
     fixture.detectChanges();
 
-    const exportButton = fixture.nativeElement.querySelector('.reports-export-control__toggle') as HTMLButtonElement;
-    exportButton.click();
+    exportButton().click();
     fixture.detectChanges();
 
-    const pdfButton = Array.from(fixture.nativeElement.querySelectorAll('.reports-export-control__item') as NodeListOf<HTMLButtonElement>).find(
-      (button) => button.textContent?.includes('Export PDF')
-    );
+    const pdfButton = exportMenuItems().find((button) => button.textContent?.includes('Download PDF'));
     pdfButton?.click();
     await fixture.whenStable();
     fixture.detectChanges();

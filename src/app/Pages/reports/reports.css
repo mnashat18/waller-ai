@@ -62,8 +62,9 @@
 .reports-export-control {
   position: relative;
   margin-left: auto;
-  display: inline-flex;
-  align-items: stretch;
+  display: grid;
+  justify-items: end;
+  gap: 0.35rem;
   min-width: 0;
 }
 
@@ -73,9 +74,28 @@
   gap: 0.45rem;
 }
 
+.reports-export-control__toggle:disabled {
+  transform: none;
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(30, 41, 59, 0.62);
+  box-shadow: none;
+  color: rgba(226, 232, 240, 0.62) !important;
+  cursor: not-allowed;
+}
+
 .reports-export-control__toggle span:last-child {
   font-size: 0.82rem;
   line-height: 1;
+}
+
+.reports-export-control__helper {
+  max-width: 17rem;
+  margin: 0;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .reports-export-control__menu {
