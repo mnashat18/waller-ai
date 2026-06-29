@@ -188,8 +188,8 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
 
   statusPillClass(value: string): string {
     const normalized = value.toLowerCase();
-    if (normalized === 'open') return 'reports-pill reports-pill--danger';
-    if (normalized === 'reviewed' || normalized === 'seen') return 'reports-pill reports-pill--info';
+    if (normalized === 'new' || normalized === 'open') return 'reports-pill reports-pill--danger';
+    if (normalized === 'in review' || normalized === 'reviewed' || normalized === 'seen') return 'reports-pill reports-pill--info';
     if (normalized === 'resolved' || normalized === 'overridden') return 'reports-pill reports-pill--success';
     return 'reports-pill reports-pill--neutral';
   }

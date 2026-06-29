@@ -1585,11 +1585,12 @@ export class ReportsService {
   private statusLabel(value: string): string {
     const normalized = this.normalizeText(value);
     if (!normalized) return 'Unknown';
-    if (normalized === 'new' || normalized === 'open') return 'Open';
-    if (normalized === 'seen') return 'Seen';
+    if (normalized === 'new') return 'New';
+    if (normalized === 'seen') return 'In review';
     if (normalized === 'reviewed') return 'Reviewed';
     if (normalized === 'resolved') return 'Resolved';
     if (normalized === 'overridden') return 'Overridden';
+    if (normalized === 'open') return 'Open';
     return normalized.replace(/_/g, ' ');
   }
 
@@ -1683,7 +1684,7 @@ export class ReportsService {
   }
 
   private isOpenAlertStatus(status: string): boolean {
-    return status === 'new' || status === 'open';
+    return status === 'new' || status === 'seen' || status === 'open';
   }
 
   private isPendingRequestStatus(status: string): boolean {

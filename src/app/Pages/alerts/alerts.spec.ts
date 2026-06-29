@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RouterTestingModule } from '@angular/router/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { OperationsWorkflowsService } from '../../services/operations-workflows.service';
@@ -184,6 +184,40 @@ describe('AlertsPageComponent', () => {
     expect(component.selectedAlert?.statusLabel).toBe('In review');
     expect(fixture.nativeElement.textContent as string).toContain('In review');
     expect(component.selectedAlertWorkflowAction).toBe('mark_reviewed');
+  });
+
+  it('shows a dedicated not-found state when the refreshed selected alert disappears', async () => {
+    workflowsService.getAlertsPageData = createObservableRecorder(() => of({ rows: [] } as any));
+
+    component.viewAlert(component.alerts[0]);
+    fixture.detectChanges();
+
+    await component.runSelectedAlertWorkflowAction();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.selectedAlert).toBeNull();
+    expect(component.selectedAlertMissing).toBeTruthy();
+    expect(fixture.nativeElement.textContent as string).toContain('The selected alert was not found.');
+    expect(fixture.nativeElement.textContent as string).not.toContain('Start review');
+  });
+
+  it('keeps the current detail state on workflow failure and shows the error', async () => {
+    workflowsService.startAlertReview = createObservableRecorder(() =>
+      throwError(() => ({ status: 404, message: 'The selected alert was not found.' }))
+    );
+
+    component.viewAlert(component.alerts[0]);
+    fixture.detectChanges();
+
+    await component.runSelectedAlertWorkflowAction();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.selectedAlert?.status).toBe('new');
+    expect(component.selectedAlertMissing).toBeFalsy();
+    expect(component.workflowStatusMessage).toContain('The selected alert was not found.');
+    expect(component.selectedAlertWorkflowAction).toBe('start_review');
   });
 
   it('does not expose a workflow action for resolved alerts', () => {

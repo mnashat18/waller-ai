@@ -5,7 +5,7 @@ import { Router, RouterModule } from '@angular/router';
 import { firstValueFrom, timeout } from 'rxjs';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
-import { OperationsWorkflowsService, type AlertRow } from '../../services/operations-workflows.service';
+import { OperationsWorkflowsService, type AlertRow, type AlertWorkflowRecord } from '../../services/operations-workflows.service';
 import { CardSkeletonLoaderComponent } from '../../shared/ui/card-skeleton-loader/card-skeleton-loader.component';
 import { DashboardSectionComponent } from '../../shared/ui/dashboard-section/dashboard-section.component';
 import { ErrorStateComponent } from '../../shared/ui/error-state/error-state.component';
@@ -76,6 +76,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
   alerts: AlertViewModel[] = [];
   filteredAlerts: AlertViewModel[] = [];
   selectedAlert: AlertViewModel | null = null;
+  selectedAlertMissing = false;
   errorMessage = '';
   feedbackMessage = '';
   warningMessage = '';
@@ -111,7 +112,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   @HostListener('document:keydown.escape')
   onEscapePressed(): void {
-    if (this.selectedAlert) {
+    if (this.selectedAlert || this.selectedAlertMissing) {
       this.closeAlertDetails();
     }
   }
@@ -195,6 +196,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
 
   viewAlert(row: AlertViewModel): void {
     this.selectedAlert = row;
+    this.selectedAlertMissing = false;
     this.workflowStatusMessage = '';
   }
 
@@ -203,6 +205,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.selectedAlert = null;
+    this.selectedAlertMissing = false;
     this.workflowStatusMessage = '';
   }
 
@@ -296,7 +299,14 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
         const refreshedSelected = this.alerts.find((row) => row.key === selectedAlertId);
         if (refreshedSelected) {
           this.selectedAlert = refreshedSelected;
+          this.selectedAlertMissing = false;
+        } else {
+          this.selectedAlert = null;
+          this.selectedAlertMissing = true;
+          this.workflowStatusMessage = '';
         }
+      } else {
+        this.selectedAlertMissing = false;
       }
       this.pageState = 'ready';
     } catch (error: unknown) {
@@ -306,6 +316,7 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
       const status = (error as { status?: number } | null)?.status ?? 0;
       this.alerts = [];
       this.filteredAlerts = [];
+      this.selectedAlertMissing = false;
 
       if (message.toLowerCase().includes('no active department')) {
         this.pageState = 'scopeUnavailable';
@@ -331,12 +342,23 @@ export class AlertsPageComponent implements OnInit, OnDestroy {
     this.workflowStatusMessage = 'Saving alert update...';
 
     try {
+      let workflowResponse: AlertWorkflowRecord | null = null;
       if (action === 'start_review') {
-        await firstValueFrom(this.workflows.startAlertReview(row.key).pipe(timeout(25000)));
+        workflowResponse = await firstValueFrom(this.workflows.startAlertReview(row.key).pipe(timeout(25000)));
       } else if (action === 'mark_reviewed') {
-        await firstValueFrom(this.workflows.markAlertReviewed(row.key).pipe(timeout(25000)));
+        workflowResponse = await firstValueFrom(this.workflows.markAlertReviewed(row.key).pipe(timeout(25000)));
       } else {
-        await firstValueFrom(this.workflows.resolveAlert(row.key).pipe(timeout(25000)));
+        workflowResponse = await firstValueFrom(this.workflows.resolveAlert(row.key).pipe(timeout(25000)));
+      }
+
+      const updatedStatus = this.normalizeStatus(workflowResponse?.status ?? null);
+      if (updatedStatus !== 'unknown') {
+        this.selectedAlert = {
+          ...row,
+          status: updatedStatus,
+          statusLabel: this.statusLabel(updatedStatus)
+        };
+        this.selectedAlertMissing = false;
       }
 
       this.workflowStatusMessage = '';

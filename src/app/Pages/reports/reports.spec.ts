@@ -86,4 +86,12 @@ describe('ReportsPageComponent', () => {
     );
     expect(buttons).not.toContain('Export');
   });
+
+  it('maps canonical alert status labels to the expected report pill classes', () => {
+    expect(component.statusPillClass('New')).toContain('danger');
+    expect(component.statusPillClass('In review')).toContain('info');
+    expect(component.statusPillClass('Reviewed')).toContain('info');
+    expect(component.statusPillClass('Resolved')).toContain('success');
+    expect(component.statusPillClass('Overridden')).toContain('success');
+  });
 });

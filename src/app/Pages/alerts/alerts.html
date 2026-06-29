@@ -285,4 +285,13 @@
       </footer>
     </aside>
   </app-viewport-dialog>
+} @else if (selectedAlertMissing) {
+  <section class="alerts-state-card alerts-state-card--warning">
+    <p class="alerts-state-card__title">Alert unavailable</p>
+    <p>The selected alert was not found. The record could not be refreshed from the canonical source.</p>
+    <div class="alerts-row-actions">
+      <button type="button" class="alerts-row-action alerts-row-action--secondary" (click)="refresh()">Refresh</button>
+      <button type="button" class="alerts-row-action alerts-row-action--secondary" (click)="closeAlertDetails()">Close</button>
+    </div>
+  </section>
 }
