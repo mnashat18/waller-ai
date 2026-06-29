@@ -310,6 +310,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.normalizeSignupFields();
 
     if (!this.signupFormValid) {
+      this.focusFirstInvalidSignupField();
       return;
     }
 
@@ -689,6 +690,31 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       email: false,
       password: false
     };
+  }
+
+  private focusFirstInvalidSignupField(): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    setTimeout(() => {
+      const firstInvalid = document.querySelector(
+        'input[name="firstName"], input[name="lastName"], input[name="email"], input[name="password"]'
+      ) as HTMLInputElement | null;
+      const invalidFields = [
+        { name: 'firstName', invalid: this.signupFieldError('firstName') !== null },
+        { name: 'lastName', invalid: this.signupFieldError('lastName') !== null },
+        { name: 'email', invalid: this.signupFieldError('email') !== null },
+        { name: 'password', invalid: this.signupFieldError('password') !== null }
+      ];
+      const target = invalidFields.find((field) => field.invalid);
+      if (!target) {
+        return;
+      }
+
+      const input = document.querySelector(`input[name="${target.name}"]`) as HTMLInputElement | null;
+      (input ?? firstInvalid)?.focus();
+    }, 0);
   }
 
 }

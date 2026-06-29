@@ -86,6 +86,23 @@ describe('Authlanding', () => {
     fixture.detectChanges();
   }
 
+  function signupForm(): HTMLFormElement {
+    return document.body.querySelector('form.auth-form') as HTMLFormElement;
+  }
+
+  function signupSubmitButton(): HTMLButtonElement {
+    return document.body.querySelector('form.auth-form button[type="submit"]') as HTMLButtonElement;
+  }
+
+  async function setSignupInputValue(name: string, value: string): Promise<void> {
+    const input = document.body.querySelector(`form.auth-form input[name="${name}"]`) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
   it('should create', () => {
     expect(component).toBeTruthy();
   });
@@ -112,20 +129,15 @@ describe('Authlanding', () => {
     expect(modal?.textContent).toContain('Start your organization');
   });
 
-  it('shows inline required errors for blank first and last name on blur and submit', async () => {
+  it('renders the signup form with novalidate and keeps the submit button usable before requests', async () => {
     await renderSignupModal();
 
-    component.markSignupFieldTouched('firstName');
-    component.markSignupFieldTouched('lastName');
+    const form = signupForm();
+    const button = signupSubmitButton();
 
-    expect(component.signupFieldError('firstName')).toBe('First name is required.');
-    expect(component.signupFieldError('lastName')).toBe('Last name is required.');
-
-    component.signup.email = 'owner@example.com';
-    component.signup.password = 'Password123';
-    component.submitSignup();
-
-    expect(authSpy.signup).not.toHaveBeenCalled();
+    expect(form.hasAttribute('novalidate')).toBe(true);
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toContain('Create account');
   });
 
   it('blocks names containing digits or unsupported symbols', async () => {
@@ -187,29 +199,66 @@ describe('Authlanding', () => {
     expect(component.signupFieldError('password')).toBeNull();
   });
 
-  it('does not call the registration API when client validation fails', async () => {
+  it('shows inline errors and does not call the registration API on a real blank submit', async () => {
     await renderSignupModal();
 
-    component.signup.firstName = 'John!';
-    component.signup.lastName = '';
-    component.signup.email = 'invalid-email';
-    component.signup.password = '1234567890';
+    const form = signupForm();
+    const button = signupSubmitButton();
 
-    component.submitSignup();
+    button.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
 
     expect(authSpy.signup).not.toHaveBeenCalled();
     expect(component.submitting).toBe(false);
+    expect(component.signupTouched).toEqual({
+      firstName: true,
+      lastName: true,
+      email: true,
+      password: true
+    });
+    expect(document.body.querySelector('#signup-first-name-error')?.textContent).toContain('First name is required.');
+    expect(document.body.querySelector('#signup-last-name-error')?.textContent).toContain('Last name is required.');
+    expect(document.body.querySelector('#signup-email-error')?.textContent).toContain('Email address is required.');
+    expect(document.body.querySelector('#signup-password-error')?.textContent).toContain('Password is required.');
+    expect(document.activeElement?.getAttribute('name')).toBe('firstName');
   });
 
-  it('submits normalized signup data when the client validation passes', async () => {
+  it('shows inline errors and does not call the registration API on a real invalid submit', async () => {
     await renderSignupModal();
 
-    component.signup.firstName = '  Abdul   Rhman ';
-    component.signup.lastName = " O'Connor ";
-    component.signup.email = ' owner@gmail.com ';
-    component.signup.password = 'ValidPass123';
+    await setSignupInputValue('firstName', 'John!');
+    await setSignupInputValue('lastName', '');
+    await setSignupInputValue('email', 'invalid-email');
+    await setSignupInputValue('password', '1234567890');
 
-    component.submitSignup();
+    signupSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(authSpy.signup).not.toHaveBeenCalled();
+    expect(document.body.querySelector('#signup-first-name-error')?.textContent).toContain('Enter a valid first name.');
+    expect(document.body.querySelector('#signup-last-name-error')?.textContent).toContain('Last name is required.');
+    expect(document.body.querySelector('#signup-email-error')?.textContent).toContain('Enter a valid email address.');
+    expect(document.body.querySelector('#signup-password-error')?.textContent).toContain(
+      'Password must be 10 to 128 characters and include at least one letter and one number.'
+    );
+  });
+
+  it('submits normalized signup data from a real valid form submit', async () => {
+    await renderSignupModal();
+
+    await setSignupInputValue('firstName', '  Abdul   Rhman ');
+    await setSignupInputValue('lastName', " O'Connor ");
+    await setSignupInputValue('email', ' owner@gmail.com ');
+    await setSignupInputValue('password', 'ValidPass123');
+
+    signupSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
 
     expect(authSpy.signup).toHaveBeenCalledWith({
       email: 'owner@gmail.com',

@@ -198,7 +198,7 @@
     </div>
 
     <div class="auth-card__content">
-      <form *ngIf="authMode === 'signup'" (ngSubmit)="submitSignup()" class="auth-form">
+      <form *ngIf="authMode === 'signup'" (ngSubmit)="submitSignup()" class="auth-form" novalidate>
         <label class="auth-field">
           <span>First name</span>
           <input
@@ -289,8 +289,8 @@
             {{ signupFieldError('password') }}
           </small>
         </label>
-        <p class="trial-note">After sign-in, choose the active organization and continue to the dashboard.</p>
-        <button class="auth-primary" type="submit" [disabled]="authBusy || !signupFormValid">
+        <p class="trial-note">Create your account, then set up your organization in the next step.</p>
+        <button class="auth-primary" type="submit" [disabled]="authBusy">
           {{ resolvingOrganizationAccess ? 'Preparing your organization access...' : (submitting ? 'Creating account...' : (inviteMode ? 'Create account and join organization' : 'Create account')) }}
         </button>
       </form>
