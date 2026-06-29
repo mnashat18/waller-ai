@@ -63,6 +63,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   showLoginPassword = false;
   loginEmailTouched = false;
   signupSubmitAttempted = false;
+  duplicateSignupRecovery = false;
   signupTouched = {
     firstName: false,
     lastName: false,
@@ -156,6 +157,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.authMode = mode;
     this.feedback = this.pendingAuthNotice;
     this.resolvingOrganizationAccess = false;
+    this.duplicateSignupRecovery = false;
     if (mode === 'signup') {
       this.resetSignupValidationState();
     }
@@ -224,6 +226,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.feedback = this.pendingAuthNotice;
     this.submitting = false;
     this.resolvingOrganizationAccess = false;
+    this.duplicateSignupRecovery = false;
     this.cdr.detectChanges();
     if (navigateHome && this.isAuthRoute()) {
       void this.router.navigate([], {
@@ -239,6 +242,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.authMode = mode;
     this.feedback = this.pendingAuthNotice;
     this.resolvingOrganizationAccess = false;
+    this.duplicateSignupRecovery = false;
     if (mode === 'signup') {
       this.resetSignupValidationState();
     }
@@ -336,6 +340,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     const password = this.signup.password;
 
     this.submitting = true;
+    this.duplicateSignupRecovery = false;
     this.feedback = 'Creating your account...';
     this.auth.signup({
       email,
@@ -397,6 +402,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
     this.submitting = true;
     this.resolvingOrganizationAccess = false;
+    this.duplicateSignupRecovery = false;
     this.feedback = 'Signing you in...';
     this.auth.login(this.login.email.trim(), this.login.password).pipe(
       timeout(this.authTimeoutMs),
@@ -579,7 +585,9 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       return 'Signup is taking too long. Please try again.';
     }
     if (err?.status === 409 || normalized.includes('already')) {
-      return 'This email is already registered. Try logging in instead.';
+      this.duplicateSignupRecovery = true;
+      this.login.email = this.signup.email.trim();
+      return 'An account already exists for this email. Sign in instead.';
     }
     if (err?.status === 400) {
       return 'Signup data is invalid. Please check your input.';
@@ -600,7 +608,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       return 'Login is taking too long. Please try again.';
     }
     if (err?.status === 401 || normalized.includes('invalid')) {
-      return 'Invalid email or password.';
+      return 'Email or password is incorrect.';
     }
     return 'Unable to login right now.';
   }

@@ -46,6 +46,7 @@ import { LoadingStateComponent } from '../shared/ui/loading-state/loading-state.
 export class AuthCallbackComponent implements OnInit {
   status: 'loading' | 'error' = 'loading';
   message = '';
+  private readonly callbackTimeoutMs = 15000;
 
   constructor(
     private router: Router,
@@ -55,16 +56,21 @@ export class AuthCallbackComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.auth.captureAuthFromUrl();
+    const capture = this.auth.captureAuthFromUrl();
 
-    const storedToken = this.auth.getStoredAccessToken?.() ?? null;
+    if (capture.reason || capture.errorDescription) {
+      void this.recoverToLogin(this.auth.getSafeAuthCallbackFailureNotice(capture.reason));
+      return;
+    }
+
+    const storedToken = capture.accessToken ?? this.auth.getStoredAccessToken?.() ?? null;
     const start$ = storedToken
       ? of(storedToken)
       : this.refreshAccessTokenFromCookie();
 
     start$
       .pipe(
-        timeout(15000),
+        timeout(this.callbackTimeoutMs),
         switchMap((token) => {
           if (!token) return of(null);
 
@@ -77,7 +83,7 @@ export class AuthCallbackComponent implements OnInit {
             catchError(() => of(null))
           );
         }),
-        timeout(15000),
+        timeout(this.callbackTimeoutMs),
         take(1)
       )
       .subscribe({
@@ -100,11 +106,10 @@ export class AuthCallbackComponent implements OnInit {
             return;
           }
 
-          const backendError = localStorage.getItem('auth_error');
-          this.fail(backendError || 'Unable to verify login session.');
+          await this.recoverToLogin(this.auth.getSafeAuthCallbackFailureNotice());
         },
         error: (err) => {
-          this.fail(err?.message || 'Authentication failed. Please try again.');
+          void this.recoverToLogin(this.auth.getSafeAuthCallbackFailureNotice());
         }
       });
   }
@@ -114,6 +119,17 @@ export class AuthCallbackComponent implements OnInit {
       map((token) => token ?? null),
       catchError(() => of(null))
     );
+  }
+
+  private async recoverToLogin(notice: string): Promise<void> {
+    this.auth.clearAuthRecoveryState();
+    this.auth.setAuthNotice(notice);
+
+    try {
+      await this.router.navigateByUrl('/?auth=login', { replaceUrl: true });
+    } catch {
+      this.fail(notice);
+    }
   }
 
   private fail(msg: string) {

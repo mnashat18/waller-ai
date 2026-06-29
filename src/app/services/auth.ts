@@ -121,6 +121,11 @@ export class AuthService {
       sessionStorage.removeItem('auth_refresh_attempted');
     }
 
+    if (reason || errorDescription) {
+      sessionStorage.removeItem('auth_callback_pending');
+      sessionStorage.removeItem('auth_refresh_attempted');
+    }
+
     if (accessToken || normalizedRefreshToken) {
       sessionStorage.removeItem('auth_callback_pending');
       localStorage.removeItem('auth_error');
@@ -486,8 +491,14 @@ export class AuthService {
   }
 
   clearAuthState() {
+    this.clearAuthRecoveryState();
     this.clearInviteFlowState();
+    sessionStorage.removeItem('post_auth_redirect');
+    sessionStorage.removeItem(this.refreshEndpointMissingSessionKey);
+    this.notifyAuthStateReset('auth-cleared');
+  }
 
+  clearAuthRecoveryState(): void {
     localStorage.removeItem('token');
     localStorage.removeItem('access_token');
     localStorage.removeItem('directus_token');
@@ -506,9 +517,18 @@ export class AuthService {
     sessionStorage.removeItem('auth_refresh_attempted');
     sessionStorage.removeItem('auth_callback_raw_url');
     sessionStorage.removeItem('auth_session_established_at');
-    sessionStorage.removeItem('post_auth_redirect');
     sessionStorage.removeItem(this.refreshEndpointMissingSessionKey);
-    this.notifyAuthStateReset('auth-cleared');
+    this.notifyAuthStateReset('auth-recovery-cleared');
+  }
+
+  getSafeAuthCallbackFailureNotice(reason?: string | null): string {
+    const normalizedReason = String(reason ?? '').trim().toUpperCase();
+
+    if (normalizedReason === 'INVALID_PROVIDER') {
+      return 'We couldn’t complete Google sign-in. Try signing in with your password, reset your password, or use a different Google account.';
+    }
+
+    return 'We couldn’t complete sign-in. Please try again.';
   }
 
   getAuthHeaders(accessToken?: string): HttpHeaders {

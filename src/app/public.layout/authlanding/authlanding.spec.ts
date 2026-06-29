@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
-import { BehaviorSubject, of } from 'rxjs';
+import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angular/router';
+import { BehaviorSubject, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 
 import { AuthService } from '../../services/auth';
@@ -86,12 +86,33 @@ describe('Authlanding', () => {
     fixture.detectChanges();
   }
 
+  async function renderLoginModal(): Promise<void> {
+    routeStub.snapshot.queryParamMap = convertToParamMap({ auth: 'login' });
+    queryParams$.next(convertToParamMap({ auth: 'login' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
   function signupForm(): HTMLFormElement {
     return document.body.querySelector('form.auth-form') as HTMLFormElement;
   }
 
   function signupSubmitButton(): HTMLButtonElement {
     return document.body.querySelector('form.auth-form button[type="submit"]') as HTMLButtonElement;
+  }
+
+  function loginSubmitButton(): HTMLButtonElement {
+    return document.body.querySelector('form.auth-form button[type="submit"]') as HTMLButtonElement;
+  }
+
+  async function setLoginInputValue(name: string, value: string): Promise<void> {
+    const input = document.body.querySelector(`form.auth-form input[name="${name}"]`) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
   }
 
   async function setSignupInputValue(name: string, value: string): Promise<void> {
@@ -290,5 +311,87 @@ describe('Authlanding', () => {
       first_name: 'Abdul Rhman',
       last_name: "O'Connor"
     });
+  });
+
+  it('maps duplicate-email signup failures to the exact safe copy and shows a login action', async () => {
+    authSpy.signup = vi.fn(() =>
+      throwError(() => ({
+        status: 409,
+        error: {
+          errors: [
+            {
+              message: 'INVALID_PROVIDER duplicate directus detail'
+            }
+          ]
+        }
+      }))
+    );
+
+    await renderSignupModal();
+    await setSignupInputValue('firstName', 'Abdul');
+    await setSignupInputValue('lastName', 'Rhman');
+    await setSignupInputValue('email', 'owner@gmail.com');
+    await setSignupInputValue('password', 'ValidPass123');
+
+    signupSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('An account already exists for this email. Sign in instead.');
+    expect(text).not.toContain('INVALID_PROVIDER');
+    expect(component.duplicateSignupRecovery).toBe(true);
+    expect(component.login.email).toBe('owner@gmail.com');
+    expect(
+      Array.from(document.body.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Log in')
+    ).toBe(true);
+  });
+
+  it('shows only the generic login failure copy for bad credentials', async () => {
+    authSpy.login = vi.fn(() =>
+      throwError(() => ({
+        status: 401,
+        error: {
+          errors: [
+            {
+              message: 'INVALID_PROVIDER'
+            }
+          ]
+        }
+      }))
+    );
+
+    await renderLoginModal();
+    await setLoginInputValue('loginEmail', 'owner@gmail.com');
+    await setLoginInputValue('loginPassword', 'WrongPassword123');
+
+    loginSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('Email or password is incorrect.');
+    expect(text).not.toContain('INVALID_PROVIDER');
+    expect(text).not.toContain('Directus');
+  });
+
+  it('keeps the normal successful login path unchanged', async () => {
+    const router = TestBed.inject(Router);
+    const navigateByUrlSpy = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+
+    await renderLoginModal();
+    await setLoginInputValue('loginEmail', 'owner@gmail.com');
+    await setLoginInputValue('loginPassword', 'ValidPass123');
+
+    loginSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(authSpy.login).toHaveBeenCalledWith('owner@gmail.com', 'ValidPass123');
+    expect(navigateByUrlSpy).toHaveBeenCalledWith('/app/workspace-access', { replaceUrl: true });
   });
 });

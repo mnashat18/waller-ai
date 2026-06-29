@@ -353,6 +353,13 @@
       </button>
 
       <p class="auth-feedback" *ngIf="feedback" [attr.role]="resolvingOrganizationAccess ? 'status' : 'alert'">{{ feedback }}</p>
+      <button
+        *ngIf="duplicateSignupRecovery && authMode === 'signup'"
+        type="button"
+        class="auth-secondary"
+        (click)="switchAuth('login')">
+        Log in
+      </button>
 
       <p class="auth-switch" *ngIf="authMode === 'signup'">
         Already have an account? <button type="button" (click)="switchAuth('login')">Log in</button>
