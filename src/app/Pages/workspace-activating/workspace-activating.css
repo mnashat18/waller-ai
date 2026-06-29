@@ -4,61 +4,44 @@
   place-items: center;
   padding: 2rem;
   background:
-    radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 40%),
-    radial-gradient(circle at bottom right, rgba(245, 196, 81, 0.1), transparent 36%),
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 40%),
+    radial-gradient(circle at bottom right, rgba(245, 196, 81, 0.06), transparent 36%),
     linear-gradient(180deg, #020617 0%, #0f172a 100%);
 }
 
 .workspace-activating__panel {
-  width: min(26rem, 100%);
+  width: min(27rem, 100%);
   display: grid;
-  justify-items: center;
-  gap: 1rem;
-  text-align: center;
+  justify-items: start;
+  gap: 1.1rem;
+  padding: 1.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 0.9rem;
+  background: rgba(8, 15, 28, 0.88);
+  box-shadow: 0 20px 48px rgba(2, 6, 23, 0.34);
 }
 
-.workspace-activating__spinner {
-  position: relative;
-  width: 5.75rem;
-  height: 5.75rem;
+.workspace-activating__status-icon {
+  width: 3rem;
+  height: 3rem;
   display: grid;
   place-items: center;
-}
-
-.workspace-activating__ring {
-  position: absolute;
-  inset: 0;
   border-radius: 999px;
-  border: 2px solid transparent;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(52, 211, 153, 0.28);
 }
 
-.workspace-activating__ring--outer {
-  border-top-color: rgba(125, 211, 252, 0.95);
-  border-right-color: rgba(99, 102, 241, 0.85);
-  animation: workspace-activating-spin 1.1s linear infinite;
-}
-
-.workspace-activating__ring--inner {
-  inset: 0.78rem;
-  border-top-color: rgba(245, 196, 81, 0.92);
-  border-left-color: rgba(125, 211, 252, 0.75);
-  animation: workspace-activating-spin-reverse 1.65s linear infinite;
-}
-
-.workspace-activating__core {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 999px;
-  background: radial-gradient(circle at 30% 30%, #f8fafc, #38bdf8 58%, #6366f1 100%);
-  box-shadow:
-    0 0 20px rgba(56, 189, 248, 0.55),
-    0 0 36px rgba(99, 102, 241, 0.35);
-  animation: workspace-activating-pulse 1.1s ease-in-out infinite;
+.workspace-activating__status-check {
+  color: #86efac;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .workspace-activating__copy {
   display: grid;
   gap: 0.45rem;
+  width: 100%;
 }
 
 .workspace-activating__copy h1 {
@@ -67,6 +50,13 @@
   font-size: 1.55rem;
   font-weight: 700;
   letter-spacing: 0;
+  text-align: left;
+}
+
+.workspace-activating__progress {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
 }
 
 .workspace-activating__copy p {
@@ -75,6 +65,17 @@
   font-size: 0.98rem;
   line-height: 1.5;
   letter-spacing: 0;
+  text-align: left;
+}
+
+.workspace-activating__spinner {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.24);
+  border-top-color: rgba(226, 232, 240, 0.92);
+  flex: 0 0 auto;
+  animation: workspace-activating-spin 0.9s linear infinite;
 }
 
 @keyframes workspace-activating-spin {
@@ -83,27 +84,19 @@
   }
 }
 
-@keyframes workspace-activating-spin-reverse {
-  to {
-    transform: rotate(-360deg);
+@media (max-width: 520px) {
+  .workspace-activating {
+    padding: 1rem;
   }
-}
 
-@keyframes workspace-activating-pulse {
-  0%,
-  100% {
-    transform: scale(0.92);
-    opacity: 0.84;
-  }
-  50% {
-    transform: scale(1.04);
-    opacity: 1;
+  .workspace-activating__panel {
+    padding: 1.35rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workspace-activating__ring,
-  .workspace-activating__core {
+  .workspace-activating__spinner {
     animation: none !important;
+    border-top-color: rgba(148, 163, 184, 0.24);
   }
 }

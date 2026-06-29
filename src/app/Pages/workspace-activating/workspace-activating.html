@@ -1,14 +1,15 @@
 <section class="workspace-activating" aria-labelledby="workspace-activating-title">
   <div class="workspace-activating__panel" role="status" aria-live="polite">
-    <div class="workspace-activating__spinner" aria-hidden="true">
-      <span class="workspace-activating__ring workspace-activating__ring--outer"></span>
-      <span class="workspace-activating__ring workspace-activating__ring--inner"></span>
-      <span class="workspace-activating__core"></span>
+    <div class="workspace-activating__status-icon" aria-hidden="true">
+      <span class="workspace-activating__status-check">✓</span>
     </div>
 
     <div class="workspace-activating__copy">
       <h1 id="workspace-activating-title">{{ title }}</h1>
-      <p>{{ subtitle }}</p>
+      <div class="workspace-activating__progress">
+        <span class="workspace-activating__spinner" aria-hidden="true"></span>
+        <p>{{ subtitle }}</p>
+      </div>
     </div>
   </div>
 </section>

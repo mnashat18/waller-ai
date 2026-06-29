@@ -201,26 +201,62 @@
       <form *ngIf="authMode === 'signup'" (ngSubmit)="submitSignup()" class="auth-form">
         <label class="auth-field">
           <span>First name</span>
-          <input class="auth-input" placeholder="John" [(ngModel)]="signup.firstName" name="firstName" />
+          <input
+            class="auth-input"
+            [class.auth-input--invalid]="hasSignupFieldError('firstName')"
+            placeholder="John"
+            [(ngModel)]="signup.firstName"
+            name="firstName"
+            autocomplete="given-name"
+            required
+            (blur)="markSignupFieldTouched('firstName')"
+            [attr.aria-invalid]="hasSignupFieldError('firstName') ? 'true' : null"
+            [attr.aria-describedby]="hasSignupFieldError('firstName') ? 'signup-first-name-error' : null" />
+          <small
+            id="signup-first-name-error"
+            class="auth-field__error"
+            *ngIf="hasSignupFieldError('firstName')"
+            role="alert">
+            {{ signupFieldError('firstName') }}
+          </small>
         </label>
         <label class="auth-field">
           <span>Last name</span>
-          <input class="auth-input" placeholder="Carter" [(ngModel)]="signup.lastName" name="lastName" />
+          <input
+            class="auth-input"
+            [class.auth-input--invalid]="hasSignupFieldError('lastName')"
+            placeholder="Carter"
+            [(ngModel)]="signup.lastName"
+            name="lastName"
+            autocomplete="family-name"
+            required
+            (blur)="markSignupFieldTouched('lastName')"
+            [attr.aria-invalid]="hasSignupFieldError('lastName') ? 'true' : null"
+            [attr.aria-describedby]="hasSignupFieldError('lastName') ? 'signup-last-name-error' : null" />
+          <small
+            id="signup-last-name-error"
+            class="auth-field__error"
+            *ngIf="hasSignupFieldError('lastName')"
+            role="alert">
+            {{ signupFieldError('lastName') }}
+          </small>
         </label>
         <label class="auth-field">
           <span>Email address</span>
           <input
             class="auth-input"
-            [class.auth-input--invalid]="signupEmailInvalid"
+            [class.auth-input--invalid]="hasSignupFieldError('email')"
             placeholder="you@company.com"
             [(ngModel)]="signup.email"
             name="email"
             type="email"
             autocomplete="email"
-            (blur)="signupEmailTouched = true"
-            [attr.aria-invalid]="signupEmailInvalid ? 'true' : null" />
-          <small class="auth-field__error" *ngIf="signupEmailInvalid" role="alert">
-            Enter a valid email address.
+            required
+            (blur)="markSignupFieldTouched('email')"
+            [attr.aria-invalid]="hasSignupFieldError('email') ? 'true' : null"
+            [attr.aria-describedby]="hasSignupFieldError('email') ? 'signup-email-error' : null" />
+          <small id="signup-email-error" class="auth-field__error" *ngIf="hasSignupFieldError('email')" role="alert">
+            {{ signupFieldError('email') }}
           </small>
         </label>
         <label class="auth-field">
@@ -228,21 +264,30 @@
           <div class="auth-password-wrap">
             <input
               class="auth-input auth-input--password"
+              [class.auth-input--invalid]="hasSignupFieldError('password')"
               placeholder="Create a password"
               [(ngModel)]="signup.password"
               name="password"
               autocomplete="new-password"
+              required
               [type]="showSignupPassword ? 'text' : 'password'"
+              (blur)="markSignupFieldTouched('password')"
+              [attr.aria-invalid]="hasSignupFieldError('password') ? 'true' : null"
+              [attr.aria-describedby]="hasSignupFieldError('password') ? 'signup-password-error signup-password-checklist' : 'signup-password-checklist'"
             />
             <button type="button" class="password-toggle" (click)="toggleSignupPasswordVisibility()">
               {{ showSignupPassword ? 'Hide' : 'Show' }}
             </button>
           </div>
-          <div class="auth-strength" *ngIf="signup.password" [attr.data-score]="passwordStrength.score">
-            <span class="auth-strength__track"><span class="auth-strength__fill"></span></span>
-            <span class="auth-strength__label">{{ passwordStrength.label }}</span>
-          </div>
-          <small class="auth-field__hint">Use at least 8 characters with a mix of letters and numbers.</small>
+          <ul id="signup-password-checklist" class="auth-password-checklist" aria-live="polite">
+            <li *ngFor="let item of signupPasswordChecklist" [class.is-met]="item.met">
+              <span class="auth-password-checklist__icon" aria-hidden="true">{{ item.met ? '✓' : '•' }}</span>
+              <span>{{ item.label }}</span>
+            </li>
+          </ul>
+          <small id="signup-password-error" class="auth-field__error" *ngIf="hasSignupFieldError('password')" role="alert">
+            {{ signupFieldError('password') }}
+          </small>
         </label>
         <p class="trial-note">After sign-in, choose the active organization and continue to the dashboard.</p>
         <button class="auth-primary" type="submit" [disabled]="authBusy || !signupFormValid">

@@ -127,4 +127,15 @@ describe('WorkspaceActivatingPageComponent', () => {
     expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
     expect(authSpy.refreshAuthTokenWithStoredRefreshToken).not.toHaveBeenCalled();
   });
+
+  it('renders the quiet activation progress state without changing the copy', async () => {
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.textContent).toContain('Your workspace is ready');
+    expect(host.textContent).toContain('Activating your Owner access...');
+    expect(host.querySelector('.workspace-activating__status-check')?.textContent?.trim()).toBe('✓');
+    expect(host.querySelector('.workspace-activating__spinner')).toBeTruthy();
+  });
 });

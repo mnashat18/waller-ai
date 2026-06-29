@@ -18,6 +18,9 @@ import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewpor
 })
 export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   private readonly authTimeoutMs = 20000;
+  private readonly namePattern = /^[\p{L}\p{M}' -]+$/u;
+  private readonly emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  private readonly signupPasswordPattern = /^(?=.*[A-Za-z])(?=.*\d).{10,128}$/;
 
   presentationStates = [
     {
@@ -58,8 +61,14 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
   inviteMode = false;
   showSignupPassword = false;
   showLoginPassword = false;
-  signupEmailTouched = false;
   loginEmailTouched = false;
+  signupSubmitAttempted = false;
+  signupTouched = {
+    firstName: false,
+    lastName: false,
+    email: false,
+    password: false
+  };
 
   signup = {
     firstName: '',
@@ -141,20 +150,15 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.authMode = mode;
     this.feedback = this.pendingAuthNotice;
     this.resolvingOrganizationAccess = false;
+    if (mode === 'signup') {
+      this.resetSignupValidationState();
+    }
     this.cdr.detectChanges();
     this.focusFirstField();
   }
 
   private isValidEmail(value: string): boolean {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value ?? '').trim());
-  }
-
-  get signupEmailInvalid(): boolean {
-    return (
-      this.signupEmailTouched &&
-      this.signup.email.trim().length > 0 &&
-      !this.isValidEmail(this.signup.email)
-    );
+    return this.emailPattern.test((value ?? '').trim());
   }
 
   get loginEmailInvalid(): boolean {
@@ -165,24 +169,22 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     );
   }
 
-  get passwordStrength(): { score: number; label: string } {
-    const pw = this.signup.password ?? '';
-    if (!pw.length) {
-      return { score: 0, label: '' };
-    }
-
-    let score = 0;
-    if (pw.length >= 8) score += 1;
-    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score += 1;
-    if (/\d/.test(pw)) score += 1;
-    if (/[^A-Za-z0-9]/.test(pw)) score += 1;
-
-    const labels = ['Weak', 'Weak', 'Fair', 'Good', 'Strong'];
-    return { score, label: labels[score] };
+  get signupPasswordChecklist(): { label: string; met: boolean }[] {
+    const password = this.signup.password ?? '';
+    return [
+      { label: 'At least 10 characters', met: password.length >= 10 },
+      { label: 'Includes a letter', met: /[A-Za-z]/.test(password) },
+      { label: 'Includes a number', met: /\d/.test(password) }
+    ];
   }
 
   get signupFormValid(): boolean {
-    return this.isValidEmail(this.signup.email) && this.signup.password.trim().length > 0;
+    return (
+      this.signupFieldError('firstName') === null &&
+      this.signupFieldError('lastName') === null &&
+      this.signupFieldError('email') === null &&
+      this.signupFieldError('password') === null
+    );
   }
 
   get loginFormValid(): boolean {
@@ -231,6 +233,9 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.authMode = mode;
     this.feedback = this.pendingAuthNotice;
     this.resolvingOrganizationAccess = false;
+    if (mode === 'signup') {
+      this.resetSignupValidationState();
+    }
     this.cdr.detectChanges();
     this.focusFirstField();
   }
@@ -243,8 +248,68 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.showLoginPassword = !this.showLoginPassword;
   }
 
+  markSignupFieldTouched(field: keyof typeof this.signupTouched): void {
+    this.signupTouched[field] = true;
+
+    if (field === 'firstName' || field === 'lastName') {
+      this.signup[field] = this.normalizeName(this.signup[field]);
+      return;
+    }
+
+    if (field === 'email') {
+      this.signup.email = this.signup.email.trim();
+    }
+  }
+
+  shouldShowSignupError(field: keyof typeof this.signupTouched): boolean {
+    return this.signupTouched[field] || this.signupSubmitAttempted;
+  }
+
+  hasSignupFieldError(field: keyof typeof this.signupTouched): boolean {
+    return this.shouldShowSignupError(field) && this.signupFieldError(field) !== null;
+  }
+
+  signupFieldError(field: keyof typeof this.signupTouched): string | null {
+    if (field === 'firstName') {
+      return this.validateName(this.signup.firstName, 'First name');
+    }
+
+    if (field === 'lastName') {
+      return this.validateName(this.signup.lastName, 'Last name');
+    }
+
+    if (field === 'email') {
+      const email = this.signup.email.trim();
+      if (!email) {
+        return 'Email address is required.';
+      }
+      return this.isValidEmail(email) ? null : 'Enter a valid email address.';
+    }
+
+    const password = this.signup.password ?? '';
+    if (!password) {
+      return 'Password is required.';
+    }
+    return this.signupPasswordPattern.test(password)
+      ? null
+      : 'Password must be 10 to 128 characters and include at least one letter and one number.';
+  }
+
   submitSignup() {
     if (this.authBusy) {
+      return;
+    }
+
+    this.signupSubmitAttempted = true;
+    this.signupTouched = {
+      firstName: true,
+      lastName: true,
+      email: true,
+      password: true
+    };
+    this.normalizeSignupFields();
+
+    if (!this.signupFormValid) {
       return;
     }
 
@@ -256,8 +321,8 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     this.auth.signup({
       email,
       password,
-      first_name: this.signup.firstName.trim(),
-      last_name: this.signup.lastName.trim()
+      first_name: this.signup.firstName,
+      last_name: this.signup.lastName
     }).pipe(
       timeout(this.authTimeoutMs),
       switchMap(() => {
@@ -589,6 +654,41 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
       el.style.transitionDelay = `${Math.min(index * 70, 280)}ms`;
       this.revealObserver?.observe(el);
     });
+  }
+
+  private normalizeSignupFields(): void {
+    this.signup.firstName = this.normalizeName(this.signup.firstName);
+    this.signup.lastName = this.normalizeName(this.signup.lastName);
+    this.signup.email = this.signup.email.trim();
+  }
+
+  private normalizeName(value: string): string {
+    return String(value ?? '')
+      .trim()
+      .replace(/\s+/gu, ' ');
+  }
+
+  private validateName(value: string, label: string): string | null {
+    const normalized = this.normalizeName(value);
+    if (!normalized) {
+      return `${label} is required.`;
+    }
+
+    if (!/[\p{L}\p{M}]/u.test(normalized) || !this.namePattern.test(normalized)) {
+      return `Enter a valid ${label.toLowerCase()}.`;
+    }
+
+    return null;
+  }
+
+  private resetSignupValidationState(): void {
+    this.signupSubmitAttempted = false;
+    this.signupTouched = {
+      firstName: false,
+      lastName: false,
+      email: false,
+      password: false
+    };
   }
 
 }
