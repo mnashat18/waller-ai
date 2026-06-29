@@ -1,6 +1,23 @@
 const MAX_TEXT = 255;
 const MAX_COMPANY_NAME = 120;
 const PUSH_WEBHOOK_TIMEOUT_MS = 5000;
+const PUSH_SUBSCRIPTION_TOKEN_MAX = 2048;
+const PUSH_SUBSCRIPTION_DEVICE_ID_MAX = 120;
+const PUSH_SUBSCRIPTION_PLATFORM_VALUES = new Set(['android', 'ios']);
+const PUSH_SUBSCRIPTION_RETURN_FIELDS = [
+  'id',
+  'user',
+  'business_profile',
+  'device_id',
+  'token',
+  'platform',
+  'device_label',
+  'app_version',
+  'os_version',
+  'status',
+  'is_active',
+  'last_seen_at'
+];
 
 const FORBIDDEN_INPUT_KEYS = new Set([
   'user',
@@ -902,6 +919,415 @@ function validateAlertWorkflowPayload(body) {
   };
 }
 
+function validatePushSubscriptionSyncPayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const allowed = new Set(['token', 'device_id', 'platform', 'device_label', 'app_version', 'os_version']);
+  const keys = Object.keys(body);
+  if (!keys.length) {
+    return { ok: false, message: 'token, device_id, and platform are required.' };
+  }
+
+  if (keys.some((key) => !allowed.has(key))) {
+    return { ok: false, message: 'Request contains unsupported push subscription fields.' };
+  }
+
+  const token = pickString(body.token, PUSH_SUBSCRIPTION_TOKEN_MAX);
+  if (!token) {
+    return { ok: false, message: 'token is required.' };
+  }
+
+  const deviceId = pickString(body.device_id, PUSH_SUBSCRIPTION_DEVICE_ID_MAX);
+  if (!deviceId) {
+    return { ok: false, message: 'device_id is required.' };
+  }
+
+  const platform = pickString(body.platform, 20)?.toLowerCase() ?? '';
+  if (!PUSH_SUBSCRIPTION_PLATFORM_VALUES.has(platform)) {
+    return { ok: false, message: 'platform must be android or ios.' };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      token,
+      deviceId,
+      platform,
+      deviceLabel: pickString(body.device_label, MAX_TEXT),
+      appVersion: pickString(body.app_version, 80),
+      osVersion: pickString(body.os_version, 80)
+    }
+  };
+}
+
+function validatePushSubscriptionRevokePayload(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Request body must be a JSON object.' };
+  }
+
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== 'device_id') {
+    return { ok: false, message: 'Only device_id is accepted.' };
+  }
+
+  const deviceId = pickString(body.device_id, PUSH_SUBSCRIPTION_DEVICE_ID_MAX);
+  if (!deviceId) {
+    return { ok: false, message: 'device_id is required.' };
+  }
+
+  return {
+    ok: true,
+    payload: { deviceId }
+  };
+}
+
+function selectPushSubscriptionRow(rows) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return null;
+  }
+
+  return [...rows].sort((left, right) => {
+    const leftActive = left.is_active === true ? 1 : 0;
+    const rightActive = right.is_active === true ? 1 : 0;
+    if (rightActive !== leftActive) {
+      return rightActive - leftActive;
+    }
+
+    const leftUpdated = new Date(left.date_updated ?? left.date_created ?? 0).getTime();
+    const rightUpdated = new Date(right.date_updated ?? right.date_created ?? 0).getTime();
+    if (Number.isFinite(rightUpdated) && Number.isFinite(leftUpdated) && rightUpdated !== leftUpdated) {
+      return rightUpdated - leftUpdated;
+    }
+
+    return Number(right.id ?? 0) - Number(left.id ?? 0);
+  })[0];
+}
+
+function buildPushSubscriptionSyncPlan({
+  tokenRow,
+  deviceRows,
+  userId,
+  workspaceId,
+  deviceId,
+  token,
+  platform,
+  deviceLabel,
+  appVersion,
+  osVersion,
+  now
+}) {
+  const normalizedTokenRow = tokenRow
+    ? {
+        ...tokenRow,
+        id: String(tokenRow.id),
+        user: pickString(tokenRow.user),
+        business_profile: pickString(tokenRow.business_profile),
+        device_id: pickString(tokenRow.device_id),
+        is_active: tokenRow.is_active === true
+      }
+    : null;
+
+  if (normalizedTokenRow) {
+    if (normalizedTokenRow.device_id !== deviceId) {
+      return { ok: false, code: 'CONFLICT', message: 'The submitted push token is already linked to another device.' };
+    }
+
+    if (normalizedTokenRow.is_active && normalizedTokenRow.user !== userId) {
+      return { ok: false, code: 'CONFLICT', message: 'The submitted push token is already linked to another active account.' };
+    }
+  }
+
+  const currentUserRows = (deviceRows ?? [])
+    .map((row) => ({
+      ...row,
+      id: String(row.id),
+      user: pickString(row.user),
+      business_profile: pickString(row.business_profile),
+      device_id: pickString(row.device_id),
+      is_active: row.is_active === true
+    }))
+    .filter((row) => row.user === userId && row.device_id === deviceId);
+
+  const foreignActiveRows = (deviceRows ?? []).filter((row) => {
+    const rowUser = pickString(row.user);
+    return pickString(row.device_id) === deviceId && row.is_active === true && rowUser && rowUser !== userId;
+  });
+
+  if (foreignActiveRows.length > 0) {
+    return {
+      ok: false,
+      code: 'CONFLICT',
+      message: 'The submitted push token is already linked to another active device account.'
+    };
+  }
+
+  const canonicalRow =
+    normalizedTokenRow ??
+    selectPushSubscriptionRow(currentUserRows) ??
+    selectPushSubscriptionRow(
+      (deviceRows ?? []).filter((row) => pickString(row.device_id) === deviceId && row.is_active === false)
+    ) ??
+    null;
+
+  const values = {
+    user: userId,
+    business_profile: workspaceId,
+    device_id: deviceId,
+    token,
+    platform,
+    device_label: deviceLabel,
+    app_version: appVersion,
+    os_version: osVersion,
+    status: 'active',
+    is_active: true,
+    last_seen_at: now
+  };
+
+  if (canonicalRow) {
+    const deactivateIds = currentUserRows
+      .filter((row) => row.id !== canonicalRow.id)
+      .map((row) => row.id);
+
+    return {
+      ok: true,
+      action: 'update',
+      rowId: canonicalRow.id,
+      values,
+      deactivateIds
+    };
+  }
+
+  return {
+    ok: true,
+    action: 'insert',
+    values,
+    deactivateIds: []
+  };
+}
+
+function buildPushSubscriptionRevokePlan({ deviceRows, userId, deviceId, now }) {
+  const currentUserRows = (deviceRows ?? [])
+    .map((row) => ({
+      ...row,
+      id: String(row.id),
+      user: pickString(row.user),
+      device_id: pickString(row.device_id),
+      business_profile: pickString(row.business_profile),
+      is_active: row.is_active === true
+    }))
+    .filter((row) => row.user === userId && row.device_id === deviceId);
+
+  const canonicalRow = selectPushSubscriptionRow(currentUserRows);
+  if (!canonicalRow) {
+    return {
+      ok: true,
+      action: 'noop',
+      rowId: null,
+      values: null
+    };
+  }
+
+  return {
+    ok: true,
+    action: 'update',
+    rowId: canonicalRow.id,
+    values: {
+      is_active: false,
+      status: 'inactive',
+      last_seen_at: now
+    }
+  };
+}
+
+async function loadPushSubscriptionByToken(trx, token) {
+  return trx('push_subscriptions')
+    .select(PUSH_SUBSCRIPTION_RETURN_FIELDS)
+    .where({ token })
+    .first();
+}
+
+async function loadPushSubscriptionRowsByDevice(trx, deviceId) {
+  return trx('push_subscriptions')
+    .select(PUSH_SUBSCRIPTION_RETURN_FIELDS)
+    .where({ device_id: deviceId })
+    .orderBy('is_active', 'desc')
+    .orderBy('date_updated', 'desc')
+    .orderBy('date_created', 'desc')
+    .orderBy('id', 'desc');
+}
+
+async function syncPushSubscriptionTransaction(trx, { userId, workspaceId, payload, now }) {
+  const { token, deviceId, platform, deviceLabel, appVersion, osVersion } = payload;
+
+  await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+    `wellar-push-subscriptions-sync:user:${userId}:device:${deviceId}`
+  ]);
+  await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+    `wellar-push-subscriptions-sync:token:${token}`
+  ]);
+
+  const tokenRow = await loadPushSubscriptionByToken(trx, token);
+  const deviceRows = await loadPushSubscriptionRowsByDevice(trx, deviceId);
+  const plan = buildPushSubscriptionSyncPlan({
+    tokenRow,
+    deviceRows,
+    userId,
+    workspaceId,
+    deviceId,
+    token,
+    platform,
+    deviceLabel,
+    appVersion,
+    osVersion,
+    now
+  });
+
+  if (!plan.ok) {
+    throw Object.assign(new Error(plan.message), { code: plan.code ?? 'CONFLICT' });
+  }
+
+  if (plan.action === 'update') {
+    await trx('push_subscriptions')
+      .where({ id: plan.rowId })
+      .update(plan.values)
+      .returning(PUSH_SUBSCRIPTION_RETURN_FIELDS);
+
+    if (plan.deactivateIds.length > 0) {
+      await trx('push_subscriptions')
+        .where({ user: userId, device_id: deviceId })
+        .whereNot({ id: plan.rowId })
+        .update({
+          is_active: false,
+          status: 'inactive',
+          last_seen_at: now
+        });
+    }
+  } else {
+    const [inserted] = await trx('push_subscriptions')
+      .insert(plan.values)
+      .returning(PUSH_SUBSCRIPTION_RETURN_FIELDS);
+
+    if (!inserted?.id) {
+      throw new Error('Push subscription creation did not return an id.');
+    }
+  }
+
+  return { ok: true };
+}
+
+async function revokePushSubscriptionTransaction(trx, { userId, deviceId, now }) {
+  await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+    `wellar-push-subscriptions-revoke:user:${userId}:device:${deviceId}`
+  ]);
+
+  const deviceRows = await loadPushSubscriptionRowsByDevice(trx, deviceId);
+  const plan = buildPushSubscriptionRevokePlan({
+    deviceRows,
+    userId,
+    deviceId,
+    now
+  });
+
+  if (!plan.ok) {
+    throw Object.assign(new Error(plan.message), { code: plan.code ?? 'CONFLICT' });
+  }
+
+  if (plan.action === 'update' && plan.rowId) {
+    await trx('push_subscriptions')
+      .where({ id: plan.rowId, user: userId, device_id: deviceId })
+      .update(plan.values);
+  }
+
+  return { ok: true };
+}
+
+async function handlePushSubscriptionSyncRequest(context, req, res) {
+  const { database, logger } = context;
+  const userId = req?.accountability?.user;
+  if (!userId) {
+    return unauthorized(res, 'Authentication is required.');
+  }
+
+  const validation = validatePushSubscriptionSyncPayload(req.body ?? {});
+  if (!validation.ok) {
+    return badRequest(res, validation.message);
+  }
+
+  try {
+    await database.transaction(async (trx) => {
+      const { active } = await loadOrganizationMembership(trx, userId);
+      if (!active) {
+        throw Object.assign(new Error('A verified active organization membership is required.'), {
+          code: 'FORBIDDEN'
+        });
+      }
+
+      await syncPushSubscriptionTransaction(trx, {
+        userId,
+        workspaceId: active.workspace_id,
+        payload: validation.payload,
+        now: new Date().toISOString()
+      });
+    });
+
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    if (error?.code === 'FORBIDDEN') {
+      return forbidden(res, error.message);
+    }
+    if (error?.code === 'CONFLICT') {
+      return conflict(res, error.message);
+    }
+
+    logger?.error?.(error, '[wellar] push subscription sync failed');
+    return serverError(res, 'Push subscription could not be synchronized.');
+  }
+}
+
+async function handlePushSubscriptionRevokeRequest(context, req, res) {
+  const { database, logger } = context;
+  const userId = req?.accountability?.user;
+  if (!userId) {
+    return unauthorized(res, 'Authentication is required.');
+  }
+
+  const validation = validatePushSubscriptionRevokePayload(req.body ?? {});
+  if (!validation.ok) {
+    return badRequest(res, validation.message);
+  }
+
+  try {
+    await database.transaction(async (trx) => {
+      const { active } = await loadOrganizationMembership(trx, userId);
+      if (!active) {
+        throw Object.assign(new Error('A verified active organization membership is required.'), {
+          code: 'FORBIDDEN'
+        });
+      }
+
+      await revokePushSubscriptionTransaction(trx, {
+        userId,
+        deviceId: validation.payload.deviceId,
+        now: new Date().toISOString()
+      });
+    });
+
+    return res.status(200).json({ ok: true });
+  } catch (error) {
+    if (error?.code === 'FORBIDDEN') {
+      return forbidden(res, error.message);
+    }
+    if (error?.code === 'CONFLICT') {
+      return conflict(res, error.message);
+    }
+
+    logger?.error?.(error, '[wellar] push subscription revoke failed');
+    return serverError(res, 'Push subscription could not be revoked.');
+  }
+}
+
 async function loadOrganizationProfile(trx, workspaceId) {
   return trx('business_profiles')
     .select([
@@ -1792,6 +2218,12 @@ export default {
       }
     });
 
+    router.post('/push-subscriptions/sync', async (req, res) => handlePushSubscriptionSyncRequest({ database, logger }, req, res));
+
+    router.post('/push-subscriptions/revoke', async (req, res) =>
+      handlePushSubscriptionRevokeRequest({ database, logger }, req, res)
+    );
+
     router.get('/scan-requests', async (req, res) => {
       const userId = req?.accountability?.user;
       if (!userId) {
@@ -2329,4 +2761,15 @@ export default {
       }
     });
   }
+};
+
+export {
+  buildPushSubscriptionRevokePlan,
+  buildPushSubscriptionSyncPlan,
+  handlePushSubscriptionRevokeRequest,
+  handlePushSubscriptionSyncRequest,
+  revokePushSubscriptionTransaction,
+  syncPushSubscriptionTransaction,
+  validatePushSubscriptionRevokePayload,
+  validatePushSubscriptionSyncPayload
 };
