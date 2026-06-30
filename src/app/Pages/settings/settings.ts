@@ -1,9 +1,10 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, HostListener, OnInit } from '@angular/core';
+import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, type Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
 import { CompanyContextService, type ActiveMembershipContext } from '../../core/context/company-context.service';
@@ -104,6 +105,9 @@ type AccountForm = {
   phone: string;
 };
 
+const ACCEPTED_AVATAR_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_AVATAR_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
 type UiPreferences = {
   reduceMotion: boolean;
   compactMode: boolean;
@@ -118,6 +122,8 @@ type ToastMessage = {
   text: string;
 };
 
+type ProfileSaveState = 'idle' | 'saving' | 'success' | 'error';
+
 type SettingsViewState = 'loading' | 'ready' | 'empty' | 'forbidden' | 'error';
 
 @Component({
@@ -127,7 +133,7 @@ type SettingsViewState = 'loading' | 'ready' | 'empty' | 'forbidden' | 'error';
   templateUrl: './settings.html',
   styleUrl: './settings.css'
 })
-export class SettingsPageComponent implements OnInit {
+export class SettingsPageComponent implements OnInit, OnDestroy {
   readonly tabs: Array<{ id: SettingsTabId; label: string; icon: string }> = [
     { id: 'profile', label: 'Profile', icon: 'user' },
     { id: 'preferences', label: 'Preferences', icon: 'preferences' },
@@ -149,6 +155,13 @@ export class SettingsPageComponent implements OnInit {
   accountTouched = false;
   clearingWorkspaceCache = false;
   loggingOut = false;
+  profileSaveState: ProfileSaveState = 'idle';
+  profileSaveMessage = 'No unsaved changes.';
+  avatarFile: File | null = null;
+  avatarPreviewUrl: string | null = null;
+  avatarUploadError = '';
+  avatarFileLabel = '';
+  protectedAvatarWrite = true;
 
   user: DirectusUserRow | null = null;
   memberships: SettingsMembership[] = [];
@@ -201,6 +214,10 @@ export class SettingsPageComponent implements OnInit {
     void this.loadSettings();
   }
 
+  ngOnDestroy(): void {
+    this.clearAvatarPreview();
+  }
+
   @HostListener('document:click')
   closeWorkspaceDropdown(): void {
     this.workspaceDropdownOpen = false;
@@ -235,6 +252,21 @@ export class SettingsPageComponent implements OnInit {
 
     const email = this.pickString(this.user?.email) ?? '';
     return email.slice(0, 1).toUpperCase() || 'U';
+  }
+
+  avatarUrl(): string | null {
+    const avatar = this.pickString(this.user?.avatar);
+    if (!avatar) {
+      return null;
+    }
+
+    const base = `${this.apiUrl()}/assets/${avatar}`;
+    const token = this.auth.getStoredAccessToken();
+    if (!token) {
+      return base;
+    }
+
+    return `${base}?access_token=${encodeURIComponent(token)}`;
   }
 
   currentWorkspaceName(): string {
@@ -312,12 +344,17 @@ export class SettingsPageComponent implements OnInit {
     return (
       this.accountInitial.firstName !== this.accountForm.firstName ||
       this.accountInitial.lastName !== this.accountForm.lastName ||
-      this.accountInitial.phone !== this.accountForm.phone
+      this.accountInitial.phone !== this.accountForm.phone ||
+      Boolean(this.avatarFile)
     );
   }
 
   onAccountChanged(): void {
     this.accountTouched = true;
+    if (this.profileSaveState !== 'saving') {
+      this.profileSaveState = 'idle';
+      this.profileSaveMessage = this.hasAccountChanges() ? 'Changes are waiting to be saved.' : 'No unsaved changes.';
+    }
   }
 
   cancelAccountChanges(): void {
@@ -326,7 +363,10 @@ export class SettingsPageComponent implements OnInit {
       lastName: this.accountInitial.lastName,
       phone: this.accountInitial.phone
     };
+    this.clearAvatarSelection();
     this.accountTouched = false;
+    this.profileSaveState = 'idle';
+    this.profileSaveMessage = 'No unsaved changes.';
   }
 
   async saveAccountChanges(): Promise<void> {
@@ -336,20 +376,25 @@ export class SettingsPageComponent implements OnInit {
 
     const token = this.auth.getStoredAccessToken();
     if (!token) {
-      this.pushToast('error', 'Session expired. Please sign in again.');
+      this.profileSaveState = 'error';
+      this.profileSaveMessage = 'Session expired. Please sign in again.';
       return;
     }
 
     this.savingAccount = true;
+    this.profileSaveState = 'saving';
+    this.profileSaveMessage = 'Saving account settings...';
 
     try {
+      const avatarId = await this.uploadAvatarIfNeeded(token);
       await firstValueFrom(
         this.http.patch(
           `${this.apiUrl()}/users/me`,
           {
             first_name: this.accountForm.firstName.trim() || null,
             last_name: this.accountForm.lastName.trim() || null,
-            phone: this.accountForm.phone.trim() || null
+            phone: this.accountForm.phone.trim() || null,
+            ...(avatarId ? { avatar: avatarId } : {})
           },
           {
             headers: this.auth.getAuthHeaders(token),
@@ -360,13 +405,130 @@ export class SettingsPageComponent implements OnInit {
 
       this.accountInitial = { ...this.accountForm };
       this.accountTouched = false;
-      await this.reloadCurrentUser();
+      this.clearAvatarSelection();
+      this.profileSaveState = 'success';
+      this.profileSaveMessage = 'Account settings saved.';
+      try {
+        await this.reloadCurrentUser();
+      } catch {
+        this.profileSaveMessage = 'Account settings saved. The profile view could not refresh.';
+      }
       this.pushToast('success', 'Account profile updated successfully.');
     } catch (error) {
-      this.pushToast('error', this.readError(error, 'Could not save account profile changes.'));
+      this.profileSaveState = 'error';
+      this.profileSaveMessage = this.readError(error, 'Could not save account profile changes.');
+      this.pushToast('error', 'Could not save account profile changes.');
     } finally {
       this.savingAccount = false;
     }
+  }
+
+  clearAvatarSelection(): void {
+    this.avatarFile = null;
+    this.avatarFileLabel = '';
+    this.avatarUploadError = '';
+    this.clearAvatarPreview();
+  }
+
+  onAvatarSelected(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    const file = input?.files?.[0] ?? null;
+    this.avatarUploadError = '';
+
+    if (!file) {
+      this.clearAvatarSelection();
+      return;
+    }
+
+    if (!ACCEPTED_AVATAR_MIME_TYPES.has(file.type)) {
+      this.clearAvatarSelection();
+      this.avatarUploadError = 'Choose a JPG, PNG, or WebP image.';
+      this.avatarFileLabel = '';
+      if (input) {
+        input.value = '';
+      }
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_FILE_SIZE_BYTES) {
+      this.clearAvatarSelection();
+      this.avatarUploadError = 'Choose an image smaller than 2 MB.';
+      this.avatarFileLabel = '';
+      if (input) {
+        input.value = '';
+      }
+      return;
+    }
+
+    this.avatarFile = file;
+    this.avatarFileLabel = file.name;
+    this.updateAvatarPreview(file);
+    this.onAccountChanged();
+  }
+
+  private async uploadAvatarIfNeeded(token: string): Promise<string | null> {
+    if (!this.avatarFile) {
+      return null;
+    }
+
+    const fileId = await firstValueFrom(this.uploadAvatarWithToken(token));
+    if (!fileId) {
+      throw new Error('The avatar upload could not be completed.');
+    }
+
+    const userId = this.normalizeId(this.user?.id);
+    if (userId) {
+      try {
+        await firstValueFrom(this.assignFileOwner(fileId, userId, token));
+      } catch {
+        // Keep the uploaded file even if ownership reassignment is blocked.
+      }
+    }
+
+    return fileId;
+  }
+
+  private uploadAvatarWithToken(token: string): Observable<string | null> {
+    const formData = new FormData();
+    formData.append('file', this.avatarFile as Blob);
+
+    return this.http.post<{ data?: { id?: string } }>(
+      `${this.apiUrl()}/files`,
+      formData,
+      {
+        headers: this.auth.getAuthHeaders(token),
+        withCredentials: true
+      }
+    ).pipe(
+      map((res) => this.pickString(res?.data?.id) ?? null)
+    );
+  }
+
+  private assignFileOwner(fileId: string, userId: string, token: string): Observable<unknown> {
+    return this.http.patch(
+      `${this.apiUrl()}/files/${encodeURIComponent(fileId)}`,
+      { uploaded_by: userId },
+      {
+        headers: this.auth.getAuthHeaders(token),
+        withCredentials: true
+      }
+    );
+  }
+
+  private updateAvatarPreview(file: File | null): void {
+    this.clearAvatarPreview();
+    if (!file) {
+      return;
+    }
+
+    this.avatarPreviewUrl = URL.createObjectURL(file);
+  }
+
+  private clearAvatarPreview(): void {
+    if (this.avatarPreviewUrl) {
+      URL.revokeObjectURL(this.avatarPreviewUrl);
+    }
+    this.avatarPreviewUrl = null;
   }
 
   toggleWorkspaceDropdown(event: MouseEvent): void {
@@ -531,7 +693,6 @@ export class SettingsPageComponent implements OnInit {
   }
 
   private async loadSettings(forceRefresh = false, allowRedirect = true): Promise<void> {
-    console.debug('[Settings] load start', { forceRefresh, allowRedirect });
     this.loading = true;
     this.viewState = 'loading';
     this.loadError = '';
@@ -541,7 +702,6 @@ export class SettingsPageComponent implements OnInit {
     try {
       const sessionUser = await this.auth.getCurrentUserAfterRestore();
       const userId = this.normalizeId(sessionUser?.id);
-      console.debug('[Settings] current user loaded', { userId });
 
       if (!userId) {
         this.viewState = 'error';
@@ -554,7 +714,6 @@ export class SettingsPageComponent implements OnInit {
       await this.companyContext.ensureActiveContext();
       this.user = await this.loadCurrentUserProfile(sessionUser);
       this.applyAccountForm();
-      console.debug('[Settings] workspace context loaded');
 
       const workspaceContext = await firstValueFrom(this.workspaceContextApi.getContext());
       this.memberships = workspaceContext.memberships.map((membership) => this.normalizeMembership(membership));
@@ -595,7 +754,6 @@ export class SettingsPageComponent implements OnInit {
       this.viewState = 'error';
     } finally {
       this.loading = false;
-      console.debug('[Settings] load finished', { viewState: this.viewState });
     }
   }
 
@@ -760,6 +918,9 @@ export class SettingsPageComponent implements OnInit {
 
     this.accountForm = { ...this.accountInitial };
     this.accountTouched = false;
+    this.clearAvatarSelection();
+    this.profileSaveState = 'idle';
+    this.profileSaveMessage = 'No unsaved changes.';
   }
 
   private resolveAccessRole(value: unknown): AccessRole {
@@ -917,13 +1078,21 @@ export class SettingsPageComponent implements OnInit {
 
   private readError(error: unknown, fallback: string): string {
     const err = error as any;
-    return (
-      err?.error?.errors?.[0]?.extensions?.reason ||
-      err?.error?.errors?.[0]?.message ||
-      err?.error?.message ||
-      err?.message ||
-      fallback
-    );
+    const status = Number(err?.status ?? err?.error?.status ?? 0);
+    if (status === 401) {
+      return 'Session expired. Please sign in again.';
+    }
+    if (status === 403) {
+      return 'You do not have permission to change this account.';
+    }
+    if (status === 404) {
+      return 'The requested account record was not found.';
+    }
+    if (status === 409 || status === 422) {
+      return 'One or more values could not be saved.';
+    }
+
+    return fallback;
   }
 
   private readWorkspaceContextError(error: unknown, fallback: string): string {

@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ApplicationRef, EmbeddedViewRef, ElementRef, Component, OnDestroy, TemplateRef, ViewChild, inject } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
-import { combineLatest, startWith } from 'rxjs';
+import { IsActiveMatchOptions, Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
@@ -15,11 +15,9 @@ import {
 import { AuthService } from '../../services/auth';
 import { RoleBadgeComponent } from '../../shared/ui/role-badge/role-badge.component';
 
-type SidebarNavItemVm = SidebarNavItem & { active: boolean };
-
 type SidebarNavGroupVm = {
   group: SidebarNavGroup['group'];
-  items: SidebarNavItemVm[];
+  items: SidebarNavItem[];
 };
 
 type SidebarVm = {
@@ -43,7 +41,7 @@ type AccountMenuPlacement = 'above' | 'below';
 @Component({
   selector: 'app-dashboard-sidebar',
   standalone: true,
-  imports: [CommonModule, RouterLink, RoleBadgeComponent],
+  imports: [CommonModule, RouterLink, RouterLinkActive, RoleBadgeComponent],
   templateUrl: './sidebar.component.html',
   styleUrl: './sidebar.component.css'
 })
@@ -56,13 +54,9 @@ export class SidebarComponent implements OnDestroy {
   readonly vm$ = combineLatest({
     state: this.companyContext.state$,
     activeMembership: this.companyContext.activeMembership$,
-    activeBusinessProfile: this.companyContext.activeBusinessProfile$,
-    currentUrl: this.router.events.pipe(
-      startWith(null),
-      map(() => this.router.url.split('?')[0].split('#')[0])
-    )
+    activeBusinessProfile: this.companyContext.activeBusinessProfile$
   }).pipe(
-    map(({ state, activeMembership, activeBusinessProfile, currentUrl }) => {
+    map(({ state, activeMembership, activeBusinessProfile }) => {
       const role = normalizeActiveMemberRole(activeMembership?.member_role ?? state.context.activeMemberRole);
       const companyName = activeBusinessProfile?.company_name ?? state.context.activeBusinessProfileName ?? null;
       const departmentName = this.resolveDepartmentName(
@@ -75,10 +69,7 @@ export class SidebarComponent implements OnDestroy {
       const userInitials = this.resolveUserInitials(userDisplayName, userEmail);
       const navGroups = getSidebarNavForRole(role).map((group) => ({
         group: group.group,
-        items: group.items.map((item) => ({
-          ...item,
-          active: this.isActive(item.matchRoutes, currentUrl)
-        }))
+        items: group.items
       }));
       const isEmployee = role === 'employee';
 
@@ -131,6 +122,15 @@ export class SidebarComponent implements OnDestroy {
   @ViewChild('accountMenuTemplate') private accountMenuTemplate?: TemplateRef<unknown>;
 
   onNavigate(_item: SidebarNavItem): void {}
+
+  routerLinkActiveOptions(_item: SidebarNavItem): IsActiveMatchOptions {
+    return {
+      paths: 'exact',
+      queryParams: 'ignored',
+      matrixParams: 'ignored',
+      fragment: 'ignored'
+    };
+  }
 
   ngOnDestroy(): void {
     this.destroyAccountMenuOverlay();
@@ -188,21 +188,6 @@ export class SidebarComponent implements OnDestroy {
     this.closeAccountMenu();
     this.auth.logout();
     void this.router.navigateByUrl('/');
-  }
-
-  private isActive(matchRoutes: string[], currentUrl: string): boolean {
-    const normalizedCurrent = this.normalizeUrl(currentUrl);
-    return matchRoutes.some((route) => {
-      const normalizedRoute = this.normalizeUrl(route);
-      return normalizedCurrent === normalizedRoute || normalizedCurrent.startsWith(`${normalizedRoute}/`);
-    });
-  }
-
-  private normalizeUrl(url: string): string {
-    return (url ?? '')
-      .split('?')[0]
-      .split('#')[0]
-      .replace(/\/+$/, '') || '/';
   }
 
   private companyInitial(name: string | null): string {

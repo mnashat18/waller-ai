@@ -1,4 +1,4 @@
-<div class="settings-page">
+﻿<div class="settings-page">
   <div class="settings-toasts" *ngIf="toasts.length">
     <div
       *ngFor="let toast of toasts"
@@ -11,32 +11,49 @@
   </div>
 
   <header class="settings-header">
-    <div>
-      <p class="settings-title">Account settings</p>
-      <p class="settings-subtitle">Manage your profile, preferences, and security.</p>
+    <div class="settings-header__copy">
+      <p class="settings-eyebrow">Account settings</p>
+      <h1>Account settings</h1>
+      <p class="settings-subtitle">
+        Manage your identity, local preferences, and session controls from one calm workspace.
+      </p>
     </div>
+
+    <button type="button" class="settings-refresh" (click)="refreshContext()" [disabled]="refreshing || loading">
+      {{ refreshing ? 'Refreshing...' : 'Refresh' }}
+    </button>
   </header>
 
-  <section *ngIf="loading" class="settings-loading-card">
+  <section *ngIf="loading" class="settings-state-card">
     <h2>Loading account settings...</h2>
     <p>Preparing your account context.</p>
   </section>
 
-  <section *ngIf="!loading && loadError" class="settings-error-card">
+  <section *ngIf="!loading && loadError" class="settings-state-card settings-state-card--error">
     <h2>Account settings could not be loaded</h2>
     <p>{{ loadError }}</p>
     <button type="button" class="settings-retry" (click)="refreshContext()">Retry</button>
   </section>
 
-  <div *ngIf="!loading && !loadError" class="settings-layout">
-    <aside class="settings-menu" aria-label="Account settings sections">
+  <section *ngIf="!loading && viewState === 'forbidden'" class="settings-state-card settings-state-card--warning">
+    <h2>Organization settings are restricted</h2>
+    <p>{{ membershipError || 'This workspace does not allow access to organization settings from your current role.' }}</p>
+  </section>
+
+  <section *ngIf="!loading && viewState === 'ready'" class="settings-layout">
+    <nav class="settings-tabs" role="tablist" aria-label="Account settings sections">
       <button
         *ngFor="let tab of tabs"
         type="button"
-        class="settings-menu-item"
+        class="settings-tab"
+        [attr.id]="'settings-tab-' + tab.id"
         [class.is-active]="activeTab === tab.id"
+        [attr.aria-selected]="activeTab === tab.id"
+        [attr.aria-controls]="'settings-panel-' + tab.id"
+        [attr.tabindex]="activeTab === tab.id ? '0' : '-1'"
+        role="tab"
         (click)="selectTab(tab.id)">
-        <span class="settings-menu-icon" [attr.data-icon]="tab.icon" aria-hidden="true">
+        <span class="settings-tab__icon" aria-hidden="true">
           <svg *ngIf="tab.icon === 'user'" viewBox="0 0 24 24" fill="none">
             <path d="M12 12c2.95 0 5.34-2.39 5.34-5.34A5.34 5.34 0 0 0 12 1.32a5.34 5.34 0 0 0-5.34 5.34c0 2.95 2.39 5.34 5.34 5.34Zm0 2.67c-4.15 0-8.01 2.1-8.01 4.67v2h16.02v-2c0-2.57-3.86-4.67-8-4.67Z" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
@@ -49,25 +66,66 @@
         </span>
         <span>{{ tab.label }}</span>
       </button>
-    </aside>
+    </nav>
 
-    <section class="settings-panel">
-      <ng-container *ngIf="activeTab === 'profile'">
-        <article class="settings-card hover-lift">
-          <header class="settings-card-header">
-            <div>
-              <h3>Profile</h3>
-              <p>User identity and editable account details.</p>
-            </div>
-          </header>
-
-          <div class="account-head">
-            <div class="account-avatar">{{ avatarInitials() }}</div>
-            <div class="account-meta">
-              <p class="account-name">{{ displayName() }}</p>
-              <p>{{ user?.email || 'No email' }}</p>
-            </div>
+    <div class="settings-surface">
+      <section *ngIf="activeTab === 'profile'" class="settings-panel" id="settings-panel-profile" role="tabpanel" [attr.aria-labelledby]="'settings-tab-profile'">
+        <header class="settings-surface__header">
+          <div>
+            <p class="settings-section-eyebrow">Profile</p>
+            <h2>Identity and account details</h2>
+            <p>Editable fields are saved through the signed-in Directus user contract only.</p>
           </div>
+          <span class="settings-surface__status" [class.is-saving]="profileSaveState === 'saving'" [class.is-success]="profileSaveState === 'success'" [class.is-error]="profileSaveState === 'error'">
+            {{ profileSaveMessage }}
+          </span>
+        </header>
+
+        <section class="settings-profile-hero">
+          <div class="settings-avatar" aria-hidden="true">
+            <img *ngIf="avatarPreviewUrl || avatarUrl()" [src]="avatarPreviewUrl || avatarUrl()" alt="" />
+            <span *ngIf="!avatarPreviewUrl && !avatarUrl()">{{ avatarInitials() }}</span>
+          </div>
+
+          <div class="settings-profile-identity">
+            <p class="settings-profile-name">{{ displayName() }}</p>
+            <p class="settings-profile-email">{{ user?.email || 'No email available' }}</p>
+            <p class="settings-profile-meta">
+              Signed in with {{ providerLabel() }} · {{ activeDirectusRoleLabel() }}
+            </p>
+            <div class="settings-profile-actions">
+              <button
+                *ngIf="protectedAvatarWrite"
+                type="button"
+                class="btn-secondary"
+                (click)="avatarInput.click()"
+                [disabled]="savingAccount">
+                Change photo
+              </button>
+              <span *ngIf="!protectedAvatarWrite" class="settings-inline-note">PROFILE AVATAR WRITE NOT WIRED</span>
+              <input
+                #avatarInput
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                hidden
+                (change)="onAvatarSelected($event)" />
+              <span class="settings-inline-note">Accepted: JPG, PNG, WebP. Max 2 MB.</span>
+            </div>
+            <p class="settings-inline-error" *ngIf="avatarUploadError">{{ avatarUploadError }}</p>
+            <p class="settings-inline-note" *ngIf="avatarFileLabel">Selected: {{ avatarFileLabel }}</p>
+          </div>
+        </section>
+
+        <section class="settings-block">
+          <header class="settings-block__header">
+            <div>
+              <p class="settings-section-eyebrow">Personal details</p>
+              <h3>Writable profile fields</h3>
+            </div>
+            <p class="settings-block__meta">
+              Save is disabled until the form changes.
+            </p>
+          </header>
 
           <div class="settings-grid two-col">
             <label class="settings-field">
@@ -85,41 +143,52 @@
               <input type="text" [ngModel]="accountForm.phone" (ngModelChange)="accountForm.phone = $event; onAccountChanged()" />
             </label>
 
-            <label class="settings-field readonly">
-              <span>Email</span>
-              <input type="text" [value]="user?.email || ''" readonly />
-            </label>
-
-            <label class="settings-field readonly">
-              <span>Provider</span>
-              <input type="text" [value]="providerLabel()" readonly />
-            </label>
+            <div class="settings-detail-stack">
+              <div class="settings-detail-row">
+                <span>Email</span>
+                <strong>{{ user?.email || 'Not available' }}</strong>
+              </div>
+              <div class="settings-detail-row">
+                <span>Sign-in provider</span>
+                <strong>{{ providerLabel() }}</strong>
+              </div>
+              <div class="settings-detail-row">
+                <span>Directus role</span>
+                <strong>{{ activeDirectusRoleLabel() }}</strong>
+              </div>
+            </div>
           </div>
-          <p class="settings-helper">Some account fields may be managed by your sign-in provider.</p>
+        </section>
 
-          <div class="settings-actions">
+        <div class="settings-save-bar">
+          <div>
+            <strong>{{ hasAccountChanges() ? 'Unsaved changes' : 'All changes saved' }}</strong>
+            <p>{{ profileSaveMessage }}</p>
+          </div>
+          <div class="settings-save-actions">
+            <button type="button" class="btn-secondary" (click)="cancelAccountChanges()" [disabled]="savingAccount || !hasAccountChanges()">
+              Reset
+            </button>
             <button type="button" class="btn-primary" (click)="saveAccountChanges()" [disabled]="savingAccount || !hasAccountChanges()">
               {{ savingAccount ? 'Saving...' : 'Save changes' }}
             </button>
-            <button type="button" class="btn-secondary" (click)="cancelAccountChanges()" [disabled]="savingAccount || !hasAccountChanges()">
-              Cancel
-            </button>
           </div>
-        </article>
-      </ng-container>
+        </div>
+      </section>
 
-      <ng-container *ngIf="activeTab === 'preferences'">
-        <article class="settings-card hover-lift">
-          <header class="settings-card-header space-between">
-            <div>
-              <h3>Operational UI preferences</h3>
-              <p>These preferences are stored locally on this browser.</p>
-            </div>
-            <span class="saved-hint" *ngIf="preferencesHint">{{ preferencesHint }}</span>
-          </header>
+      <section *ngIf="activeTab === 'preferences'" class="settings-panel" id="settings-panel-preferences" role="tabpanel" [attr.aria-labelledby]="'settings-tab-preferences'">
+        <header class="settings-surface__header">
+          <div>
+            <p class="settings-section-eyebrow">Preferences</p>
+            <h2>Operational UI preferences</h2>
+            <p>These preferences are stored locally in this browser.</p>
+          </div>
+          <span class="settings-surface__status">{{ preferencesHint || 'Stored locally' }}</span>
+        </header>
 
-          <div class="prefs-grid">
-            <label class="toggle-field pref-card">
+        <section class="settings-block settings-block--flat">
+          <div class="settings-preference-list">
+            <label class="settings-preference-row">
               <div>
                 <strong>Reduce motion</strong>
                 <span>Use fewer animations across operational pages.</span>
@@ -127,7 +196,7 @@
               <input type="checkbox" [ngModel]="preferences.reduceMotion" (ngModelChange)="updatePreferenceBoolean('reduceMotion', !!$event)" />
             </label>
 
-            <label class="toggle-field pref-card">
+            <label class="settings-preference-row">
               <div>
                 <strong>Compact mode</strong>
                 <span>Reduce spacing for denser dashboard views.</span>
@@ -135,7 +204,7 @@
               <input type="checkbox" [ngModel]="preferences.compactMode" (ngModelChange)="updatePreferenceBoolean('compactMode', !!$event)" />
             </label>
 
-            <label class="settings-field pref-card">
+            <label class="settings-field settings-field--inline">
               <span>Table density</span>
               <small>Choose how much spacing tables use.</small>
               <select [ngModel]="preferences.tableDensity" (ngModelChange)="updatePreferenceSelect('tableDensity', $event)">
@@ -144,7 +213,7 @@
               </select>
             </label>
 
-            <label class="settings-field pref-card">
+            <label class="settings-field settings-field--inline">
               <span>Default date range</span>
               <small>Default analytics range for reports and compliance views.</small>
               <select [ngModel]="preferences.defaultDateRange" (ngModelChange)="updatePreferenceSelect('defaultDateRange', $event)">
@@ -154,7 +223,7 @@
               </select>
             </label>
 
-            <label class="settings-field pref-card">
+            <label class="settings-field settings-field--inline">
               <span>Default landing page</span>
               <small>Page to open after login when your workspace is ready.</small>
               <select [ngModel]="preferences.defaultLandingPage" (ngModelChange)="updatePreferenceSelect('defaultLandingPage', $event)">
@@ -164,35 +233,44 @@
               </select>
             </label>
           </div>
-        </article>
-      </ng-container>
+        </section>
+      </section>
 
-      <ng-container *ngIf="activeTab === 'security'">
-        <article class="settings-card hover-lift">
-          <header class="settings-card-header">
-            <div>
-              <h3>Security</h3>
-              <p>Session and local device controls.</p>
-            </div>
-          </header>
+      <section *ngIf="activeTab === 'security'" class="settings-panel" id="settings-panel-security" role="tabpanel" [attr.aria-labelledby]="'settings-tab-security'">
+        <header class="settings-surface__header">
+          <div>
+            <p class="settings-section-eyebrow">Security</p>
+            <h2>Session and device controls</h2>
+            <p>Security-sensitive actions stay limited to the behavior already supported by the app.</p>
+          </div>
+        </header>
 
-          <div class="settings-grid two-col">
-            <div class="detail-row">
+        <section class="settings-block">
+          <div class="settings-detail-grid">
+            <div class="settings-detail-row">
               <span>Signed-in email</span>
-              <strong>{{ user?.email || 'No email' }}</strong>
+              <strong>{{ user?.email || 'No email available' }}</strong>
             </div>
-            <div class="detail-row">
+            <div class="settings-detail-row">
               <span>Auth provider</span>
               <strong>{{ providerLabel() }}</strong>
             </div>
+            <div class="settings-detail-row">
+              <span>Organization scope</span>
+              <strong>{{ scopeDetail() }}</strong>
+            </div>
+            <div class="settings-detail-row">
+              <span>Access level</span>
+              <strong>{{ roleSummaryText() }}</strong>
+            </div>
           </div>
-        </article>
+        </section>
 
-        <article class="settings-card hover-lift">
-          <header class="settings-card-header">
+        <section class="settings-block">
+          <header class="settings-block__header">
             <div>
-              <h3>Troubleshooting</h3>
-              <p>Use this when the browser is showing stale session or workspace context.</p>
+              <p class="settings-section-eyebrow">Cache</p>
+              <h3>Refresh local workspace state</h3>
             </div>
           </header>
           <p class="settings-helper">Clear cache removes local browser state and reloads the verified server context.</p>
@@ -201,22 +279,23 @@
               {{ clearingWorkspaceCache ? 'Clearing...' : 'Clear cache' }}
             </button>
           </div>
-        </article>
+        </section>
 
-        <article class="settings-card hover-lift">
-          <header class="settings-card-header">
+        <section class="settings-block">
+          <header class="settings-block__header">
             <div>
+              <p class="settings-section-eyebrow">Session</p>
               <h3>Sign out</h3>
-              <p>Ends this browser session.</p>
             </div>
           </header>
+          <p class="settings-helper">Ends this browser session without changing backend permissions.</p>
           <div class="settings-actions">
             <button type="button" class="btn-danger" (click)="logout()" [disabled]="loggingOut">
               {{ loggingOut ? 'Logging out...' : 'Log out' }}
             </button>
           </div>
-        </article>
-      </ng-container>
-    </section>
-  </div>
+        </section>
+      </section>
+    </div>
+  </section>
 </div>

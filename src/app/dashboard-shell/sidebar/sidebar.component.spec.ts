@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+﻿import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { BehaviorSubject, of } from 'rxjs';
@@ -97,9 +97,17 @@ describe('SidebarComponent', () => {
       imports: [SidebarComponent],
       providers: [
         provideRouter([
-          { path: 'app/dashboard', component: DummyRouteComponent },
+          {
+            path: 'app/dashboard',
+            component: DummyRouteComponent,
+            children: [{ path: 'child', component: DummyRouteComponent }]
+          },
           { path: 'app/workforce', component: DummyRouteComponent },
-          { path: 'app/settings', component: DummyRouteComponent }
+          { path: 'app/scan-requests', component: DummyRouteComponent },
+          { path: 'app/compliance', component: DummyRouteComponent },
+          { path: 'app/alerts', component: DummyRouteComponent },
+          { path: 'app/reports', component: DummyRouteComponent },
+          { path: 'app/company', component: DummyRouteComponent }
         ]),
         {
           provide: CompanyContextService,
@@ -126,6 +134,8 @@ describe('SidebarComponent', () => {
     fixture.detectChanges();
     await router.navigateByUrl('/app/workforce');
     fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
   });
 
   afterEach(() => {
@@ -134,9 +144,6 @@ describe('SidebarComponent', () => {
   });
 
   it('renders organization navigation without a standalone Settings item', async () => {
-    await fixture.whenStable();
-    fixture.detectChanges();
-
     const labels = Array.from(fixture.nativeElement.querySelectorAll('.app-sidebar__nav-item') as NodeListOf<HTMLElement>).map(
       (item) => item.textContent?.replace(/\s+/g, ' ').trim()
     );
@@ -147,10 +154,29 @@ describe('SidebarComponent', () => {
     expect(labels).not.toContain('Settings');
   });
 
-  it('renders the account control with identity and role', async () => {
+  it('keeps Workforce active on direct route entry and exposes aria-current', () => {
+    const activeItems = Array.from(fixture.nativeElement.querySelectorAll('.app-sidebar__nav-item.is-active')) as HTMLAnchorElement[];
+    const workforce = activeItems.find((item) => item.textContent?.includes('Workforce')) as HTMLAnchorElement | undefined;
+
+    expect(workforce).toBeTruthy();
+    expect(workforce?.getAttribute('aria-current')).toBe('page');
+    expect(Array.from(activeItems).some((item) => item.textContent?.includes('Dashboard'))).toBe(false);
+  });
+
+  it('uses exact Dashboard matching so child routes do not activate Dashboard', async () => {
+    await router.navigateByUrl('/app/dashboard/child');
+    fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
 
+    const dashboard = Array.from(fixture.nativeElement.querySelectorAll('.app-sidebar__nav-item')) as HTMLAnchorElement[];
+    const dashboardItem = dashboard.find((item) => item.textContent?.includes('Dashboard')) as HTMLAnchorElement | undefined;
+
+    expect(dashboardItem?.classList.contains('is-active')).toBe(false);
+    expect(dashboardItem?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('renders the account control with identity and role', () => {
     const control = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
     expect(control).toBeTruthy();
     expect(control.textContent).toContain('Owner User');
@@ -158,10 +184,7 @@ describe('SidebarComponent', () => {
     expect(control.textContent).toContain('Owner');
   });
 
-  it('keeps the account footer anchored without sticky positioning', async () => {
-    await fixture.whenStable();
-    fixture.detectChanges();
-
+  it('keeps the account footer anchored without sticky positioning', () => {
     const body = fixture.nativeElement.querySelector('.app-sidebar__body') as HTMLElement;
     const footer = fixture.nativeElement.querySelector('.app-sidebar__footer') as HTMLElement;
     const bodyStyles = getComputedStyle(body);
@@ -172,34 +195,18 @@ describe('SidebarComponent', () => {
     expect(footerStyles.position).not.toBe('sticky');
   });
 
-  it('keeps sidebar hover behavior free of whole-shell transforms', async () => {
-    await fixture.whenStable();
-    fixture.detectChanges();
-
+  it('keeps sidebar hover behavior free of whole-shell transforms', () => {
     expect(findRule('.app-shell .app-sidebar__panel:hover')).toBeUndefined();
 
-    const accountControlRule = collectStyleRules().find((rule) =>
-      rule.selectorText.includes('.app-sidebar__account-control:hover')
-    );
-    const accountMenuItemRule = collectStyleRules().find((rule) =>
-      rule.selectorText.includes('.app-sidebar__account-menu-item:hover')
-    );
+    const navHoverRule = collectStyleRules().find((rule) => rule.selectorText.includes('.app-sidebar__nav-item:hover'));
+    const navActiveRule = collectStyleRules().find((rule) => rule.selectorText.includes('.app-sidebar__nav-item.is-active'));
 
-    const accountControlTransform = accountControlRule?.style.getPropertyValue('transform') ?? '';
-    const accountControlTransition = accountControlRule?.style.getPropertyValue('transition') ?? '';
-    const accountMenuItemTransform = accountMenuItemRule?.style.getPropertyValue('transform') ?? '';
-    const accountMenuItemTransition = accountMenuItemRule?.style.getPropertyValue('transition') ?? '';
-
-    expect(accountControlTransform).toBe('');
-    expect(accountControlTransition).not.toContain('transform');
-    expect(accountMenuItemTransform).toBe('');
-    expect(accountMenuItemTransition).not.toContain('transform');
+    expect(navHoverRule?.style.getPropertyValue('transform') ?? '').toBe('');
+    expect(navHoverRule?.style.getPropertyValue('transition') ?? '').not.toContain('all');
+    expect(navActiveRule?.style.getPropertyValue('transform') ?? '').toBe('');
   });
 
-  it('opens a body-level account menu that routes to personal settings and closes on Escape', async () => {
-    await fixture.whenStable();
-    fixture.detectChanges();
-
+  it('opens a body-level account menu that routes to personal settings and closes on Escape', () => {
     const navigateSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
     const trigger = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
     trigger.click();
@@ -223,29 +230,6 @@ describe('SidebarComponent', () => {
     trigger.click();
     fixture.detectChanges();
 
-    const preferencesButton = Array.from(
-      document.body.querySelectorAll('.app-sidebar__account-menu-item')
-    ).find((button) => button.textContent?.trim() === 'Preferences') as HTMLButtonElement;
-    preferencesButton.click();
-    expect(navigateSpy).toHaveBeenCalledWith(['/app/settings'], {
-      queryParams: { tab: 'preferences' },
-      replaceUrl: false
-    });
-
-    trigger.click();
-    fixture.detectChanges();
-    const securityButton = Array.from(
-      document.body.querySelectorAll('.app-sidebar__account-menu-item')
-    ).find((button) => button.textContent?.trim() === 'Security') as HTMLButtonElement;
-    securityButton.click();
-    expect(navigateSpy).toHaveBeenCalledWith(['/app/settings'], {
-      queryParams: { tab: 'security' },
-      replaceUrl: false
-    });
-
-    trigger.click();
-    fixture.detectChanges();
-
     const focusedMenuItem = document.body.querySelector('.app-sidebar__account-menu-item') as HTMLButtonElement;
     focusedMenuItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     fixture.detectChanges();
@@ -254,10 +238,7 @@ describe('SidebarComponent', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('closes the account menu on outside clicks and signs out through the existing flow', async () => {
-    await fixture.whenStable();
-    fixture.detectChanges();
-
+  it('closes the account menu on outside clicks and signs out through the existing flow', () => {
     const navigateByUrlSpy = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
     const trigger = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
     trigger.click();

@@ -1,5 +1,7 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+﻿import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter, Router } from '@angular/router';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { vi } from 'vitest';
 
@@ -12,6 +14,7 @@ describe('SettingsPageComponent', () => {
   let fixture: ComponentFixture<SettingsPageComponent>;
   let component: SettingsPageComponent;
   let router: Router;
+  let httpMock: HttpTestingController;
 
   const createCompanyContextStub = (role: 'owner' | 'manager' | 'hr' = 'owner') => ({
     snapshot: () => ({
@@ -42,6 +45,8 @@ describe('SettingsPageComponent', () => {
     await TestBed.configureTestingModule({
       imports: [SettingsPageComponent],
       providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
         provideRouter([
           { path: 'app/company', component: SettingsPageComponent },
           { path: 'app/settings', component: SettingsPageComponent }
@@ -68,7 +73,10 @@ describe('SettingsPageComponent', () => {
                 id: 'user-1',
                 first_name: 'Owner',
                 last_name: 'User',
-                email: 'owner@example.com'
+                email: 'owner@example.com',
+                provider: 'email',
+                avatar: null,
+                role: { name: 'Member' }
               }),
             logout: () => undefined
           }
@@ -106,12 +114,14 @@ describe('SettingsPageComponent', () => {
     }).compileComponents();
 
     router = TestBed.inject(Router);
+    httpMock = TestBed.inject(HttpTestingController);
     vi.spyOn(router, 'navigate').mockResolvedValue(true);
     vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
 
     fixture = TestBed.createComponent(SettingsPageComponent);
     component = fixture.componentInstance;
     vi.spyOn(component as any, 'loadSettings').mockResolvedValue(undefined);
+    vi.spyOn(component as any, 'reloadCurrentUser').mockResolvedValue(undefined);
     component.loading = false;
     component.loadError = '';
     component.viewState = 'ready';
@@ -120,9 +130,16 @@ describe('SettingsPageComponent', () => {
       first_name: 'Owner',
       last_name: 'User',
       email: 'owner@example.com',
-      provider: 'email'
+      provider: 'email',
+      role: { name: 'Member' },
+      avatar: null
     };
     component.accountForm = {
+      firstName: 'Owner',
+      lastName: 'User',
+      phone: '555-1000'
+    };
+    (component as any).accountInitial = {
       firstName: 'Owner',
       lastName: 'User',
       phone: '555-1000'
@@ -134,13 +151,14 @@ describe('SettingsPageComponent', () => {
 
   afterEach(() => {
     fixture?.destroy();
+    httpMock?.verify();
   });
 
-  it('defaults to Profile and hides the Organization tab', async () => {
+  it('defaults to Profile and keeps only the supported secondary tabs visible', async () => {
     await createComponent();
 
     const labels = Array.from(
-      fixture.nativeElement.querySelectorAll('.settings-menu-item') as NodeListOf<HTMLElement>
+      fixture.nativeElement.querySelectorAll('.settings-tab') as NodeListOf<HTMLElement>
     ).map((item) => item.textContent?.replace(/\s+/g, ' ').trim());
 
     expect(labels).toEqual(['Profile', 'Preferences', 'Security']);
@@ -152,7 +170,7 @@ describe('SettingsPageComponent', () => {
   it('switches to Preferences and Security through the tab controls', async () => {
     await createComponent();
 
-    const tabs = fixture.nativeElement.querySelectorAll('.settings-menu-item') as NodeListOf<HTMLButtonElement>;
+    const tabs = fixture.nativeElement.querySelectorAll('.settings-tab') as NodeListOf<HTMLButtonElement>;
     tabs[1].click();
     fixture.detectChanges();
     expect(component.activeTab).toBe('preferences');
@@ -166,6 +184,59 @@ describe('SettingsPageComponent', () => {
     tabs[2].click();
     fixture.detectChanges();
     expect(component.activeTab).toBe('security');
+  });
+
+  it('keeps the save action disabled until the profile is dirty and rejects invalid avatar files', async () => {
+    await createComponent();
+
+    const saveButton = fixture.nativeElement.querySelector('.settings-save-bar .btn-primary') as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(true);
+
+    component.accountForm = {
+      firstName: 'Owner',
+      lastName: 'Updated',
+      phone: '555-1000'
+    };
+
+    expect(component.hasAccountChanges()).toBe(true);
+
+    component.onAvatarSelected({
+      target: {
+        files: [new File(['test'], 'avatar.txt', { type: 'text/plain' })],
+        value: ''
+      }
+    } as unknown as Event);
+
+    expect(component.avatarUploadError).toBe('Choose a JPG, PNG, or WebP image.');
+    expect(component.hasAccountChanges()).toBe(true);
+  });
+
+  it('submits supported profile changes through /users/me and refreshes the local state', async () => {
+    await createComponent();
+
+    component.accountForm = {
+      firstName: 'Owner',
+      lastName: 'Updated',
+      phone: '555-2000'
+    };
+
+    const savePromise = component.saveAccountChanges();
+    await Promise.resolve();
+
+    const request = httpMock.expectOne((req) => req.url.endsWith('/users/me'));
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({
+      first_name: 'Owner',
+      last_name: 'Updated',
+      phone: '555-2000'
+    });
+    request.flush({ data: { id: 'user-1' } });
+
+    await savePromise;
+
+    expect(component.profileSaveState).toBe('success');
+    expect(component.profileSaveMessage).toContain('Account settings saved');
+    expect((component as any).reloadCurrentUser).toHaveBeenCalled();
   });
 
   it('redirects legacy organization tab URLs for owners and HR users', async () => {

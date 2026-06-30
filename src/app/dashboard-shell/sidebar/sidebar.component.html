@@ -1,12 +1,11 @@
 <aside class="app-sidebar__panel sidebar">
   <div class="app-sidebar__brand">
-    <div class="app-sidebar__logo-wrap">
-      <img class="app-sidebar__logo" src="assets/logo/app_icon.png" alt="Wellar AI" />
-      <span class="app-sidebar__logo-pulse" aria-hidden="true"></span>
+    <div class="app-sidebar__logo-wrap" aria-hidden="true">
+      <img class="app-sidebar__logo" src="assets/logo/app_icon.png" alt="" />
     </div>
 
     <div class="app-sidebar__brand-copy">
-      <p>Wellar AI</p>
+      <p>Wellar</p>
       <h2>Operational Control Center</h2>
     </div>
   </div>
@@ -21,8 +20,11 @@
             </div>
 
             <div class="app-sidebar__company-copy">
-              <h3>{{ vm.companyName || 'Loading organization...' }}</h3>
               <p class="app-sidebar__eyebrow">Active organization</p>
+              <h3>{{ vm.companyName || 'Loading organization...' }}</h3>
+              <p class="app-sidebar__company-meta">
+                {{ vm.scopeValue }} · {{ vm.departmentValue }}
+              </p>
             </div>
 
             <app-role-badge *ngIf="vm.role" [role]="vm.role"></app-role-badge>
@@ -38,10 +40,11 @@
                 <a
                   *ngFor="let item of group.items"
                   class="app-sidebar__nav-item"
-                  [class.is-active]="item.active"
                   [routerLink]="item.route"
+                  routerLinkActive="is-active"
+                  ariaCurrentWhenActive="page"
+                  [routerLinkActiveOptions]="routerLinkActiveOptions(item)"
                   (click)="onNavigate(item)"
-                  [attr.aria-current]="item.active ? 'page' : null"
                   [attr.title]="item.description">
                   <span class="app-sidebar__nav-icon" aria-hidden="true">
                     <ng-container [ngSwitch]="item.icon">
