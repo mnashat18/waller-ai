@@ -1,7 +1,7 @@
 const MAX_TEXT = 255;
 const MAX_COMPANY_NAME = 120;
 const PUSH_WEBHOOK_TIMEOUT_MS = 5000;
-const PUSH_SUBSCRIPTION_TOKEN_MAX = 2048;
+const PUSH_SUBSCRIPTION_TOKEN_MAX = 255;
 const PUSH_SUBSCRIPTION_DEVICE_ID_MAX = 120;
 const PUSH_SUBSCRIPTION_PLATFORM_VALUES = new Set(['android', 'ios']);
 const PUSH_SUBSCRIPTION_RETURN_FIELDS = [
@@ -14,7 +14,6 @@ const PUSH_SUBSCRIPTION_RETURN_FIELDS = [
   'device_label',
   'app_version',
   'os_version',
-  'status',
   'is_active',
   'last_seen_at'
 ];
@@ -934,9 +933,20 @@ function validatePushSubscriptionSyncPayload(body) {
     return { ok: false, message: 'Request contains unsupported push subscription fields.' };
   }
 
+  const rawToken = typeof body.token === 'string' || typeof body.token === 'number' ? String(body.token).trim() : '';
+  if (rawToken.length > PUSH_SUBSCRIPTION_TOKEN_MAX) {
+    return { ok: false, message: `token must be ${PUSH_SUBSCRIPTION_TOKEN_MAX} characters or fewer.` };
+  }
+
   const token = pickString(body.token, PUSH_SUBSCRIPTION_TOKEN_MAX);
   if (!token) {
     return { ok: false, message: 'token is required.' };
+  }
+
+  const rawDeviceId =
+    typeof body.device_id === 'string' || typeof body.device_id === 'number' ? String(body.device_id).trim() : '';
+  if (rawDeviceId.length > PUSH_SUBSCRIPTION_DEVICE_ID_MAX) {
+    return { ok: false, message: `device_id must be ${PUSH_SUBSCRIPTION_DEVICE_ID_MAX} characters or fewer.` };
   }
 
   const deviceId = pickString(body.device_id, PUSH_SUBSCRIPTION_DEVICE_ID_MAX);
@@ -972,6 +982,12 @@ function validatePushSubscriptionRevokePayload(body) {
     return { ok: false, message: 'Only device_id is accepted.' };
   }
 
+  const rawDeviceId =
+    typeof body.device_id === 'string' || typeof body.device_id === 'number' ? String(body.device_id).trim() : '';
+  if (rawDeviceId.length > PUSH_SUBSCRIPTION_DEVICE_ID_MAX) {
+    return { ok: false, message: `device_id must be ${PUSH_SUBSCRIPTION_DEVICE_ID_MAX} characters or fewer.` };
+  }
+
   const deviceId = pickString(body.device_id, PUSH_SUBSCRIPTION_DEVICE_ID_MAX);
   if (!deviceId) {
     return { ok: false, message: 'device_id is required.' };
@@ -995,13 +1011,13 @@ function selectPushSubscriptionRow(rows) {
       return rightActive - leftActive;
     }
 
-    const leftUpdated = new Date(left.date_updated ?? left.date_created ?? 0).getTime();
-    const rightUpdated = new Date(right.date_updated ?? right.date_created ?? 0).getTime();
+    const leftUpdated = new Date(left.last_seen_at ?? 0).getTime();
+    const rightUpdated = new Date(right.last_seen_at ?? 0).getTime();
     if (Number.isFinite(rightUpdated) && Number.isFinite(leftUpdated) && rightUpdated !== leftUpdated) {
       return rightUpdated - leftUpdated;
     }
 
-    return Number(right.id ?? 0) - Number(left.id ?? 0);
+    return String(right.id ?? '').localeCompare(String(left.id ?? ''));
   })[0];
 }
 
@@ -1030,12 +1046,12 @@ function buildPushSubscriptionSyncPlan({
     : null;
 
   if (normalizedTokenRow) {
-    if (normalizedTokenRow.device_id !== deviceId) {
-      return { ok: false, code: 'CONFLICT', message: 'The submitted push token is already linked to another device.' };
+    if (normalizedTokenRow.user !== userId) {
+      return { ok: false, code: 'CONFLICT', message: 'Push subscription conflict.' };
     }
 
-    if (normalizedTokenRow.is_active && normalizedTokenRow.user !== userId) {
-      return { ok: false, code: 'CONFLICT', message: 'The submitted push token is already linked to another active account.' };
+    if (normalizedTokenRow.device_id !== deviceId) {
+      return { ok: false, code: 'CONFLICT', message: 'Push subscription conflict.' };
     }
   }
 
@@ -1059,16 +1075,13 @@ function buildPushSubscriptionSyncPlan({
     return {
       ok: false,
       code: 'CONFLICT',
-      message: 'The submitted push token is already linked to another active device account.'
+      message: 'Push subscription conflict.'
     };
   }
 
   const canonicalRow =
     normalizedTokenRow ??
     selectPushSubscriptionRow(currentUserRows) ??
-    selectPushSubscriptionRow(
-      (deviceRows ?? []).filter((row) => pickString(row.device_id) === deviceId && row.is_active === false)
-    ) ??
     null;
 
   const values = {
@@ -1080,7 +1093,6 @@ function buildPushSubscriptionSyncPlan({
     device_label: deviceLabel,
     app_version: appVersion,
     os_version: osVersion,
-    status: 'active',
     is_active: true,
     last_seen_at: now
   };
@@ -1135,7 +1147,6 @@ function buildPushSubscriptionRevokePlan({ deviceRows, userId, deviceId, now }) 
     rowId: canonicalRow.id,
     values: {
       is_active: false,
-      status: 'inactive',
       last_seen_at: now
     }
   };
@@ -1153,8 +1164,7 @@ async function loadPushSubscriptionRowsByDevice(trx, deviceId) {
     .select(PUSH_SUBSCRIPTION_RETURN_FIELDS)
     .where({ device_id: deviceId })
     .orderBy('is_active', 'desc')
-    .orderBy('date_updated', 'desc')
-    .orderBy('date_created', 'desc')
+    .orderBy('last_seen_at', 'desc')
     .orderBy('id', 'desc');
 }
 
@@ -1200,7 +1210,6 @@ async function syncPushSubscriptionTransaction(trx, { userId, workspaceId, paylo
         .whereNot({ id: plan.rowId })
         .update({
           is_active: false,
-          status: 'inactive',
           last_seen_at: now
         });
     }
@@ -1250,17 +1259,19 @@ async function handlePushSubscriptionSyncRequest(context, req, res) {
     return unauthorized(res, 'Authentication is required.');
   }
 
-  const validation = validatePushSubscriptionSyncPayload(req.body ?? {});
-  if (!validation.ok) {
-    return badRequest(res, validation.message);
-  }
-
   try {
     await database.transaction(async (trx) => {
       const { active } = await loadOrganizationMembership(trx, userId);
       if (!active) {
         throw Object.assign(new Error('A verified active organization membership is required.'), {
           code: 'FORBIDDEN'
+        });
+      }
+
+      const validation = validatePushSubscriptionSyncPayload(req.body ?? {});
+      if (!validation.ok) {
+        throw Object.assign(new Error(validation.message), {
+          code: 'BAD_REQUEST'
         });
       }
 
@@ -1274,14 +1285,17 @@ async function handlePushSubscriptionSyncRequest(context, req, res) {
 
     return res.status(200).json({ ok: true });
   } catch (error) {
+    if (error?.code === 'BAD_REQUEST') {
+      return badRequest(res, error.message);
+    }
     if (error?.code === 'FORBIDDEN') {
       return forbidden(res, error.message);
     }
     if (error?.code === 'CONFLICT') {
-      return conflict(res, error.message);
+      return conflict(res, 'Push subscription conflict.');
     }
 
-    logger?.error?.(error, '[wellar] push subscription sync failed');
+    logger?.error?.('[wellar] push subscription sync failed');
     return serverError(res, 'Push subscription could not be synchronized.');
   }
 }
@@ -1293,17 +1307,19 @@ async function handlePushSubscriptionRevokeRequest(context, req, res) {
     return unauthorized(res, 'Authentication is required.');
   }
 
-  const validation = validatePushSubscriptionRevokePayload(req.body ?? {});
-  if (!validation.ok) {
-    return badRequest(res, validation.message);
-  }
-
   try {
     await database.transaction(async (trx) => {
       const { active } = await loadOrganizationMembership(trx, userId);
       if (!active) {
         throw Object.assign(new Error('A verified active organization membership is required.'), {
           code: 'FORBIDDEN'
+        });
+      }
+
+      const validation = validatePushSubscriptionRevokePayload(req.body ?? {});
+      if (!validation.ok) {
+        throw Object.assign(new Error(validation.message), {
+          code: 'BAD_REQUEST'
         });
       }
 
@@ -1316,14 +1332,17 @@ async function handlePushSubscriptionRevokeRequest(context, req, res) {
 
     return res.status(200).json({ ok: true });
   } catch (error) {
+    if (error?.code === 'BAD_REQUEST') {
+      return badRequest(res, error.message);
+    }
     if (error?.code === 'FORBIDDEN') {
       return forbidden(res, error.message);
     }
     if (error?.code === 'CONFLICT') {
-      return conflict(res, error.message);
+      return conflict(res, 'Push subscription conflict.');
     }
 
-    logger?.error?.(error, '[wellar] push subscription revoke failed');
+    logger?.error?.('[wellar] push subscription revoke failed');
     return serverError(res, 'Push subscription could not be revoked.');
   }
 }

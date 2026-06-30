@@ -23,6 +23,20 @@ function createDataset(overrides = {}) {
   };
 }
 
+const PUSH_SUBSCRIPTION_FIELDS = [
+  'id',
+  'user',
+  'business_profile',
+  'device_id',
+  'token',
+  'platform',
+  'device_label',
+  'app_version',
+  'os_version',
+  'is_active',
+  'last_seen_at'
+];
+
 function resolveField(row, field) {
   if (!field) return undefined;
   if (Object.prototype.hasOwnProperty.call(row, field)) {
@@ -246,8 +260,10 @@ class FakeQuery {
     );
 
     for (const row of matches) {
+      assert.ok(!Object.prototype.hasOwnProperty.call(this.payload, 'status'));
+      assert.ok(!Object.prototype.hasOwnProperty.call(this.payload, 'date_created'));
+      assert.ok(!Object.prototype.hasOwnProperty.call(this.payload, 'date_updated'));
       Object.assign(row, this.payload);
-      row.date_updated = this.payload.date_updated ?? row.date_updated ?? '2026-01-01T00:00:00.000Z';
     }
 
     if (returnRows) {
@@ -261,10 +277,11 @@ class FakeQuery {
     const rows = this.dataset[this.tableSpec] ?? [];
     const payloads = Array.isArray(this.payload) ? this.payload : [this.payload];
     const inserted = payloads.map((payload, index) => {
+      assert.ok(!Object.prototype.hasOwnProperty.call(payload, 'status'));
+      assert.ok(!Object.prototype.hasOwnProperty.call(payload, 'date_created'));
+      assert.ok(!Object.prototype.hasOwnProperty.call(payload, 'date_updated'));
       const row = {
         id: String(rows.length + index + 1),
-        date_created: payload.date_created ?? '2026-01-01T00:00:00.000Z',
-        date_updated: payload.date_updated ?? '2026-01-01T00:00:00.000Z',
         ...payload
       };
       rows.push(row);
@@ -349,20 +366,72 @@ test('validates push subscription payloads', () => {
     }).ok
   );
   assert.ok(validatePushSubscriptionRevokePayload({ device_id: 'device-a' }).ok);
+  const tooLongToken = 'x'.repeat(256);
+  const invalid = validatePushSubscriptionSyncPayload({
+    token: tooLongToken,
+    device_id: 'device-a',
+    platform: 'android'
+  });
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.message, 'token must be 255 characters or fewer.');
 });
 
-test('sync route rejects unauthenticated, invalid, forbidden, conflict, and server errors safely', async () => {
+test('sync route enforces auth before payload validation and hides conflict details', async () => {
   const unauthorizedRes = createResponse();
   await handlePushSubscriptionSyncRequest({ database: createFakeDatabase(createDataset()), logger: null }, { accountability: {}, body: {} }, unauthorizedRes);
   assert.equal(unauthorizedRes.statusCode, 401);
 
-  const invalidRes = createResponse();
+  const forbiddenInvalidRes = createResponse();
+  const inactiveDataset = createDataset();
+  inactiveDataset.business_profiles.push({
+    id: 'workspace-a',
+    company_name: 'Acme',
+    is_active: true,
+    plan_code: 'free',
+    billing_status: 'trialing'
+  });
+  inactiveDataset.business_profile_members.push({
+    id: 'user-a-workspace-a',
+    user: 'user-a',
+    status: 'inactive',
+    member_role: 'employee',
+    business_profile: 'workspace-a',
+    department: null,
+    joined_at: '2026-01-01T00:00:00.000Z'
+  });
+  inactiveDataset.directus_users.push({
+    id: 'user-a',
+    active_business_profile: 'workspace-a',
+    active_department: null,
+    active_member_role: 'employee'
+  });
   await handlePushSubscriptionSyncRequest(
-    { database: createFakeDatabase(createDataset()), logger: null },
+    { database: createFakeDatabase(inactiveDataset), logger: null },
+    { accountability: { user: 'user-a' }, body: {} },
+    forbiddenInvalidRes
+  );
+  assert.equal(forbiddenInvalidRes.statusCode, 403);
+
+  const invalidRes = createResponse();
+  const activeDataset = createDataset();
+  seedMembership(activeDataset, { userId: 'user-a', workspaceId: 'workspace-a' });
+  await handlePushSubscriptionSyncRequest(
+    { database: createFakeDatabase(activeDataset), logger: null },
     { accountability: { user: 'user-a' }, body: { device_id: 'device-a' } },
     invalidRes
   );
   assert.equal(invalidRes.statusCode, 400);
+
+  const forbiddenAuthRes = createResponse();
+  await handlePushSubscriptionSyncRequest(
+    { database: createFakeDatabase(createDataset()), logger: null },
+    {
+      accountability: { user: 'user-a' },
+      body: { token: 'token-a', device_id: 'device-a', platform: 'android' }
+    },
+    forbiddenAuthRes
+  );
+  assert.equal(forbiddenAuthRes.statusCode, 403);
 
   const forbiddenRes = createResponse();
   await handlePushSubscriptionSyncRequest(
@@ -384,11 +453,8 @@ test('sync route rejects unauthenticated, invalid, forbidden, conflict, and serv
         device_id: 'device-a',
         token: 'token-a',
         platform: 'android',
-        status: 'active',
         is_active: true,
-        last_seen_at: '2026-01-01T09:00:00.000Z',
-        date_created: '2026-01-01T09:00:00.000Z',
-        date_updated: '2026-01-01T09:00:00.000Z'
+        last_seen_at: '2026-01-01T09:00:00.000Z'
       }
     ]
   });
@@ -403,6 +469,26 @@ test('sync route rejects unauthenticated, invalid, forbidden, conflict, and serv
     conflictRes
   );
   assert.equal(conflictRes.statusCode, 409);
+  assert.deepEqual(conflictRes.body, {
+    error: {
+      code: 'CONFLICT',
+      message: 'Push subscription conflict.'
+    }
+  });
+
+  const okDataset = createDataset();
+  seedMembership(okDataset, { userId: 'user-a', workspaceId: 'workspace-a' });
+  const okRes = createResponse();
+  await handlePushSubscriptionSyncRequest(
+    { database: createFakeDatabase(okDataset), logger: null },
+    {
+      accountability: { user: 'user-a' },
+      body: { token: 'token-a', device_id: 'device-a', platform: 'android' }
+    },
+    okRes
+  );
+  assert.equal(okRes.statusCode, 200);
+  assert.deepEqual(okRes.body, { ok: true });
 
   const serverErrorRes = createResponse();
   await handlePushSubscriptionSyncRequest(
@@ -423,14 +509,47 @@ test('sync route rejects unauthenticated, invalid, forbidden, conflict, and serv
   assert.equal(serverErrorRes.statusCode, 500);
 });
 
-test('revoke route rejects unauthenticated and invalid payloads and succeeds on the current device row', async () => {
+test('revoke route enforces auth before payload validation and succeeds on the current device row', async () => {
   const unauthorizedRes = createResponse();
   await handlePushSubscriptionRevokeRequest({ database: createFakeDatabase(createDataset()), logger: null }, { accountability: {}, body: {} }, unauthorizedRes);
   assert.equal(unauthorizedRes.statusCode, 401);
 
-  const invalidRes = createResponse();
+  const forbiddenInvalidRes = createResponse();
+  const inactiveDataset = createDataset();
+  inactiveDataset.business_profiles.push({
+    id: 'workspace-a',
+    company_name: 'Acme',
+    is_active: true,
+    plan_code: 'free',
+    billing_status: 'trialing'
+  });
+  inactiveDataset.business_profile_members.push({
+    id: 'user-a-workspace-a',
+    user: 'user-a',
+    status: 'inactive',
+    member_role: 'employee',
+    business_profile: 'workspace-a',
+    department: null,
+    joined_at: '2026-01-01T00:00:00.000Z'
+  });
+  inactiveDataset.directus_users.push({
+    id: 'user-a',
+    active_business_profile: 'workspace-a',
+    active_department: null,
+    active_member_role: 'employee'
+  });
   await handlePushSubscriptionRevokeRequest(
-    { database: createFakeDatabase(createDataset()), logger: null },
+    { database: createFakeDatabase(inactiveDataset), logger: null },
+    { accountability: { user: 'user-a' }, body: {} },
+    forbiddenInvalidRes
+  );
+  assert.equal(forbiddenInvalidRes.statusCode, 403);
+
+  const invalidRes = createResponse();
+  const activeDataset = createDataset();
+  seedMembership(activeDataset, { userId: 'user-a', workspaceId: 'workspace-a' });
+  await handlePushSubscriptionRevokeRequest(
+    { database: createFakeDatabase(activeDataset), logger: null },
     { accountability: { user: 'user-a' }, body: { other: 'field' } },
     invalidRes
   );
@@ -445,11 +564,8 @@ test('revoke route rejects unauthenticated and invalid payloads and succeeds on 
         device_id: 'device-a',
         token: 'token-a',
         platform: 'android',
-        status: 'active',
         is_active: true,
-        last_seen_at: '2026-01-01T09:00:00.000Z',
-        date_created: '2026-01-01T09:00:00.000Z',
-        date_updated: '2026-01-01T09:00:00.000Z'
+        last_seen_at: '2026-01-01T09:00:00.000Z'
       }
     ]
   });
@@ -461,6 +577,7 @@ test('revoke route rejects unauthenticated and invalid payloads and succeeds on 
     successRes
   );
   assert.equal(successRes.statusCode, 200);
+  assert.deepEqual(successRes.body, { ok: true });
   assert.equal(dataset.push_subscriptions[0].is_active, false);
 });
 
@@ -502,22 +619,20 @@ test('syncing the same user and token twice keeps one active current-token recor
   );
 
   assert.equal(dataset.push_subscriptions.length, 1);
-  assert.deepEqual(dataset.push_subscriptions[0], {
-    id: '1',
-    date_created: '2026-01-01T00:00:00.000Z',
-    date_updated: '2026-01-01T00:00:00.000Z',
-    user: 'user-a',
-    business_profile: 'workspace-a',
-    device_id: 'device-a',
-    token: 'token-a',
-    platform: 'android',
-    device_label: 'Pixel',
-    app_version: '1.0.1',
-    os_version: '15',
-    status: 'active',
-    is_active: true,
-    last_seen_at: '2026-01-01T11:00:00.000Z'
-  });
+  assert.deepEqual(Object.keys(dataset.push_subscriptions[0]).sort(), [...PUSH_SUBSCRIPTION_FIELDS].sort());
+  assert.equal(dataset.push_subscriptions[0].user, 'user-a');
+  assert.equal(dataset.push_subscriptions[0].business_profile, 'workspace-a');
+  assert.equal(dataset.push_subscriptions[0].device_id, 'device-a');
+  assert.equal(dataset.push_subscriptions[0].token, 'token-a');
+  assert.equal(dataset.push_subscriptions[0].platform, 'android');
+  assert.equal(dataset.push_subscriptions[0].device_label, 'Pixel');
+  assert.equal(dataset.push_subscriptions[0].app_version, '1.0.1');
+  assert.equal(dataset.push_subscriptions[0].os_version, '15');
+  assert.equal(dataset.push_subscriptions[0].is_active, true);
+  assert.equal(dataset.push_subscriptions[0].last_seen_at, '2026-01-01T11:00:00.000Z');
+  assert.equal('status' in dataset.push_subscriptions[0], false);
+  assert.equal('date_created' in dataset.push_subscriptions[0], false);
+  assert.equal('date_updated' in dataset.push_subscriptions[0], false);
 });
 
 test('sync rotation updates the current device row and retains other devices', async () => {
@@ -533,11 +648,8 @@ test('sync rotation updates the current device row and retains other devices', a
         device_label: 'Old phone',
         app_version: '1.0.0',
         os_version: '14',
-        status: 'active',
         is_active: true,
-        last_seen_at: '2026-01-01T09:00:00.000Z',
-        date_created: '2026-01-01T09:00:00.000Z',
-        date_updated: '2026-01-01T09:00:00.000Z'
+        last_seen_at: '2026-01-01T09:00:00.000Z'
       },
       {
         id: '2',
@@ -549,11 +661,8 @@ test('sync rotation updates the current device row and retains other devices', a
         device_label: 'Tablet',
         app_version: '2.0.0',
         os_version: '17',
-        status: 'active',
         is_active: true,
-        last_seen_at: '2026-01-01T09:00:00.000Z',
-        date_created: '2026-01-01T09:00:00.000Z',
-        date_updated: '2026-01-01T09:00:00.000Z'
+        last_seen_at: '2026-01-01T09:00:00.000Z'
       }
     ]
   });
@@ -579,8 +688,8 @@ test('sync rotation updates the current device row and retains other devices', a
   assert.equal(dataset.push_subscriptions.length, 2);
   assert.equal(dataset.push_subscriptions[0].token, 'token-new');
   assert.equal(dataset.push_subscriptions[0].is_active, true);
-  assert.equal(dataset.push_subscriptions[0].status, 'active');
   assert.equal(dataset.push_subscriptions[0].last_seen_at, '2026-01-01T12:00:00.000Z');
+  assert.equal('status' in dataset.push_subscriptions[0], false);
   assert.equal(dataset.push_subscriptions[1].token, 'token-other');
 });
 
@@ -597,11 +706,8 @@ test('revoke affects only the authenticated user current device row', async () =
         device_label: 'Pixel',
         app_version: '1.0.0',
         os_version: '15',
-        status: 'active',
         is_active: true,
-        last_seen_at: '2026-01-01T09:00:00.000Z',
-        date_created: '2026-01-01T09:00:00.000Z',
-        date_updated: '2026-01-01T09:00:00.000Z'
+        last_seen_at: '2026-01-01T09:00:00.000Z'
       },
       {
         id: '2',
@@ -613,11 +719,8 @@ test('revoke affects only the authenticated user current device row', async () =
         device_label: 'Tablet',
         app_version: '2.0.0',
         os_version: '17',
-        status: 'active',
         is_active: true,
-        last_seen_at: '2026-01-01T09:00:00.000Z',
-        date_created: '2026-01-01T09:00:00.000Z',
-        date_updated: '2026-01-01T09:00:00.000Z'
+        last_seen_at: '2026-01-01T09:00:00.000Z'
       }
     ]
   });
@@ -633,9 +736,10 @@ test('revoke affects only the authenticated user current device row', async () =
   );
 
   assert.equal(dataset.push_subscriptions[0].is_active, false);
-  assert.equal(dataset.push_subscriptions[0].status, 'inactive');
   assert.equal(dataset.push_subscriptions[0].last_seen_at, '2026-01-01T13:00:00.000Z');
   assert.equal(dataset.push_subscriptions[1].is_active, true);
+  assert.equal(dataset.push_subscriptions[1].last_seen_at, '2026-01-01T09:00:00.000Z');
+  assert.equal('status' in dataset.push_subscriptions[0], false);
 });
 
 test('a different authenticated user cannot reclaim an active token', async () => {
@@ -651,11 +755,8 @@ test('a different authenticated user cannot reclaim an active token', async () =
         device_label: 'Pixel',
         app_version: '1.0.0',
         os_version: '15',
-        status: 'active',
         is_active: true,
-        last_seen_at: '2026-01-01T09:00:00.000Z',
-        date_created: '2026-01-01T09:00:00.000Z',
-        date_updated: '2026-01-01T09:00:00.000Z'
+        last_seen_at: '2026-01-01T09:00:00.000Z'
       }
     ]
   });
@@ -675,14 +776,14 @@ test('a different authenticated user cannot reclaim an active token', async () =
         now: '2026-01-01T14:00:00.000Z'
       })
     ),
-    /another active account/i
+    /push subscription conflict/i
   );
 
   assert.equal(dataset.push_subscriptions[0].user, 'user-a');
   assert.equal(dataset.push_subscriptions[0].token, 'token-a');
 });
 
-test('token rebinding can reuse an inactive same-device row', () => {
+test('token ownership cannot be rebound through an inactive foreign row', () => {
   const dataset = createDataset({
     push_subscriptions: [
       {
@@ -695,11 +796,8 @@ test('token rebinding can reuse an inactive same-device row', () => {
         device_label: 'Old phone',
         app_version: '1.0.0',
         os_version: '14',
-        status: 'inactive',
         is_active: false,
-        last_seen_at: '2026-01-01T08:00:00.000Z',
-        date_created: '2026-01-01T08:00:00.000Z',
-        date_updated: '2026-01-01T08:00:00.000Z'
+        last_seen_at: '2026-01-01T08:00:00.000Z'
       }
     ]
   });
@@ -718,13 +816,9 @@ test('token rebinding can reuse an inactive same-device row', () => {
     now: '2026-01-01T15:00:00.000Z'
   });
 
-  assert.equal(plan.ok, true);
-  assert.equal(plan.action, 'update');
-  assert.equal(plan.rowId, '1');
-  assert.equal(plan.values.user, 'user-new');
-  assert.equal(plan.values.business_profile, 'workspace-new');
-  assert.equal(plan.values.token, 'token-new');
-  assert.equal(plan.values.is_active, true);
+  assert.equal(plan.ok, false);
+  assert.equal(plan.code, 'CONFLICT');
+  assert.equal(plan.message, 'Push subscription conflict.');
 });
 
 test('revoke plan is a no-op when no current row exists', () => {
@@ -736,4 +830,52 @@ test('revoke plan is a no-op when no current row exists', () => {
   });
 
   assert.equal(plan.action, 'noop');
+});
+
+test('sync route rejects token longer than 255 as payload validation 400', async () => {
+  const dataset = createDataset();
+  seedMembership(dataset, { userId: 'user-a', workspaceId: 'workspace-a' });
+  const res = createResponse();
+
+  await handlePushSubscriptionSyncRequest(
+    { database: createFakeDatabase(dataset), logger: null },
+    {
+      accountability: { user: 'user-a' },
+      body: { token: 'x'.repeat(256), device_id: 'device-a', platform: 'android' }
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(dataset.push_subscriptions.length, 0);
+});
+
+test('canonical row selection depends only on is_active, last_seen_at, and string id ordering', () => {
+  const plan = buildPushSubscriptionRevokePlan({
+    deviceRows: [
+      {
+        id: '9',
+        user: 'user-a',
+        business_profile: 'workspace-a',
+        device_id: 'device-a',
+        token: 'token-a',
+        is_active: true,
+        last_seen_at: '2026-01-01T09:00:00.000Z'
+      },
+      {
+        id: '10',
+        user: 'user-a',
+        business_profile: 'workspace-a',
+        device_id: 'device-a',
+        token: 'token-b',
+        is_active: true,
+        last_seen_at: '2026-01-01T09:00:00.000Z'
+      }
+    ],
+    userId: 'user-a',
+    deviceId: 'device-a',
+    now: '2026-01-01T16:00:00.000Z'
+  });
+
+  assert.equal(plan.rowId, '9');
 });
