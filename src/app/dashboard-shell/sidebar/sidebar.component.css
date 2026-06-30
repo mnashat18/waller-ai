@@ -1,3 +1,16 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.app-sidebar__body {
+  display: grid;
+  gap: 0.95rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .app-sidebar__company {
   display: block;
   margin: 0;
@@ -104,4 +117,217 @@
   white-space: normal;
   word-break: normal;
   overflow-wrap: break-word;
+}
+
+.app-sidebar__footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 8;
+  margin-top: auto;
+  padding-top: 0.6rem;
+  background: linear-gradient(180deg, rgba(5, 9, 18, 0), rgba(5, 9, 18, 0.96) 32%);
+}
+
+.app-sidebar__account-control {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 3.8rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    radial-gradient(220px at 0% 0%, rgba(56, 189, 248, 0.1), transparent 52%),
+    rgba(9, 14, 28, 0.94);
+  color: #e2e8f0;
+  padding: 0.7rem 0.78rem;
+  text-align: left;
+  box-shadow:
+    0 18px 34px rgba(2, 6, 23, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.app-sidebar__account-control:hover,
+.app-sidebar__account-control:focus-visible,
+.app-sidebar__account-control.is-open {
+  transform: translateY(-1px);
+  border-color: rgba(125, 211, 252, 0.28);
+  background:
+    radial-gradient(220px at 0% 0%, rgba(56, 189, 248, 0.14), transparent 52%),
+    rgba(10, 15, 30, 0.98);
+  box-shadow:
+    0 22px 40px rgba(2, 6, 23, 0.34),
+    0 0 0 1px rgba(56, 189, 248, 0.06) inset;
+}
+
+.app-sidebar__account-avatar {
+  width: 2.55rem;
+  height: 2.55rem;
+  border-radius: 0.92rem;
+  display: grid;
+  place-items: center;
+  font-family: 'Space Grotesk', 'Manrope', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 900;
+  color: #08111f;
+  background: linear-gradient(135deg, #7dd3fc, #818cf8);
+  box-shadow: 0 12px 24px rgba(56, 189, 248, 0.22);
+}
+
+.app-sidebar__account-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.08rem;
+}
+
+.app-sidebar__account-copy strong,
+.app-sidebar__account-copy small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-sidebar__account-copy strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.app-sidebar__account-copy small {
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.app-sidebar__account-role {
+  justify-self: end;
+}
+
+.app-sidebar__account-chevron {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: rgba(226, 232, 240, 0.72);
+  display: grid;
+  place-items: center;
+}
+
+.app-sidebar__account-chevron svg {
+  width: 100%;
+  height: 100%;
+}
+
+.app-sidebar__account-menu {
+  position: fixed;
+  z-index: 140;
+  pointer-events: auto;
+  display: block;
+}
+
+.app-sidebar__account-menu-panel {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 13rem;
+  border: 1px solid rgba(71, 85, 105, 0.58);
+  border-radius: 1rem;
+  background: rgba(8, 12, 24, 0.98);
+  box-shadow: 0 22px 38px rgba(2, 6, 23, 0.42);
+  padding: 0.5rem;
+  overflow-y: auto;
+}
+
+.app-sidebar__account-menu--above .app-sidebar__account-menu-panel {
+  box-shadow: 0 -22px 38px rgba(2, 6, 23, 0.38);
+}
+
+.app-sidebar__account-menu-header {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.18rem 0.2rem 0.35rem;
+}
+
+.app-sidebar__account-menu-header p,
+.app-sidebar__account-menu-header span {
+  margin: 0;
+  line-height: 1.25;
+}
+
+.app-sidebar__account-menu-header p {
+  color: #f8fafc;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.app-sidebar__account-menu-header span {
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.app-sidebar__account-menu-divider {
+  height: 1px;
+  margin: 0.2rem 0.1rem;
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.app-sidebar__account-menu-item {
+  width: 100%;
+  border: 0;
+  border-radius: 0.78rem;
+  background: transparent;
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.app-sidebar__account-menu-item:hover,
+.app-sidebar__account-menu-item:focus-visible {
+  background: rgba(56, 189, 248, 0.12);
+  color: #f8fafc;
+  transform: translateX(1px);
+}
+
+.app-sidebar__account-menu-item--danger {
+  color: #fecdd3;
+}
+
+.app-sidebar__account-menu-item--danger:hover,
+.app-sidebar__account-menu-item--danger:focus-visible {
+  background: rgba(251, 113, 133, 0.12);
+  color: #ffe4e6;
+}
+
+@media (max-width: 760px) {
+  .app-sidebar__account-control {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .app-sidebar__account-role,
+  .app-sidebar__account-chevron {
+    display: none;
+  }
+
+  .app-sidebar__account-menu {
+    width: calc(100vw - 1.25rem) !important;
+    max-width: 22rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar__account-control,
+  .app-sidebar__account-menu-item {
+    transition: none;
+  }
 }

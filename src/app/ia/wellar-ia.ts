@@ -255,12 +255,12 @@ export const WORKSPACE_ROUTE_MAP: readonly WorkspaceRouteDefinition[] = [
   {
     id: 'settings',
     path: 'settings',
-    label: 'Settings',
-    title: 'Settings',
-    description: 'User profile, verified workspace context, local preferences, and session controls.',
+    label: 'Account settings',
+    title: 'Account settings',
+    description: 'Personal profile, preferences, and session controls.',
     icon: 'settings',
     roles: ['owner', 'hr'],
-    sidebar: true,
+    sidebar: false,
     section: 'admin'
   },
   {
@@ -359,14 +359,6 @@ export const SIDEBAR_NAV: readonly SidebarNavGroup[] = [
         icon: 'company',
         description: 'Open the organization overview, departments, and access management surface.',
         matchRoutes: ['/app/company'],
-        roles: ['owner', 'hr']
-      },
-      {
-        label: 'Settings',
-        route: '/app/settings',
-        icon: 'settings',
-        description: 'Manage your profile, verified workspace context, preferences, and session controls.',
-        matchRoutes: ['/app/settings'],
         roles: ['owner', 'hr']
       }
     ]

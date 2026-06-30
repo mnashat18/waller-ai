@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, HostListener, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
@@ -24,7 +24,7 @@ const PREF_KEYS = {
   defaultLandingPage: 'wellar_ui_default_landing_page_v1'
 } as const;
 
-type SettingsTabId = 'profile' | 'workspace' | 'preferences' | 'security';
+type SettingsTabId = 'profile' | 'preferences' | 'security';
 type ToastType = 'success' | 'error' | 'info';
 type TableDensity = 'comfortable' | 'compact';
 type DefaultDateRange = 'today' | 'last_7_days' | 'last_30_days';
@@ -130,7 +130,6 @@ type SettingsViewState = 'loading' | 'ready' | 'empty' | 'forbidden' | 'error';
 export class SettingsPageComponent implements OnInit {
   readonly tabs: Array<{ id: SettingsTabId; label: string; icon: string }> = [
     { id: 'profile', label: 'Profile', icon: 'user' },
-    { id: 'workspace', label: 'Organization', icon: 'workspace' },
     { id: 'preferences', label: 'Preferences', icon: 'preferences' },
     { id: 'security', label: 'Security', icon: 'security' }
   ];
@@ -184,6 +183,7 @@ export class SettingsPageComponent implements OnInit {
   constructor(
     private http: HttpClient,
     private auth: AuthService,
+    private route: ActivatedRoute,
     private router: Router,
     private companyContext: CompanyContextService,
     private workspaceContextApi: WorkspaceContextApiService
@@ -191,6 +191,13 @@ export class SettingsPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadPreferences();
+    const requestedTab = this.normalizeInitialTab(this.route.snapshot.queryParamMap.get('tab'));
+    if (requestedTab === 'organization') {
+      void this.redirectLegacyOrganizationTab();
+      return;
+    }
+
+    this.activeTab = requestedTab ?? 'profile';
     void this.loadSettings();
   }
 
@@ -207,6 +214,12 @@ export class SettingsPageComponent implements OnInit {
 
   selectTab(tab: SettingsTabId): void {
     this.activeTab = tab;
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab },
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
   }
 
   avatarInitials(): string {
@@ -494,6 +507,27 @@ export class SettingsPageComponent implements OnInit {
 
   trackByMembershipId(_index: number, membership: SettingsMembership): string {
     return membership.id;
+  }
+
+  private normalizeInitialTab(value: string | null): SettingsTabId | 'organization' | null {
+    const normalized = (value ?? '').trim().toLowerCase();
+    if (normalized === 'profile' || normalized === 'preferences' || normalized === 'security') {
+      return normalized;
+    }
+    if (normalized === 'organization') {
+      return 'organization';
+    }
+    return null;
+  }
+
+  private async redirectLegacyOrganizationTab(): Promise<void> {
+    const role = this.resolveAccessRole(this.companyContext.snapshot().context.activeMemberRole);
+    if (role === 'owner' || role === 'hr') {
+      await this.router.navigateByUrl('/app/company', { replaceUrl: true });
+      return;
+    }
+
+    this.activeTab = 'profile';
   }
 
   private async loadSettings(forceRefresh = false, allowRedirect = true): Promise<void> {

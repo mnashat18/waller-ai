@@ -1,9 +1,11 @@
 import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, of } from 'rxjs';
+import { vi } from 'vitest';
 
 import { CompanyContextService, type CompanyContextState } from '../../core/context/company-context.service';
+import { AuthService } from '../../services/auth';
 import { SidebarComponent } from './sidebar.component';
 
 @Component({
@@ -39,12 +41,12 @@ const createContextState = (): CompanyContextState => ({
 });
 
 describe('SidebarComponent', () => {
-  let component: SidebarComponent;
   let fixture: ComponentFixture<SidebarComponent>;
   let router: Router;
   let state$: BehaviorSubject<CompanyContextState>;
   let activeMembership$: BehaviorSubject<any>;
   let activeBusinessProfile$: BehaviorSubject<any>;
+  let authLogoutSpy: any;
 
   beforeEach(async () => {
     state$ = new BehaviorSubject<CompanyContextState>(createContextState());
@@ -62,42 +64,146 @@ describe('SidebarComponent', () => {
       providers: [
         provideRouter([
           { path: 'app/dashboard', component: DummyRouteComponent },
-          { path: 'app/workforce', component: DummyRouteComponent }
+          { path: 'app/workforce', component: DummyRouteComponent },
+          { path: 'app/settings', component: DummyRouteComponent }
         ]),
         {
           provide: CompanyContextService,
           useValue: {
-            ensureLoaded: () => state$.asObservable(),
+            ensureLoaded: () => of(null),
             state$: state$.asObservable(),
             activeMembership$: activeMembership$.asObservable(),
-            activeBusinessProfile$: activeBusinessProfile$.asObservable()
+            activeBusinessProfile$: activeBusinessProfile$.asObservable(),
+            clearActiveWorkspaceContext: () => undefined
+          }
+        },
+        {
+          provide: AuthService,
+          useValue: {
+            logout: () => undefined
           }
         }
       ]
     }).compileComponents();
 
     router = TestBed.inject(Router);
+    authLogoutSpy = vi.spyOn(TestBed.inject(AuthService), 'logout').mockImplementation(() => undefined);
     fixture = TestBed.createComponent(SidebarComponent);
-    component = fixture.componentInstance;
     fixture.detectChanges();
     await router.navigateByUrl('/app/workforce');
     fixture.detectChanges();
   });
 
-  it('highlights the active route when navigation changes', async () => {
+  afterEach(() => {
+    fixture?.destroy();
+    document.body.querySelector('.app-sidebar__account-menu')?.remove();
+  });
+
+  it('renders organization navigation without a standalone Settings item', async () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    const activeLink = fixture.nativeElement.querySelector('.app-sidebar__nav-item.is-active');
-    expect(activeLink).toBeTruthy();
-    expect(activeLink.textContent).toContain('Workforce');
+    const labels = Array.from(fixture.nativeElement.querySelectorAll('.app-sidebar__nav-item') as NodeListOf<HTMLElement>).map(
+      (item) => item.textContent?.replace(/\s+/g, ' ').trim()
+    );
 
-    await router.navigateByUrl('/app/dashboard');
-    fixture.detectChanges();
+    expect(labels).toContain('Dashboard');
+    expect(labels).toContain('Workforce');
+    expect(labels).toContain('Scan Requests');
+    expect(labels).not.toContain('Settings');
+  });
+
+  it('renders the account control with identity and role', async () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    const nextActiveLink = fixture.nativeElement.querySelector('.app-sidebar__nav-item.is-active');
-    expect(nextActiveLink.textContent).toContain('Dashboard');
+    const control = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
+    expect(control).toBeTruthy();
+    expect(control.textContent).toContain('Owner User');
+    expect(control.textContent).toContain('owner@example.com');
+    expect(control.textContent).toContain('Owner');
+  });
+
+  it('opens a body-level account menu that routes to personal settings and closes on Escape', async () => {
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const navigateSpy = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+    const trigger = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+
+    const menu = document.body.querySelector('.app-sidebar__account-menu') as HTMLElement;
+    expect(menu).toBeTruthy();
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu.textContent).toContain('Profile');
+    expect(menu.textContent).toContain('Preferences');
+    expect(menu.textContent).toContain('Security');
+    expect(menu.textContent).toContain('Sign out');
+
+    const profileButton = menu.querySelector('.app-sidebar__account-menu-item') as HTMLButtonElement;
+    profileButton.click();
+    expect(navigateSpy).toHaveBeenCalledWith(['/app/settings'], {
+      queryParams: { tab: 'profile' },
+      replaceUrl: false
+    });
+
+    trigger.click();
+    fixture.detectChanges();
+
+    const preferencesButton = Array.from(
+      document.body.querySelectorAll('.app-sidebar__account-menu-item')
+    ).find((button) => button.textContent?.trim() === 'Preferences') as HTMLButtonElement;
+    preferencesButton.click();
+    expect(navigateSpy).toHaveBeenCalledWith(['/app/settings'], {
+      queryParams: { tab: 'preferences' },
+      replaceUrl: false
+    });
+
+    trigger.click();
+    fixture.detectChanges();
+    const securityButton = Array.from(
+      document.body.querySelectorAll('.app-sidebar__account-menu-item')
+    ).find((button) => button.textContent?.trim() === 'Security') as HTMLButtonElement;
+    securityButton.click();
+    expect(navigateSpy).toHaveBeenCalledWith(['/app/settings'], {
+      queryParams: { tab: 'security' },
+      replaceUrl: false
+    });
+
+    trigger.click();
+    fixture.detectChanges();
+
+    const focusedMenuItem = document.body.querySelector('.app-sidebar__account-menu-item') as HTMLButtonElement;
+    focusedMenuItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+
+    expect(document.body.querySelector('.app-sidebar__account-menu')).toBeFalsy();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('closes the account menu on outside clicks and signs out through the existing flow', async () => {
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const navigateByUrlSpy = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    const trigger = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(document.body.querySelector('.app-sidebar__account-menu')).toBeFalsy();
+
+    trigger.click();
+    fixture.detectChanges();
+
+    const menu = document.body.querySelector('.app-sidebar__account-menu') as HTMLElement;
+    const signOutButton = Array.from(menu.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Sign out')
+    ) as HTMLButtonElement;
+    signOutButton.click();
+
+    expect(authLogoutSpy).toHaveBeenCalledTimes(1);
+    expect(navigateByUrlSpy).toHaveBeenCalledWith('/');
   });
 });
