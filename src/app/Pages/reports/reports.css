@@ -98,11 +98,18 @@
   text-align: right;
 }
 
+.reports-export-overlay {
+  position: fixed;
+  z-index: 40;
+  display: block;
+  pointer-events: auto;
+}
+
+.reports-export-overlay--above .reports-export-control__menu {
+  box-shadow: 0 -22px 36px rgba(15, 23, 42, 0.3);
+}
+
 .reports-export-control__menu {
-  position: absolute;
-  top: calc(100% + 0.5rem);
-  right: 0;
-  z-index: 30;
   display: grid;
   gap: 0.35rem;
   min-width: 12rem;
@@ -111,6 +118,7 @@
   background: rgba(15, 23, 42, 0.98);
   box-shadow: 0 22px 36px rgba(15, 23, 42, 0.3);
   padding: 0.45rem;
+  overflow-y: auto;
 }
 
 .reports-export-control__item {

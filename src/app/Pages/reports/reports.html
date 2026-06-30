@@ -58,7 +58,7 @@
       (retry)="refresh()">
     </app-error-state>
   } @else {
-    <app-filter-bar-shell [overflowVisible]="true">
+    <app-filter-bar-shell>
       <select [(ngModel)]="filters.dateRange" name="reportsDateRange" class="app-form-control" aria-label="Date range">
         <option value="today">Today</option>
         <option value="last7">Last 7 days</option>
@@ -86,8 +86,9 @@
       <button type="button" class="dashboard-action-button" (click)="applyFilters()">Apply</button>
       <button type="button" class="dashboard-action-button" (click)="clearFilters()">Clear</button>
 
-      <div #exportMenuRoot class="reports-export-control">
+      <div class="reports-export-control">
         <button
+          #exportMenuTrigger
           type="button"
           class="dashboard-action-button dashboard-action-button--primary reports-export-control__toggle"
           [disabled]="!canExport"
@@ -102,20 +103,28 @@
         @if (!canExport && showReportEmpty) {
           <p class="reports-export-control__helper">{{ exportUnavailableMessage }}</p>
         }
-
-        @if (exportMenuOpen) {
-          <div
-            id="reports-export-menu"
-            class="reports-export-control__menu"
-            role="menu"
-            aria-label="Export report"
-            (keydown)="handleExportMenuKeydown($event)">
-            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportCsv()">Download CSV</button>
-            <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportPdf()">Download PDF</button>
-          </div>
-        }
       </div>
     </app-filter-bar-shell>
+
+    <ng-template #exportMenuTemplate>
+      <div
+        class="reports-export-overlay"
+        [class.reports-export-overlay--above]="exportMenuPlacement === 'above'"
+        [style.top.px]="exportMenuPosition.top"
+        [style.left.px]="exportMenuPosition.left"
+        [style.width.px]="exportMenuPosition.width"
+        [style.maxHeight.px]="exportMenuPosition.maxHeight"
+        (keydown)="handleExportMenuKeydown($event)">
+        <div id="reports-export-menu" class="reports-export-control__menu" role="menu" aria-label="Export report">
+          <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportCsv()">
+            Download CSV
+          </button>
+          <button type="button" class="reports-export-control__item" role="menuitem" (click)="exportPdf()">
+            Download PDF
+          </button>
+        </div>
+      </div>
+    </ng-template>
 
     @if (showReportEmpty) {
       <section class="reports-state-card">

@@ -1,5 +1,15 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import {
+  ApplicationRef,
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  EmbeddedViewRef,
+  OnDestroy,
+  OnInit,
+  TemplateRef,
+  ViewChild
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NavigationStart, Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
@@ -56,15 +66,27 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
   report: ReportsViewData | null = null;
   feedback: FeedbackMessage | null = null;
   exportMenuOpen = false;
+  exportMenuPlacement: 'above' | 'below' = 'below';
+  exportMenuPosition = {
+    top: 0,
+    left: 0,
+    width: 0,
+    maxHeight: 0
+  };
 
   filters: ReportsFilters = this.defaultFilters();
 
-  @ViewChild('exportMenuRoot') private exportMenuRoot?: ElementRef<HTMLElement>;
+  @ViewChild('exportMenuTrigger') private exportMenuTrigger?: ElementRef<HTMLButtonElement>;
+  @ViewChild('exportMenuTemplate') private exportMenuTemplate?: TemplateRef<unknown>;
+  private exportMenuViewRef: EmbeddedViewRef<unknown> | null = null;
+  private exportMenuElement: HTMLElement | null = null;
+  private exportMenuCleanup: Array<() => void> = [];
   private feedbackTimer: ReturnType<typeof setTimeout> | null = null;
   private exportBusy = false;
   private routerEventsSub?: Subscription;
 
   constructor(
+    private appRef: ApplicationRef,
     private reportsService: ReportsService,
     private reportsPdfExportService: ReportsPdfExportService,
     private companyContext: CompanyContextService,
@@ -87,6 +109,7 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
       clearTimeout(this.feedbackTimer);
       this.feedbackTimer = null;
     }
+    this.destroyExportMenuOverlay();
   }
 
   get currentRole(): string {
@@ -217,13 +240,15 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     event?.preventDefault();
     event?.stopPropagation();
     if (!this.canExport) {
-      this.exportMenuOpen = false;
+      this.closeExportMenu();
       return;
     }
-    this.exportMenuOpen = !this.exportMenuOpen;
     if (this.exportMenuOpen) {
-      this.focusFirstExportMenuItem();
+      this.closeExportMenu(true);
+      return;
     }
+
+    this.openExportMenu();
   }
 
   handleExportMenuKeydown(event: KeyboardEvent): void {
@@ -260,7 +285,7 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.exportMenuOpen = false;
+    this.closeExportMenu(true);
     this.exportBusy = true;
 
     try {
@@ -279,7 +304,7 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.exportMenuOpen = false;
+    this.closeExportMenu(true);
     this.exportBusy = true;
 
     try {
@@ -333,11 +358,11 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
   }
 
   private async loadReports(refresh = true): Promise<void> {
+    this.closeExportMenu();
     this.loading = true;
     this.viewState = 'loading';
     this.errorMessage = '';
     this.partialWarning = '';
-    this.exportMenuOpen = false;
 
     try {
       const context = await this.companyContext.ensureActiveContext();
@@ -418,60 +443,167 @@ export class ReportsPageComponent implements OnInit, OnDestroy {
     }, 3500);
   }
 
-  @HostListener('document:click', ['$event'])
-  handleDocumentClick(event: MouseEvent): void {
-    if (!this.exportMenuOpen) {
-      return;
-    }
-
-    const target = event.target;
-    if (!(target instanceof Node)) {
-      this.closeExportMenu();
-      return;
-    }
-
-    if (!this.exportMenuRoot?.nativeElement.contains(target)) {
-      this.closeExportMenu();
-    }
-  }
-
-  @HostListener('document:keydown.escape', ['$event'])
-  handleEscapeKey(event: Event): void {
-    if (!this.exportMenuOpen) {
-      return;
-    }
-
-    event.preventDefault();
-    this.closeExportMenu(true);
-  }
-
   private closeExportMenu(restoreFocus = false): void {
     if (!this.exportMenuOpen) {
+      if (restoreFocus) {
+        this.exportMenuTrigger?.nativeElement.focus();
+      }
       return;
     }
 
     this.exportMenuOpen = false;
+    this.destroyExportMenuOverlay();
     this.cdr.markForCheck();
 
     if (restoreFocus) {
-      setTimeout(() => {
-        const trigger = this.exportMenuRoot?.nativeElement.querySelector<HTMLButtonElement>(
-          '.reports-export-control__toggle'
-        );
-        trigger?.focus();
-      }, 0);
+      this.exportMenuTrigger?.nativeElement.focus();
     }
   }
 
   private focusFirstExportMenuItem(): void {
-    setTimeout(() => {
-      this.exportMenuItems()[0]?.focus();
-    }, 0);
+    this.exportMenuItems()[0]?.focus();
   }
 
   private exportMenuItems(): HTMLButtonElement[] {
-    return Array.from(
-      this.exportMenuRoot?.nativeElement.querySelectorAll<HTMLButtonElement>('.reports-export-control__item') ?? []
+    return Array.from(this.exportMenuElement?.querySelectorAll<HTMLButtonElement>('.reports-export-control__item') ?? []);
+  }
+
+  private openExportMenu(): void {
+    if (this.exportMenuOpen || !this.canExport) {
+      return;
+    }
+
+    this.exportMenuOpen = true;
+    this.mountExportMenuOverlay();
+    this.cdr.markForCheck();
+    this.focusFirstExportMenuItem();
+  }
+
+  private mountExportMenuOverlay(): void {
+    this.destroyExportMenuOverlay();
+
+    if (!this.exportMenuTemplate) {
+      return;
+    }
+
+    const viewRef = this.exportMenuTemplate.createEmbeddedView({});
+    this.appRef.attachView(viewRef);
+    viewRef.detectChanges();
+
+    const host = viewRef.rootNodes.find((node): node is HTMLElement => node instanceof HTMLElement);
+    if (!host) {
+      this.appRef.detachView(viewRef);
+      viewRef.destroy();
+      return;
+    }
+
+    document.body.appendChild(host);
+    this.exportMenuViewRef = viewRef;
+    this.exportMenuElement = host;
+    this.repositionExportMenu();
+    this.attachExportMenuListeners();
+  }
+
+  private repositionExportMenu(): void {
+    if (!this.exportMenuElement || !this.exportMenuTrigger || !this.exportMenuOpen) {
+      return;
+    }
+
+    const triggerRect = this.exportMenuTrigger.nativeElement.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const margin = 12;
+    const menuWidth = Math.max(192, Math.min(Math.ceil(triggerRect.width), viewportWidth - margin * 2));
+
+    this.exportMenuElement.style.width = `${menuWidth}px`;
+    this.exportMenuElement.style.left = '0px';
+    this.exportMenuElement.style.top = '0px';
+    this.exportMenuElement.style.maxHeight = 'none';
+
+    const menuHeight = Math.ceil(this.exportMenuElement.getBoundingClientRect().height);
+    const spaceBelow = viewportHeight - triggerRect.bottom - margin;
+    const spaceAbove = triggerRect.top - margin;
+    const openBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
+
+    const top = openBelow
+      ? Math.max(margin, Math.min(triggerRect.bottom + 8, viewportHeight - menuHeight - margin))
+      : Math.max(margin, triggerRect.top - menuHeight - 8);
+    const left = Math.max(margin, Math.min(triggerRect.right - menuWidth, viewportWidth - menuWidth - margin));
+    const maxHeight = Math.max(120, openBelow ? spaceBelow : spaceAbove);
+
+    this.exportMenuPlacement = openBelow ? 'below' : 'above';
+    this.exportMenuPosition = {
+      top,
+      left,
+      width: menuWidth,
+      maxHeight
+    };
+
+    this.exportMenuElement.style.top = `${top}px`;
+    this.exportMenuElement.style.left = `${left}px`;
+    this.exportMenuElement.style.maxHeight = `${maxHeight}px`;
+  }
+
+  private attachExportMenuListeners(): void {
+    const updatePosition = () => this.repositionExportMenu();
+    const onDocumentClick = (event: MouseEvent) => {
+      if (!this.exportMenuOpen) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Node) || !this.isExportMenuTarget(target)) {
+        this.closeExportMenu();
+      }
+    };
+    const onDocumentKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && this.exportMenuOpen) {
+        event.preventDefault();
+        this.closeExportMenu(true);
+      }
+    };
+
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    document.addEventListener('click', onDocumentClick, true);
+    document.addEventListener('keydown', onDocumentKeydown, true);
+
+    this.exportMenuCleanup.push(
+      () => window.removeEventListener('resize', updatePosition),
+      () => window.removeEventListener('scroll', updatePosition, true),
+      () => document.removeEventListener('click', onDocumentClick, true),
+      () => document.removeEventListener('keydown', onDocumentKeydown, true)
+    );
+  }
+
+  private destroyExportMenuOverlay(): void {
+    while (this.exportMenuCleanup.length) {
+      this.exportMenuCleanup.pop()?.();
+    }
+
+    if (this.exportMenuViewRef) {
+      this.appRef.detachView(this.exportMenuViewRef);
+      this.exportMenuViewRef.destroy();
+      this.exportMenuViewRef = null;
+    }
+
+    if (this.exportMenuElement?.parentNode) {
+      this.exportMenuElement.parentNode.removeChild(this.exportMenuElement);
+    }
+
+    this.exportMenuElement = null;
+    this.exportMenuPlacement = 'below';
+    this.exportMenuPosition = {
+      top: 0,
+      left: 0,
+      width: 0,
+      maxHeight: 0
+    };
+  }
+
+  private isExportMenuTarget(target: Node): boolean {
+    return Boolean(
+      this.exportMenuElement?.contains(target) || this.exportMenuTrigger?.nativeElement.contains(target)
     );
   }
 

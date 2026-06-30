@@ -137,6 +137,11 @@ describe('ReportsPageComponent', () => {
     fixture.detectChanges();
   });
 
+  afterEach(() => {
+    fixture?.destroy();
+    document.body.querySelector('.reports-export-overlay')?.remove();
+  });
+
   function setReadyReport(report: ReportsViewData = baseReport): void {
     component.viewState = 'ready';
     component.report = report;
@@ -148,9 +153,13 @@ describe('ReportsPageComponent', () => {
     return fixture.nativeElement.querySelector('.reports-export-control__toggle') as HTMLButtonElement;
   }
 
+  function exportOverlay(): HTMLElement {
+    return document.body.querySelector('.reports-export-overlay') as HTMLElement;
+  }
+
   function exportMenuItems(): HTMLButtonElement[] {
     return Array.from(
-      fixture.nativeElement.querySelectorAll('.reports-export-control__item') as NodeListOf<HTMLButtonElement>
+      document.body.querySelectorAll('.reports-export-control__item') as NodeListOf<HTMLButtonElement>
     );
   }
 
@@ -178,8 +187,13 @@ describe('ReportsPageComponent', () => {
     fixture.detectChanges();
 
     expect(button.getAttribute('aria-expanded')).toBe('true');
-    expect((fixture.nativeElement.querySelector('app-filter-bar-shell > div') as HTMLElement).style.overflow).toBe('visible');
-    const menu = fixture.nativeElement.querySelector('#reports-export-menu') as HTMLElement;
+    const overlay = exportOverlay();
+    expect(overlay.parentElement).toBe(document.body);
+    expect(overlay.style.top).not.toBe('');
+    expect(overlay.style.left).not.toBe('');
+    expect(overlay.style.width).not.toBe('');
+    expect(fixture.nativeElement.querySelector('.reports-export-overlay')).toBeFalsy();
+    const menu = document.body.querySelector('#reports-export-menu') as HTMLElement;
     expect(menu?.getAttribute('role')).toBe('menu');
     const menuItems = exportMenuItems();
     expect(menuItems.map((item) => item.textContent?.trim())).toEqual(['Download CSV', 'Download PDF']);
@@ -252,11 +266,11 @@ describe('ReportsPageComponent', () => {
 
     activateExportWithNativeKeyboard('Enter');
     expect(component.exportMenuOpen).toBe(true);
-    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeTruthy();
+    expect(document.body.querySelector('#reports-export-menu')).toBeTruthy();
 
     activateExportWithNativeKeyboard('Enter');
     expect(component.exportMenuOpen).toBe(false);
-    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeFalsy();
+    expect(document.body.querySelector('#reports-export-menu')).toBeFalsy();
   });
 
   it('uses native Space activation without double-toggling the export menu', () => {
@@ -264,11 +278,11 @@ describe('ReportsPageComponent', () => {
 
     activateExportWithNativeKeyboard(' ');
     expect(component.exportMenuOpen).toBe(true);
-    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeTruthy();
+    expect(document.body.querySelector('#reports-export-menu')).toBeTruthy();
 
     activateExportWithNativeKeyboard(' ');
     expect(component.exportMenuOpen).toBe(false);
-    expect(fixture.nativeElement.querySelector('#reports-export-menu')).toBeFalsy();
+    expect(document.body.querySelector('#reports-export-menu')).toBeFalsy();
   });
 
   it('keeps arrow navigation in the export menu and restores focus to Export on Escape', async () => {
@@ -276,7 +290,6 @@ describe('ReportsPageComponent', () => {
 
     exportButton().click();
     fixture.detectChanges();
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const [csvButton, pdfButton] = exportMenuItems();
     expect(document.activeElement).toBe(csvButton);
@@ -291,7 +304,6 @@ describe('ReportsPageComponent', () => {
 
     csvButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     fixture.detectChanges();
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(component.exportMenuOpen).toBe(false);
     expect(document.activeElement).toBe(exportButton());

@@ -267,6 +267,10 @@ function createQueryBuilder(table, state, scope) {
       }
 
       if (table === 'business_profile_members') {
+        if (equalityFilters.business_profile && equalityFilters.department && equalityFilters.status === 'active') {
+          return { count: state.scenario.departmentActiveMemberCountsById?.[String(equalityFilters.department)] ?? 0 };
+        }
+
         if (equalityFilters.user && equalityFilters.member_role === 'owner') {
           return state.scenario.duplicateOwnerMembership;
         }
@@ -416,6 +420,7 @@ function createFakeDatabase(scenario = {}) {
       activeMembershipRows: [],
       managerMembersById: {},
       departmentRowsById: {},
+      departmentActiveMemberCountsById: {},
       directusUserRow: undefined,
       failDepartmentInsert: false,
       failDirectusUserUpdate: false,
@@ -466,7 +471,8 @@ function buildTestHarness(scenario = {}) {
     createWorkspaceHandler: router.handlers.get('POST /workspaces/create'),
     switchWorkspaceHandler: router.handlers.get('POST /workspaces/switch'),
     createDepartmentHandler: router.handlers.get('POST /organization/departments'),
-    updateDepartmentHandler: router.handlers.get('PATCH /organization/departments/:departmentId')
+    updateDepartmentHandler: router.handlers.get('PATCH /organization/departments/:departmentId'),
+    deactivateDepartmentHandler: router.handlers.get('POST /organization/departments/:departmentId/deactivate')
   };
 }
 
@@ -1087,6 +1093,169 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
   const updateCalls = database.calls.filter((call) => call.type === 'update' && call.table === 'departments');
   assert.deepEqual(updateCalls[0].payload, { manager_member: 'hr-1' });
   assert.deepEqual(updateCalls[1].payload, { name: 'Operations', manager_member: null });
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 98,
+    user: 'user-deactivate',
+    status: 'active',
+    member_role: 'owner',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, deactivateDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    departmentRowsById: {
+      'department-1': {
+        id: 'department-1',
+        name: 'Operations',
+        is_active: true,
+        business_profile: 'trusted-workspace',
+        manager_member: 'hr-1',
+        date_created: now,
+        date_updated: now
+      }
+    }
+  });
+
+  const response = buildFakeResponse();
+  await deactivateDepartmentHandler(
+    {
+      accountability: { user: 'user-deactivate' },
+      params: { departmentId: 'department-1' }
+    },
+    response
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.data.department.is_active, false);
+  assert.equal(response.body.data.department.manager_member_id, 'hr-1');
+
+  const departmentUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'departments');
+  const auditInsert = database.calls.find(
+    (call) =>
+      call.type === 'insert' &&
+      call.table === 'activity_events' &&
+      call.payload.action === 'organization_department_deactivated'
+  );
+
+  assert.deepEqual(departmentUpdate.payload, { is_active: false });
+  assert.match(auditInsert.payload.id, uuidPattern);
+  assert.notEqual(auditInsert.payload.id, 'department-1');
+  assert.equal(auditInsert.payload.entity_id, 'department-1');
+  assert.equal(database.scenario.departmentRowsById['department-1'].is_active, false);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 99,
+    user: 'user-deactivate-conflict',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, deactivateDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    departmentRowsById: {
+      'department-2': {
+        id: 'department-2',
+        name: 'Support',
+        is_active: true,
+        business_profile: 'trusted-workspace',
+        manager_member: null,
+        date_created: now,
+        date_updated: now
+      }
+    },
+    departmentActiveMemberCountsById: {
+      'department-2': 2
+    }
+  });
+
+  const response = buildFakeResponse();
+  await deactivateDepartmentHandler(
+    {
+      accountability: { user: 'user-deactivate-conflict' },
+      params: { departmentId: 'department-2' }
+    },
+    response
+  );
+
+  assert.equal(response.statusCode, 409);
+  assert.equal(response.body.error.message, 'Deactivate the department after reassigning its active members.');
+  assert.equal(database.calls.some((call) => call.type === 'update' && call.table === 'departments'), false);
+  assert.equal(database.calls.some((call) => call.type === 'insert' && call.table === 'activity_events'), false);
+  assert.equal(database.scenario.departmentRowsById['department-2'].is_active, true);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const activeMembership = {
+    id: 100,
+    user: 'user-deactivate-forbidden',
+    status: 'active',
+    member_role: 'employee',
+    workspace_id: 'trusted-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Trusted Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, deactivateDepartmentHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [activeMembership],
+    departmentRowsById: {
+      'department-3': {
+        id: 'department-3',
+        name: 'Finance',
+        is_active: true,
+        business_profile: 'trusted-workspace',
+        manager_member: null,
+        date_created: now,
+        date_updated: now
+      }
+    }
+  });
+
+  const response = buildFakeResponse();
+  await deactivateDepartmentHandler(
+    {
+      accountability: { user: 'user-deactivate-forbidden' },
+      params: { departmentId: 'department-3' }
+    },
+    response
+  );
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(database.calls.some((call) => call.table === 'departments'), false);
+  assert.equal(database.calls.some((call) => call.table === 'activity_events'), false);
 });
 
 await withOwnerRoleEnv(ownerRoleId, async () => {

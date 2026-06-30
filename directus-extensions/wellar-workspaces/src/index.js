@@ -2060,7 +2060,13 @@ export default {
             .update({ is_active: false });
 
           const updatedDepartment = await loadDepartmentById(trx, active.workspace_id, departmentId);
+          const activityEventId = randomUUID();
+          assertUuid(activityEventId, 'activity_events.id');
+          if (activityEventId === String(departmentId)) {
+            throw new Error('Generated department deactivation activity event id must be unique.');
+          }
           await trx('activity_events').insert({
+            id: activityEventId,
             actor: userId,
             target_user: userId,
             action: 'organization_department_deactivated',
