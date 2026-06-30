@@ -3297,10 +3297,8 @@ body::selection {
   .app-shell__grid {
     position: relative;
     z-index: 1;
-    display: grid;
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    display: block;
     min-height: 100dvh;
-    align-items: stretch;
   }
 
   .app-shell .app-main,
@@ -3330,7 +3328,10 @@ body::selection {
   }
 
   .app-shell .app-main {
-    width: auto;
+    margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .app-shell .app-sidebar {
