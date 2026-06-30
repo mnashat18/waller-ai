@@ -1454,7 +1454,6 @@ body::selection {
 .page-shell .list-card:hover,
 .page-shell .kpi-card:hover,
 .app-shell .app-content-frame:hover,
-.app-shell .app-sidebar__panel:hover,
 .app-shell .app-header__panel:hover {
   transform: translateY(-4px);
   box-shadow: var(--wellar-shadow-strong);

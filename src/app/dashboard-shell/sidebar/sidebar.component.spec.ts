@@ -40,6 +40,40 @@ const createContextState = (): CompanyContextState => ({
   }
 });
 
+const collectStyleRules = (): CSSStyleRule[] => {
+  const rules: CSSStyleRule[] = [];
+
+  const visit = (list: CSSRuleList | undefined | null): void => {
+    if (!list) {
+      return;
+    }
+
+    Array.from(list).forEach((rule) => {
+      if (rule.type === CSSRule.STYLE_RULE) {
+        rules.push(rule as CSSStyleRule);
+      }
+
+      const nestedRules = (rule as CSSGroupingRule & { cssRules?: CSSRuleList }).cssRules;
+      if (nestedRules?.length) {
+        visit(nestedRules);
+      }
+    });
+  };
+
+  Array.from(document.styleSheets).forEach((sheet) => {
+    try {
+      visit(sheet.cssRules);
+    } catch {
+      // Ignore cross-origin or inaccessible sheets in the test environment.
+    }
+  });
+
+  return rules;
+};
+
+const findRule = (selectorText: string): CSSStyleRule | undefined =>
+  collectStyleRules().find((rule) => rule.selectorText === selectorText);
+
 describe('SidebarComponent', () => {
   let fixture: ComponentFixture<SidebarComponent>;
   let router: Router;
@@ -136,6 +170,30 @@ describe('SidebarComponent', () => {
     expect(bodyStyles.overflowY).not.toBe('auto');
     expect(footerStyles.position).toBe('static');
     expect(footerStyles.position).not.toBe('sticky');
+  });
+
+  it('keeps sidebar hover behavior free of whole-shell transforms', async () => {
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(findRule('.app-shell .app-sidebar__panel:hover')).toBeUndefined();
+
+    const accountControlRule = collectStyleRules().find((rule) =>
+      rule.selectorText.includes('.app-sidebar__account-control:hover')
+    );
+    const accountMenuItemRule = collectStyleRules().find((rule) =>
+      rule.selectorText.includes('.app-sidebar__account-menu-item:hover')
+    );
+
+    const accountControlTransform = accountControlRule?.style.getPropertyValue('transform') ?? '';
+    const accountControlTransition = accountControlRule?.style.getPropertyValue('transition') ?? '';
+    const accountMenuItemTransform = accountMenuItemRule?.style.getPropertyValue('transform') ?? '';
+    const accountMenuItemTransition = accountMenuItemRule?.style.getPropertyValue('transition') ?? '';
+
+    expect(accountControlTransform).toBe('');
+    expect(accountControlTransition).not.toContain('transform');
+    expect(accountMenuItemTransform).toBe('');
+    expect(accountMenuItemTransition).not.toContain('transform');
   });
 
   it('opens a body-level account menu that routes to personal settings and closes on Escape', async () => {
