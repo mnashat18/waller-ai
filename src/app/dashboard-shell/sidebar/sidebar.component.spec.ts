@@ -98,16 +98,33 @@ describe('SidebarComponent', () => {
       providers: [
         provideRouter([
           {
-            path: 'app/dashboard',
-            component: DummyRouteComponent,
-            children: [{ path: 'child', component: DummyRouteComponent }]
-          },
-          { path: 'app/workforce', component: DummyRouteComponent },
-          { path: 'app/scan-requests', component: DummyRouteComponent },
-          { path: 'app/compliance', component: DummyRouteComponent },
-          { path: 'app/alerts', component: DummyRouteComponent },
-          { path: 'app/reports', component: DummyRouteComponent },
-          { path: 'app/company', component: DummyRouteComponent }
+            path: 'app',
+            children: [
+              {
+                path: 'dashboard',
+                component: DummyRouteComponent,
+                children: [{ path: 'anything', component: DummyRouteComponent }]
+              },
+              {
+                path: 'workforce',
+                component: DummyRouteComponent,
+                children: [{ path: 'member/:id', component: DummyRouteComponent }]
+              },
+              { path: 'scan-requests', component: DummyRouteComponent },
+              { path: 'compliance', component: DummyRouteComponent },
+              { path: 'alerts', component: DummyRouteComponent },
+              {
+                path: 'reports',
+                component: DummyRouteComponent,
+                children: [{ path: 'export', component: DummyRouteComponent }]
+              },
+              {
+                path: 'company',
+                component: DummyRouteComponent,
+                children: [{ path: 'departments', component: DummyRouteComponent }]
+              }
+            ]
+          }
         ]),
         {
           provide: CompanyContextService,
@@ -163,17 +180,35 @@ describe('SidebarComponent', () => {
     expect(Array.from(activeItems).some((item) => item.textContent?.includes('Dashboard'))).toBe(false);
   });
 
-  it('uses exact Dashboard matching so child routes do not activate Dashboard', async () => {
-    await router.navigateByUrl('/app/dashboard/child');
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
+  it('keeps section navigation active on nested routes while Dashboard remains exact', async () => {
+    const findItem = (label: string): HTMLAnchorElement | undefined =>
+      Array.from(fixture.nativeElement.querySelectorAll('.app-sidebar__nav-item')).find((item) =>
+        (item as HTMLAnchorElement).textContent?.includes(label)
+      ) as HTMLAnchorElement | undefined;
 
-    const dashboard = Array.from(fixture.nativeElement.querySelectorAll('.app-sidebar__nav-item')) as HTMLAnchorElement[];
-    const dashboardItem = dashboard.find((item) => item.textContent?.includes('Dashboard')) as HTMLAnchorElement | undefined;
+    const navigateTo = async (url: string): Promise<void> => {
+      await router.navigateByUrl(url);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
 
-    expect(dashboardItem?.classList.contains('is-active')).toBe(false);
-    expect(dashboardItem?.getAttribute('aria-current')).toBeNull();
+    await navigateTo('/app/workforce/member/123');
+    expect(findItem('Workforce')?.classList.contains('is-active')).toBe(true);
+    expect(findItem('Workforce')?.getAttribute('aria-current')).toBe('page');
+    expect(findItem('Dashboard')?.classList.contains('is-active')).toBe(false);
+
+    await navigateTo('/app/reports/export');
+    expect(findItem('Reports')?.classList.contains('is-active')).toBe(true);
+    expect(findItem('Reports')?.getAttribute('aria-current')).toBe('page');
+
+    await navigateTo('/app/company/departments');
+    expect(findItem('Organization')?.classList.contains('is-active')).toBe(true);
+    expect(findItem('Organization')?.getAttribute('aria-current')).toBe('page');
+
+    await navigateTo('/app/dashboard/anything');
+    expect(findItem('Dashboard')?.classList.contains('is-active')).toBe(false);
+    expect(findItem('Dashboard')?.getAttribute('aria-current')).toBeNull();
   });
 
   it('renders the account control with identity and role', () => {

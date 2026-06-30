@@ -123,9 +123,9 @@ export class SidebarComponent implements OnDestroy {
 
   onNavigate(_item: SidebarNavItem): void {}
 
-  routerLinkActiveOptions(_item: SidebarNavItem): IsActiveMatchOptions {
+  routerLinkActiveOptions(item: SidebarNavItem): IsActiveMatchOptions {
     return {
-      paths: 'exact',
+      paths: item.matchRoutes.length === 1 && item.matchRoutes[0] === '/app/dashboard' ? 'exact' : 'subset',
       queryParams: 'ignored',
       matrixParams: 'ignored',
       fragment: 'ignored'
