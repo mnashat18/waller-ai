@@ -5,8 +5,6 @@ import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { BehaviorSubject, Subject } from 'rxjs';
 
 import { CompanyContextService, type CompanyContextState } from '../core/context/company-context.service';
-import { PostAuthWelcomeService } from '../services/post-auth-welcome.service';
-import { PostAuthWelcomeComponent } from '../shared/ui/post-auth-welcome/post-auth-welcome.component';
 import { AppShellComponent } from './app-shell.component';
 
 @Component({
@@ -112,10 +110,10 @@ describe('AppShellComponent', () => {
         }
       ],
       schemas: [NO_ERRORS_SCHEMA]
-    })
+      })
       .overrideComponent(AppShellComponent, {
         set: {
-          imports: [CommonModule, RouterOutlet, SidebarStubComponent, TopbarStubComponent, PostAuthWelcomeComponent]
+          imports: [CommonModule, RouterOutlet, SidebarStubComponent, TopbarStubComponent]
         }
       })
       .compileComponents();
@@ -205,20 +203,4 @@ describe('AppShellComponent', () => {
     expect(initializeCallCount).toBe(0);
   });
 
-  it('shows the welcome card once on the authenticated shell and consumes it immediately', async () => {
-    const welcomeService = TestBed.inject(PostAuthWelcomeService);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    contextState$.next(createContextState());
-    await fixture.whenStable();
-    welcomeService.queueReturningWelcome('Avery');
-    fixture.detectChanges();
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    fixture.detectChanges();
-
-    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('Welcome back, Avery');
-    expect(text).toContain('Your workspace is ready.');
-    expect(welcomeService.consumeWelcome()).toBeNull();
-  });
 });

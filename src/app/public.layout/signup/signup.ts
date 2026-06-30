@@ -2,8 +2,10 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule, NgForm } from '@angular/forms';
+import { CompanyContextService } from '../../core/context/company-context.service';
 import { AuthService } from '../../services/auth';
 import { InviteService } from '../../services/invites';
+import { PostAuthWelcomeService } from '../../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import { switchMap } from 'rxjs/operators';
 
@@ -32,7 +34,9 @@ export class SignupComponent implements OnInit {
     private invites: InviteService,
     private route: ActivatedRoute,
     private router: Router,
-    private postLoginRouting: PostLoginRoutingService
+    private postLoginRouting: PostLoginRoutingService,
+    private companyContext: CompanyContextService,
+    private postAuthWelcome: PostAuthWelcomeService
   ) {
     this.syncInviteContext();
     this.authNotice = this.auth.consumeAuthNotice() ?? '';
@@ -87,6 +91,11 @@ export class SignupComponent implements OnInit {
             return;
           }
           const nextRoute = await this.postLoginRouting.resolveDestination();
+          const shouldShowWelcome = this.queueWelcomeIfReady(nextRoute);
+          if (shouldShowWelcome) {
+            await this.router.navigateByUrl('/app/welcome', { replaceUrl: true });
+            return;
+          }
           await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
         } catch {
           this.authNotice = 'Unable to continue after signup. Please sign in again.';
@@ -142,5 +151,30 @@ export class SignupComponent implements OnInit {
     const inviteToken = inviteParam && inviteParam !== '1' ? inviteParam : null;
     const normalized = (tokenParam ?? inviteToken ?? '').trim();
     return normalized || null;
+  }
+
+  private queueWelcomeIfReady(nextRoute: string): boolean {
+    const normalized = nextRoute.trim().toLowerCase();
+    if (
+      !normalized ||
+      normalized.startsWith('/app/workspace-access') ||
+      normalized.startsWith('/app/workspace-restricted') ||
+      normalized.startsWith('/app/welcome')
+    ) {
+      return false;
+    }
+
+    if (!normalized.startsWith('/app/') && !normalized.startsWith('/employee-web-access')) {
+      return false;
+    }
+
+    const context = this.companyContext.snapshot().context;
+    if (!context.activeBusinessProfileId || !context.activeMemberRole) {
+      return false;
+    }
+
+    const firstName = String(context.currentUser?.first_name ?? context.userDisplayName ?? '').trim().split(/\s+/u)[0] || 'there';
+    this.postAuthWelcome.queueWorkspaceWelcome(firstName, nextRoute);
+    return true;
   }
 }

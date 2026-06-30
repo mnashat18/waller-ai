@@ -143,7 +143,7 @@ describe('AuthCallbackComponent', () => {
 
     expect(authSpy.storeAccessToken).toHaveBeenCalledWith('header.payload.signature');
     expect(postLoginRoutingSpy.resolveDestination).toHaveBeenCalledTimes(1);
-    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
+    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/welcome', { replaceUrl: true });
     expect(authSpy.clearAuthRecoveryState).not.toHaveBeenCalled();
   });
 
@@ -162,7 +162,7 @@ describe('AuthCallbackComponent', () => {
     fixture.detectChanges();
 
     expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledTimes(1);
-    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledWith('Avery');
+    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledWith('Avery', '/app/dashboard');
     expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
   });
 });

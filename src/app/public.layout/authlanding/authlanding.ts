@@ -4,7 +4,7 @@ import { ActivatedRoute, NavigationEnd, Router, RouterModule } from '@angular/ro
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../services/auth';
 import { of, Subscription } from 'rxjs';
-import { catchError, filter, finalize, map, switchMap, timeout } from 'rxjs/operators';
+import { catchError, filter, map, switchMap, timeout } from 'rxjs/operators';
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { InviteService } from '../../services/invites';
 import { PostAuthWelcomeService } from '../../services/post-auth-welcome.service';
@@ -381,25 +381,38 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         return;
       }
 
-      this.submitting = false;
+      this.resolvingOrganizationAccess = true;
+      this.feedback = 'Preparing your workspace...';
 
-      const inviteToken = this.resolveInviteTokenFromContext();
-      if (inviteToken) {
+      try {
+        const inviteToken = this.resolveInviteTokenFromContext();
+        if (inviteToken) {
+          this.closeAuth(false);
+          await this.router.navigate(['/invites/claim'], {
+            queryParams: { token: inviteToken },
+            replaceUrl: true
+          });
+          return;
+        }
+
+        const nextRoute = await this.resolvePostLoginDestinationOrShowAccessError();
+        if (!nextRoute) {
+          return;
+        }
+
+        const shouldShowWelcome = this.queueWorkspaceWelcomeIfReady(nextRoute);
         this.closeAuth(false);
-        await this.router.navigate(['/invites/claim'], {
-          queryParams: { token: inviteToken },
-          replaceUrl: true
-        });
-        return;
-      }
+        if (shouldShowWelcome) {
+          await this.router.navigateByUrl('/app/welcome', { replaceUrl: true });
+          return;
+        }
 
-      this.closeAuth(false);
-      const nextRoute = await this.resolvePostLoginDestinationOrShowAccessError();
-      if (!nextRoute) {
-        return;
+        await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
+      } finally {
+        this.submitting = false;
+        this.resolvingOrganizationAccess = false;
+        this.cdr.detectChanges();
       }
-      this.queueWorkspaceWelcomeIfReady(nextRoute);
-      await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
     });
   }
 
@@ -418,33 +431,46 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         this.feedback = this.resolveLoginError(err);
         return of(null);
       }),
-      finalize(() => {
-        this.submitting = false;
-        this.cdr.detectChanges();
-      })
     ).subscribe(async (result) => {
       if (!result) {
+        this.submitting = false;
+        this.resolvingOrganizationAccess = false;
+        this.cdr.detectChanges();
         return;
       }
 
-      const inviteToken = this.resolveInviteTokenFromContext();
-      if (inviteToken) {
+      this.resolvingOrganizationAccess = true;
+      this.feedback = 'Preparing your workspace...';
+
+      try {
+        const inviteToken = this.resolveInviteTokenFromContext();
+        if (inviteToken) {
+          this.closeAuth(false);
+          await this.router.navigate(['/invites/claim'], {
+            queryParams: { token: inviteToken },
+            replaceUrl: true
+          });
+          return;
+        }
+
+        const nextRoute = await this.resolvePostLoginDestinationOrShowAccessError();
+        if (!nextRoute) {
+          return;
+        }
+
+        const shouldShowWelcome = this.queueReturningWelcomeIfReady(nextRoute);
         this.closeAuth(false);
-        await this.router.navigate(['/invites/claim'], {
-          queryParams: { token: inviteToken },
-          replaceUrl: true
-        });
-        return;
-      }
+        if (shouldShowWelcome) {
+          await this.router.navigateByUrl('/app/welcome', { replaceUrl: true });
+          return;
+        }
 
-      const nextRoute = await this.resolvePostLoginDestinationOrShowAccessError();
-      if (!nextRoute) {
-        return;
+        await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
+      } finally {
+        this.submitting = false;
+        this.resolvingOrganizationAccess = false;
+        this.cdr.detectChanges();
       }
-
-      this.queueReturningWelcomeIfReady(nextRoute);
-      this.closeAuth(false);
-      await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
     });
   }
 
@@ -485,7 +511,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
   private async resolvePostLoginDestinationOrShowAccessError(): Promise<string | null> {
     this.resolvingOrganizationAccess = true;
-    this.feedback = 'Preparing your organization access...';
+    this.feedback = 'Preparing your workspace...';
     this.cdr.detectChanges();
 
     try {
@@ -566,34 +592,59 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     return this.invites.getPendingInviteToken();
   }
 
-  private queueReturningWelcomeIfReady(nextRoute: string): void {
-    if (!nextRoute.startsWith('/app/dashboard')) {
-      return;
+  private queueReturningWelcomeIfReady(nextRoute: string): boolean {
+    if (!this.shouldQueueWelcomeForRoute(nextRoute)) {
+      return false;
     }
 
     const context = this.companyContext.snapshot().context;
     if (!context.activeBusinessProfileId || !context.activeMemberRole) {
-      return;
+      return false;
     }
 
     this.postAuthWelcome.queueReturningWelcome(
-      this.resolveWelcomeFirstName(context.currentUser?.first_name ?? context.userDisplayName)
+      this.resolveWelcomeFirstName(context.currentUser?.first_name ?? context.userDisplayName),
+      nextRoute
     );
+    return true;
   }
 
-  private queueWorkspaceWelcomeIfReady(nextRoute: string): void {
-    if (!nextRoute.startsWith('/app/dashboard')) {
-      return;
+  private queueWorkspaceWelcomeIfReady(nextRoute: string): boolean {
+    if (!this.shouldQueueWelcomeForRoute(nextRoute)) {
+      return false;
     }
 
     const context = this.companyContext.snapshot().context;
     if (!context.activeBusinessProfileId || !context.activeMemberRole) {
-      return;
+      return false;
     }
 
     this.postAuthWelcome.queueWorkspaceWelcome(
-      this.resolveWelcomeFirstName(context.currentUser?.first_name ?? context.userDisplayName)
+      this.resolveWelcomeFirstName(context.currentUser?.first_name ?? context.userDisplayName),
+      nextRoute
     );
+    return true;
+  }
+
+  private shouldQueueWelcomeForRoute(nextRoute: string): boolean {
+    const normalized = nextRoute.trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    if (normalized.startsWith('/app/workspace-access')) {
+      return false;
+    }
+
+    if (normalized.startsWith('/app/workspace-restricted')) {
+      return false;
+    }
+
+    if (normalized.startsWith('/app/welcome')) {
+      return false;
+    }
+
+    return normalized.startsWith('/app/') || normalized.startsWith('/employee-web-access');
   }
 
   private resolveWelcomeFirstName(value: string | null | undefined): string {

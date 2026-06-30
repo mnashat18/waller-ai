@@ -138,11 +138,12 @@ export class PostLoginRoutingService {
     if (resolvedProfileId && resolvedRole) {
       const inviteSuccessRoute = this.resolveClaimSuccessRoute(resolvedRole);
       if (inviteSuccessRoute) {
+        this.queueInviteWelcome(inviteSuccessRoute);
         this.invites.debugFlow('final route decision', {
           route: this.safeRouteForDebug(inviteSuccessRoute),
           role: resolvedRole
         });
-        return inviteSuccessRoute;
+        return '/app/welcome';
       }
     }
 
@@ -396,7 +397,6 @@ export class PostLoginRoutingService {
       await this.refreshAuthTokenAfterInviteRoleChange();
       await this.activateClaimedInviteMembership(claimResult.businessProfileId);
       await this.refreshInviteContexts();
-      this.queueInviteWelcome();
       return await this.resolveFinalRouteAfterClaim(token, claimResult);
     } catch (error) {
       this.invites.clearClaimInProgressForToken(token);
@@ -489,13 +489,14 @@ export class PostLoginRoutingService {
 
     if (activeBusinessProfileId && activeMemberRole) {
       const route = this.resolveClaimedWorkspaceDestination(activeBusinessProfileId, activeMemberRole, true);
-      this.invites.debugFlow('navigating to dashboard', { route: this.safeRouteForDebug(route) });
-      return route;
+      this.queueInviteWelcome(route);
+      this.invites.debugFlow('navigating to welcome', { route: this.safeRouteForDebug(route) });
+      return '/app/welcome';
     }
 
     const nextRoute = await this.navigateToPostInviteDestination(claimed, token);
     if (nextRoute === '/app/dashboard' || nextRoute === '/app/workspace-access?joined=1') {
-      this.invites.debugFlow('navigating to dashboard', { route: this.safeRouteForDebug(nextRoute) });
+      this.invites.debugFlow('navigating to welcome', { route: this.safeRouteForDebug(nextRoute) });
       return nextRoute;
     }
 
@@ -510,8 +511,9 @@ export class PostLoginRoutingService {
     const roleAfterMembership = this.normalizeRole(contextAfterMembership.activeMemberRole);
     if (profileAfterMembership && roleAfterMembership) {
       const route = this.resolveClaimedWorkspaceDestination(profileAfterMembership, roleAfterMembership, true);
-      this.invites.debugFlow('navigating to dashboard', { route: this.safeRouteForDebug(route) });
-      return route;
+      this.queueInviteWelcome(route);
+      this.invites.debugFlow('navigating to welcome', { route: this.safeRouteForDebug(route) });
+      return '/app/welcome';
     }
 
     this.invites.setInviteClaimError('Invite accepted, but workspace context could not be loaded.');
@@ -553,7 +555,9 @@ export class PostLoginRoutingService {
       this.invites.clearClaimInProgressForToken(token);
       this.invites.clearInviteClaimError();
       const role = this.normalizeRole(context.activeMemberRole);
-      return this.resolveClaimedWorkspaceDestination(context.activeBusinessProfileId, role, true);
+      const route = this.resolveClaimedWorkspaceDestination(context.activeBusinessProfileId, role, true);
+      this.queueInviteWelcome(route);
+      return '/app/welcome';
     }
 
     if (context.activeBusinessProfileId) {
@@ -571,9 +575,12 @@ export class PostLoginRoutingService {
     return `/invites/claim?token=${encodeURIComponent(token)}`;
   }
 
-  private queueInviteWelcome(): void {
+  private queueInviteWelcome(destinationRoute: string): void {
     const context = this.companyContext.snapshot().context;
-    this.postAuthWelcome.queueInviteWelcome(context.activeBusinessProfileName ?? 'your organization');
+    this.postAuthWelcome.queueInviteWelcome(
+      context.activeBusinessProfileName ?? 'your organization',
+      destinationRoute
+    );
   }
 
   private sanitizeExplicitRedirect(path: string): string {

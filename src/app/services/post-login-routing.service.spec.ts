@@ -108,9 +108,9 @@ describe('PostLoginRoutingService invite welcome handoff', () => {
   it('queues the invite welcome only after the claim succeeds', async () => {
     const route = await service.resolveDestination();
 
-    expect(route).toBe('/app/dashboard');
+    expect(route).toBe('/app/welcome');
     expect(welcomeSpy.queueInviteWelcome).toHaveBeenCalledTimes(1);
-    expect(welcomeSpy.queueInviteWelcome).toHaveBeenCalledWith('Northwind Logistics');
+    expect(welcomeSpy.queueInviteWelcome).toHaveBeenCalledWith('Northwind Logistics', '/app/dashboard');
   });
 
   it('does not queue the invite welcome when the claim fails', async () => {

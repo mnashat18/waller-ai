@@ -2,8 +2,10 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { CompanyContextService } from '../../core/context/company-context.service';
 import { AuthService } from '../../services/auth';
 import { InviteService } from '../../services/invites';
+import { PostAuthWelcomeService } from '../../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 
 @Component({
@@ -27,7 +29,9 @@ export class LoginComponent implements OnInit {
     private invites: InviteService,
     private route: ActivatedRoute,
     private router: Router,
-    private postLoginRouting: PostLoginRoutingService
+    private postLoginRouting: PostLoginRoutingService,
+    private companyContext: CompanyContextService,
+    private postAuthWelcome: PostAuthWelcomeService
   ) {
     this.syncInviteContext();
     this.authNotice = this.auth.consumeAuthNotice() ?? '';
@@ -79,6 +83,11 @@ export class LoginComponent implements OnInit {
             return;
           }
           const nextRoute = await this.postLoginRouting.resolveDestination();
+          const shouldShowWelcome = this.queueWelcomeIfReady(nextRoute);
+          if (shouldShowWelcome) {
+            await this.router.navigateByUrl('/app/welcome', { replaceUrl: true });
+            return;
+          }
           await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
         } catch {
           this.authNotice = 'Unable to continue after login. Please try again.';
@@ -144,5 +153,30 @@ export class LoginComponent implements OnInit {
       query.has('token') ||
       query.has('code')
     );
+  }
+
+  private queueWelcomeIfReady(nextRoute: string): boolean {
+    const normalized = nextRoute.trim().toLowerCase();
+    if (
+      !normalized ||
+      normalized.startsWith('/app/workspace-access') ||
+      normalized.startsWith('/app/workspace-restricted') ||
+      normalized.startsWith('/app/welcome')
+    ) {
+      return false;
+    }
+
+    if (!normalized.startsWith('/app/') && !normalized.startsWith('/employee-web-access')) {
+      return false;
+    }
+
+    const context = this.companyContext.snapshot().context;
+    if (!context.activeBusinessProfileId || !context.activeMemberRole) {
+      return false;
+    }
+
+    const firstName = String(context.currentUser?.first_name ?? context.userDisplayName ?? '').trim().split(/\s+/u)[0] || 'there';
+    this.postAuthWelcome.queueReturningWelcome(firstName, nextRoute);
+    return true;
   }
 }

@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import { CanActivateFn, CanMatchFn, Router, Routes } from '@angular/router';
+import { CanActivateFn, CanMatchFn, Router, Routes, UrlMatcher } from '@angular/router';
 import { environment } from '../environments/environment';
 
 import { PublicLayout } from './public.layout/public.layout';
@@ -14,6 +14,8 @@ import { AuditLogsMobileComponent } from './Pages/mobile/audit-logs-mobile.compo
 
 import { CompanyContextService } from './core/context/company-context.service';
 import { InviteService } from './services/invites';
+import { PostAuthWelcomeService } from './services/post-auth-welcome.service';
+import { PostLoginRoutingService } from './services/post-login-routing.service';
 import { AppShellComponent } from './dashboard-shell/app-shell.component';
 
 const isLikelyJwt = (token: string): boolean => {
@@ -419,6 +421,35 @@ const activeRoleRouteGuard = (allowedRoles: string[]): CanActivateFn => (_, stat
 
 const ownerHrRouteGuard = activeRoleRouteGuard(['owner', 'hr']);
 
+const welcomeIntentGuard: CanActivateFn = async () => {
+  const router = inject(Router);
+  const postAuthWelcome = inject(PostAuthWelcomeService);
+  const postLoginRouting = inject(PostLoginRoutingService);
+
+  if (postAuthWelcome.hasPendingIntent()) {
+    return true;
+  }
+
+  try {
+    const nextRoute = await postLoginRouting.resolveDestinationStrict();
+    return router.parseUrl(nextRoute || '/app/workspace-access');
+  } catch {
+    return router.parseUrl('/app/workspace-access');
+  }
+};
+
+const appWelcomeMatcher: UrlMatcher = (segments) => {
+  if (segments.length !== 2) {
+    return null;
+  }
+
+  if (segments[0]?.path !== 'app' || segments[1]?.path !== 'welcome') {
+    return null;
+  }
+
+  return { consumed: segments.slice(0, 2) };
+};
+
 export const ownerWorkspaceGuard: CanActivateFn = (_, state) => {
   const token = getStoredToken();
 
@@ -608,6 +639,12 @@ export const routes: Routes = [
   },
 
   /* ================= NEW AUTHENTICATED APP ================= */
+  {
+    matcher: appWelcomeMatcher,
+    canActivate: [appAuthGuard, businessOnboardingGuard, welcomeIntentGuard],
+    loadComponent: () =>
+      import('./Pages/welcome/welcome').then((m) => m.WelcomePageComponent)
+  },
   {
     path: 'app',
     component: AppShellComponent,

@@ -51,7 +51,7 @@ export class WorkspaceActivatingPageComponent implements OnInit {
       const verified = await this.tryActivateOwnerSession(activation);
       if (verified) {
         this.workspaceActivation.clearActivation();
-        await this.router.navigateByUrl('/app/dashboard', { replaceUrl: true });
+        await this.router.navigateByUrl('/app/welcome', { replaceUrl: true });
         return;
       }
 
@@ -106,7 +106,8 @@ export class WorkspaceActivatingPageComponent implements OnInit {
         this.postAuthWelcome.queueWorkspaceWelcome(
           this.resolveWelcomeFirstName(
             refreshedUser?.first_name ?? context.currentUser?.first_name ?? context.userDisplayName
-          )
+          ),
+          '/app/dashboard'
         );
       }
 

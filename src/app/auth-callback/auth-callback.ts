@@ -95,19 +95,23 @@ export class AuthCallbackComponent implements OnInit {
           if (user) {
             try {
               const inviteToken = this.invites.getPendingInviteToken();
-              if (inviteToken) {
-                await this.router.navigate(['/invites/claim'], {
-                  queryParams: { token: inviteToken },
-                  replaceUrl: true
-                });
-                return;
-              }
-              const nextRoute = await this.postLoginRouting.resolveDestination();
-              this.queueReturningWelcomeIfReady(nextRoute);
-              await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
-            } catch (error) {
-              this.fail((error as { message?: string })?.message || 'Unable to continue after login.');
+            if (inviteToken) {
+              await this.router.navigate(['/invites/claim'], {
+                queryParams: { token: inviteToken },
+                replaceUrl: true
+              });
+              return;
             }
+            const nextRoute = await this.postLoginRouting.resolveDestination();
+            const shouldShowWelcome = this.queueReturningWelcomeIfReady(nextRoute);
+            if (shouldShowWelcome) {
+              await this.router.navigateByUrl('/app/welcome', { replaceUrl: true });
+              return;
+            }
+            await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
+          } catch (error) {
+            this.fail((error as { message?: string })?.message || 'Unable to continue after login.');
+          }
             return;
           }
 
@@ -142,17 +146,32 @@ export class AuthCallbackComponent implements OnInit {
     this.message = msg;
   }
 
-  private queueReturningWelcomeIfReady(nextRoute: string): void {
-    if (!nextRoute.startsWith('/app/dashboard')) {
-      return;
+  private queueReturningWelcomeIfReady(nextRoute: string): boolean {
+    if (!this.shouldQueueWelcomeForRoute(nextRoute)) {
+      return false;
     }
 
     const context = this.companyContext.snapshot().context;
     if (!context.activeBusinessProfileId || !context.activeMemberRole) {
-      return;
+      return false;
     }
 
     const firstName = String(context.currentUser?.first_name ?? context.userDisplayName ?? '').trim().split(/\s+/u)[0] || 'there';
-    this.postAuthWelcome.queueReturningWelcome(firstName);
+    this.postAuthWelcome.queueReturningWelcome(firstName, nextRoute);
+    return true;
+  }
+
+  private shouldQueueWelcomeForRoute(nextRoute: string): boolean {
+    const normalized = nextRoute.trim().toLowerCase();
+    if (
+      !normalized ||
+      normalized.startsWith('/app/workspace-access') ||
+      normalized.startsWith('/app/workspace-restricted') ||
+      normalized.startsWith('/app/welcome')
+    ) {
+      return false;
+    }
+
+    return normalized.startsWith('/app/') || normalized.startsWith('/employee-web-access');
   }
 }

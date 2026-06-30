@@ -173,7 +173,7 @@
     </div>
 
     <div class="auth-access-status" *ngIf="resolvingOrganizationAccess" role="status" aria-live="polite">
-      Preparing your organization access...
+      Preparing your workspace...
     </div>
 
     <div class="auth-mode-tabs" role="tablist" aria-label="Authentication mode">
@@ -295,7 +295,7 @@
         </label>
         <p class="trial-note">Create your account, then set up your organization in the next step.</p>
         <button class="auth-primary" type="submit" [disabled]="authBusy">
-          {{ resolvingOrganizationAccess ? 'Preparing your organization access...' : (submitting ? 'Creating account...' : (inviteMode ? 'Create account and join organization' : 'Create account')) }}
+          {{ resolvingOrganizationAccess ? 'Preparing your workspace...' : (submitting ? 'Creating account...' : (inviteMode ? 'Create account and join organization' : 'Create account')) }}
         </button>
       </form>
 
@@ -334,7 +334,7 @@
         </label>
         <a routerLink="/reset-password" class="auth-forgot">Forgot password?</a>
         <button class="auth-primary" type="submit" [disabled]="authBusy || !loginFormValid">
-          {{ resolvingOrganizationAccess ? 'Preparing your organization access...' : (submitting ? 'Signing in...' : (inviteMode ? 'Log in to join your organization' : 'Log in')) }}
+          {{ resolvingOrganizationAccess ? 'Preparing your workspace...' : (submitting ? 'Signing in...' : (inviteMode ? 'Log in to join your organization' : 'Log in')) }}
         </button>
       </form>
 

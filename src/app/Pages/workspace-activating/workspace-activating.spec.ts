@@ -110,9 +110,9 @@ describe('WorkspaceActivatingPageComponent', () => {
     expect(authSpy.getCurrentUserWithFields).toHaveBeenCalled();
     expect(postLoginRoutingSpy.refreshAuthAndWorkspaceContext).toHaveBeenCalledWith({ force: true, failOnError: true });
     expect(postAuthWelcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledTimes(1);
-    expect(postAuthWelcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledWith('Owner');
+    expect(postAuthWelcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledWith('Owner', '/app/dashboard');
     expect(workspaceActivationSpy.clearActivation).toHaveBeenCalled();
-    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
+    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/welcome', { replaceUrl: true });
   });
 
   it('logs out and redirects to login with a one-time notice after bounded refresh failure', async () => {

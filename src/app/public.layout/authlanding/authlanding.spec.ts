@@ -132,6 +132,7 @@ describe('Authlanding', () => {
 
   afterEach(() => {
     fixture?.destroy();
+    vi.useRealTimers();
   });
 
   async function renderSignupModal(): Promise<void> {
@@ -544,7 +545,14 @@ describe('Authlanding', () => {
     expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
   });
 
-  it('keeps the normal successful login path unchanged', async () => {
+  it('keeps the login modal visible and disabled while workspace readiness is confirmed', async () => {
+    let resolveDestination!: (value: string) => void;
+    postLoginRoutingSpy.resolveDestination = vi.fn(
+      () => new Promise<string>((resolve) => {
+        resolveDestination = resolve;
+      })
+    );
+
     const router = TestBed.inject(Router);
     const navigateByUrlSpy = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
 
@@ -554,12 +562,19 @@ describe('Authlanding', () => {
 
     loginSubmitButton().click();
     fixture.detectChanges();
+
+    expect(component.showAuthModal).toBe(true);
+    expect(component.authBusy).toBe(true);
+    expect(loginSubmitButton().disabled).toBe(true);
+    expect(loginFeedbackText()).toBe('Preparing your workspace...');
+
+    resolveDestination('/app/dashboard');
     await fixture.whenStable();
     await new Promise((resolve) => setTimeout(resolve, 0));
     fixture.detectChanges();
 
-    expect(authSpy.login).toHaveBeenCalledWith('owner@gmail.com', 'ValidPass123');
-    expect(navigateByUrlSpy).toHaveBeenCalledWith('/app/workspace-access', { replaceUrl: true });
+    expect(component.showAuthModal).toBe(false);
+    expect(navigateByUrlSpy).toHaveBeenCalledWith('/app/welcome', { replaceUrl: true });
   });
 
   it('queues a returning-user welcome exactly once after a successful login reaches the dashboard', async () => {
@@ -578,8 +593,9 @@ describe('Authlanding', () => {
     fixture.detectChanges();
 
     expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledTimes(1);
-    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledWith('Avery');
+    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledWith('Avery', '/app/dashboard');
     expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
+    expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/app/welcome', { replaceUrl: true });
   });
 
   it('queues a workspace welcome exactly once after a successful signup reaches the dashboard', async () => {
@@ -600,7 +616,8 @@ describe('Authlanding', () => {
     fixture.detectChanges();
 
     expect(welcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledTimes(1);
-    expect(welcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledWith('Avery');
+    expect(welcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledWith('Avery', '/app/dashboard');
     expect(welcomeSpy.queueReturningWelcome).not.toHaveBeenCalled();
+    expect(TestBed.inject(Router).navigateByUrl).toHaveBeenCalledWith('/app/welcome', { replaceUrl: true });
   });
 });
