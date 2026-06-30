@@ -128,11 +128,14 @@ describe('SidebarComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
+    const body = fixture.nativeElement.querySelector('.app-sidebar__body') as HTMLElement;
     const footer = fixture.nativeElement.querySelector('.app-sidebar__footer') as HTMLElement;
-    const styles = getComputedStyle(footer);
+    const bodyStyles = getComputedStyle(body);
+    const footerStyles = getComputedStyle(footer);
 
-    expect(styles.position).toBe('static');
-    expect(styles.position).not.toBe('sticky');
+    expect(bodyStyles.overflowY).not.toBe('auto');
+    expect(footerStyles.position).toBe('static');
+    expect(footerStyles.position).not.toBe('sticky');
   });
 
   it('opens a body-level account menu that routes to personal settings and closes on Escape', async () => {

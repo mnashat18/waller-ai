@@ -27,18 +27,6 @@
 
             <app-role-badge *ngIf="vm.role" [role]="vm.role"></app-role-badge>
           </div>
-
-          <dl class="app-sidebar__company-context">
-            <div class="app-sidebar__company-context-row">
-              <dt>Scope</dt>
-              <dd>{{ vm.scopeValue }}</dd>
-            </div>
-
-            <div class="app-sidebar__company-context-row">
-              <dt>Department</dt>
-              <dd>{{ vm.departmentValue }}</dd>
-            </div>
-          </dl>
         </section>
 
         <ng-container *ngIf="vm.groups.length">
