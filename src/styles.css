@@ -4665,19 +4665,31 @@ body::selection {
 
   .app-shell .app-shell__grid {
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr) !important;
+    min-height: 100dvh;
+    align-items: stretch;
   }
 
   .app-shell .app-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
     width: var(--sidebar-width) !important;
     min-width: var(--sidebar-width) !important;
     max-width: var(--sidebar-width) !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    align-self: stretch;
+    z-index: 40 !important;
+    overflow: visible;
   }
 
   .app-shell .app-sidebar__panel {
     width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
     align-items: stretch !important;
     padding-left: 1rem !important;
     padding-right: 1rem !important;
+    overflow: hidden !important;
   }
 
   .app-shell .app-sidebar__nav,
@@ -4957,6 +4969,7 @@ body::selection {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
     max-width: var(--sidebar-width);
+    position: fixed;
   }
 
   .app-page-shell,

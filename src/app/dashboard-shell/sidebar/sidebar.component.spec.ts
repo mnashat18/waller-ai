@@ -124,6 +124,17 @@ describe('SidebarComponent', () => {
     expect(control.textContent).toContain('Owner');
   });
 
+  it('keeps the account footer anchored without sticky positioning', async () => {
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const footer = fixture.nativeElement.querySelector('.app-sidebar__footer') as HTMLElement;
+    const styles = getComputedStyle(footer);
+
+    expect(styles.position).toBe('static');
+    expect(styles.position).not.toBe('sticky');
+  });
+
   it('opens a body-level account menu that routes to personal settings and closes on Escape', async () => {
     await fixture.whenStable();
     fixture.detectChanges();
