@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import { CompanyContextService, type ActiveMembershipContext } from '../core/context/company-context.service';
 import { AuthService } from './auth';
 import { InviteService } from './invites';
+import { PostAuthWelcomeService } from './post-auth-welcome.service';
 
 @Injectable({ providedIn: 'root' })
 export class PostLoginRoutingService {
@@ -14,7 +15,8 @@ export class PostLoginRoutingService {
   constructor(
     private auth: AuthService,
     private companyContext: CompanyContextService,
-    private invites: InviteService
+    private invites: InviteService,
+    private postAuthWelcome: PostAuthWelcomeService
   ) {}
 
   async resolveDestination(): Promise<string> {
@@ -394,6 +396,7 @@ export class PostLoginRoutingService {
       await this.refreshAuthTokenAfterInviteRoleChange();
       await this.activateClaimedInviteMembership(claimResult.businessProfileId);
       await this.refreshInviteContexts();
+      this.queueInviteWelcome();
       return await this.resolveFinalRouteAfterClaim(token, claimResult);
     } catch (error) {
       this.invites.clearClaimInProgressForToken(token);
@@ -566,6 +569,11 @@ export class PostLoginRoutingService {
     }
 
     return `/invites/claim?token=${encodeURIComponent(token)}`;
+  }
+
+  private queueInviteWelcome(): void {
+    const context = this.companyContext.snapshot().context;
+    this.postAuthWelcome.queueInviteWelcome(context.activeBusinessProfileName ?? 'your organization');
   }
 
   private sanitizeExplicitRedirect(path: string): string {

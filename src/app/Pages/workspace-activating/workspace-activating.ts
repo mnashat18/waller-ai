@@ -6,6 +6,7 @@ import { timeout } from 'rxjs/operators';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { AuthService } from '../../services/auth';
+import { PostAuthWelcomeService } from '../../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import {
   type PendingWorkspaceActivation,
@@ -30,6 +31,7 @@ export class WorkspaceActivatingPageComponent implements OnInit {
     private auth: AuthService,
     private companyContext: CompanyContextService,
     private postLoginRouting: PostLoginRoutingService,
+    private postAuthWelcome: PostAuthWelcomeService,
     private workspaceActivation: WorkspaceActivationService,
     private router: Router
   ) {}
@@ -100,6 +102,14 @@ export class WorkspaceActivatingPageComponent implements OnInit {
       const workspaceMatches = context.activeBusinessProfileId === activation.businessProfileId;
       const memberRoleMatches = String(context.activeMemberRole ?? '').toLowerCase() === 'owner';
 
+      if (sessionReady && workspaceMatches && memberRoleMatches) {
+        this.postAuthWelcome.queueWorkspaceWelcome(
+          this.resolveWelcomeFirstName(
+            refreshedUser?.first_name ?? context.currentUser?.first_name ?? context.userDisplayName
+          )
+        );
+      }
+
       return sessionReady && workspaceMatches && memberRoleMatches;
     } catch {
       return false;
@@ -127,6 +137,15 @@ export class WorkspaceActivatingPageComponent implements OnInit {
     const record = role as Record<string, unknown>;
     const roleName = typeof record['name'] === 'string' ? record['name'].trim().toLowerCase() : '';
     return roleName === 'owner';
+  }
+
+  private resolveWelcomeFirstName(value: string | null | undefined): string {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) {
+      return 'there';
+    }
+
+    return normalized.split(/\s+/u)[0] ?? 'there';
   }
 
   private sleep(ms: number): Promise<void> {

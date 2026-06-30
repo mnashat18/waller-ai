@@ -5,7 +5,9 @@ import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../services/auth';
 import { of, Subscription } from 'rxjs';
 import { catchError, filter, finalize, map, switchMap, timeout } from 'rxjs/operators';
+import { CompanyContextService } from '../../core/context/company-context.service';
 import { InviteService } from '../../services/invites';
+import { PostAuthWelcomeService } from '../../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewport-dialog.component';
 
@@ -100,6 +102,8 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     private route: ActivatedRoute,
     private invites: InviteService,
     private postLoginRouting: PostLoginRoutingService,
+    private companyContext: CompanyContextService,
+    private postAuthWelcome: PostAuthWelcomeService,
     private cdr: ChangeDetectorRef
   ) {}
 
@@ -391,6 +395,10 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
 
       this.closeAuth(false);
       const nextRoute = await this.resolvePostLoginDestinationOrShowAccessError();
+      if (!nextRoute) {
+        return;
+      }
+      this.queueWorkspaceWelcomeIfReady(nextRoute);
       await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
     });
   }
@@ -434,6 +442,7 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
         return;
       }
 
+      this.queueReturningWelcomeIfReady(nextRoute);
       this.closeAuth(false);
       await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
     });
@@ -555,6 +564,45 @@ export class Authlanding implements AfterViewInit, OnInit, OnDestroy {
     }
 
     return this.invites.getPendingInviteToken();
+  }
+
+  private queueReturningWelcomeIfReady(nextRoute: string): void {
+    if (!nextRoute.startsWith('/app/dashboard')) {
+      return;
+    }
+
+    const context = this.companyContext.snapshot().context;
+    if (!context.activeBusinessProfileId || !context.activeMemberRole) {
+      return;
+    }
+
+    this.postAuthWelcome.queueReturningWelcome(
+      this.resolveWelcomeFirstName(context.currentUser?.first_name ?? context.userDisplayName)
+    );
+  }
+
+  private queueWorkspaceWelcomeIfReady(nextRoute: string): void {
+    if (!nextRoute.startsWith('/app/dashboard')) {
+      return;
+    }
+
+    const context = this.companyContext.snapshot().context;
+    if (!context.activeBusinessProfileId || !context.activeMemberRole) {
+      return;
+    }
+
+    this.postAuthWelcome.queueWorkspaceWelcome(
+      this.resolveWelcomeFirstName(context.currentUser?.first_name ?? context.userDisplayName)
+    );
+  }
+
+  private resolveWelcomeFirstName(value: string | null | undefined): string {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) {
+      return 'there';
+    }
+
+    return normalized.split(/\s+/u)[0] ?? 'there';
   }
 
   private focusProductFragment(): void {

@@ -68,7 +68,7 @@ export class LayoutComponent implements OnDestroy, OnInit {
       this.isTransitioning = true;
       this.transitionTimer = setTimeout(() => {
         this.isTransitioning = false;
-      }, 420);
+      }, 160);
     }, 0);
   }
 

@@ -295,7 +295,7 @@
   font-size: 0.7rem;
   font-weight: 800;
   line-height: 1.2;
-  transition: all 0.18s ease;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
   white-space: nowrap;
 }
 

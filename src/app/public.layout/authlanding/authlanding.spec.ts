@@ -3,8 +3,10 @@ import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angul
 import { BehaviorSubject, NEVER, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 
+import { CompanyContextService } from '../../core/context/company-context.service';
 import { AuthService } from '../../services/auth';
 import { InviteService } from '../../services/invites';
+import { PostAuthWelcomeService } from '../../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import { Authlanding } from './authlanding';
 
@@ -27,6 +29,16 @@ describe('Authlanding', () => {
     loginWithGoogle: ReturnType<typeof vi.fn>;
     setPostAuthRedirect: ReturnType<typeof vi.fn>;
   };
+  let companyContextSpy: {
+    snapshot: ReturnType<typeof vi.fn>;
+  };
+  let welcomeSpy: {
+    queueReturningWelcome: ReturnType<typeof vi.fn>;
+    queueWorkspaceWelcome: ReturnType<typeof vi.fn>;
+  };
+  let postLoginRoutingSpy: {
+    resolveDestination: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     queryParams$ = new BehaviorSubject(convertToParamMap({ auth: 'signup' }));
@@ -45,6 +57,38 @@ describe('Authlanding', () => {
       login: vi.fn(() => of({ access_token: 'token' })),
       loginWithGoogle: vi.fn(),
       setPostAuthRedirect: vi.fn()
+    };
+    companyContextSpy = {
+      snapshot: vi.fn(() => ({
+        context: {
+          currentUser: {
+            id: 'user-1',
+            email: 'owner@example.com',
+            first_name: 'Avery',
+            last_name: 'Owner'
+          },
+          userId: 'user-1',
+          userDisplayName: 'Avery Owner',
+          userEmail: 'owner@example.com',
+          isAuthenticated: true,
+          authInitialized: true,
+          workspaceInitialized: true,
+          activeBusinessProfileId: 'profile-1',
+          activeBusinessProfileName: 'Wellar',
+          activeDepartmentId: null,
+          activeDepartmentName: null,
+          activeMemberRole: 'owner',
+          availableCompanies: [],
+          hubReason: null
+        }
+      }))
+    };
+    welcomeSpy = {
+      queueReturningWelcome: vi.fn(),
+      queueWorkspaceWelcome: vi.fn()
+    };
+    postLoginRoutingSpy = {
+      resolveDestination: vi.fn(() => Promise.resolve('/app/workspace-access'))
     };
 
     await TestBed.configureTestingModule({
@@ -68,7 +112,15 @@ describe('Authlanding', () => {
         },
         {
           provide: PostLoginRoutingService,
-          useValue: { resolveDestination: () => Promise.resolve('/app/workspace-access') }
+          useValue: postLoginRoutingSpy
+        },
+        {
+          provide: CompanyContextService,
+          useValue: companyContextSpy
+        },
+        {
+          provide: PostAuthWelcomeService,
+          useValue: welcomeSpy
         }
       ]
     })
@@ -76,6 +128,10 @@ describe('Authlanding', () => {
 
     fixture = TestBed.createComponent(Authlanding);
     component = fixture.componentInstance;
+  });
+
+  afterEach(() => {
+    fixture?.destroy();
   });
 
   async function renderSignupModal(): Promise<void> {
@@ -361,6 +417,8 @@ describe('Authlanding', () => {
     expect(
       Array.from(document.body.querySelectorAll('button')).some((button) => button.textContent?.trim() === 'Log in')
     ).toBe(true);
+    expect(welcomeSpy.queueReturningWelcome).not.toHaveBeenCalled();
+    expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
   });
 
   it('shows only the generic login failure copy for bad credentials', async () => {
@@ -390,6 +448,8 @@ describe('Authlanding', () => {
     expect(text).toContain('Email or password is incorrect.');
     expect(text).not.toContain('INVALID_PROVIDER');
     expect(text).not.toContain('Directus');
+    expect(welcomeSpy.queueReturningWelcome).not.toHaveBeenCalled();
+    expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
   });
 
   it('clears busy state and does not route after a 401 login failure', async () => {
@@ -448,6 +508,8 @@ describe('Authlanding', () => {
       expect(component.authBusy).toBe(false);
       expect(loginSubmitButton().disabled).toBe(false);
       expect(navigateByUrlSpy).not.toHaveBeenCalled();
+      expect(welcomeSpy.queueReturningWelcome).not.toHaveBeenCalled();
+      expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -478,6 +540,8 @@ describe('Authlanding', () => {
     expect(feedback).not.toContain('directus');
     expect(component.submitting).toBe(false);
     expect(component.authBusy).toBe(false);
+    expect(welcomeSpy.queueReturningWelcome).not.toHaveBeenCalled();
+    expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
   });
 
   it('keeps the normal successful login path unchanged', async () => {
@@ -496,5 +560,47 @@ describe('Authlanding', () => {
 
     expect(authSpy.login).toHaveBeenCalledWith('owner@gmail.com', 'ValidPass123');
     expect(navigateByUrlSpy).toHaveBeenCalledWith('/app/workspace-access', { replaceUrl: true });
+  });
+
+  it('queues a returning-user welcome exactly once after a successful login reaches the dashboard', async () => {
+    const router = TestBed.inject(Router);
+    vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    postLoginRoutingSpy.resolveDestination = vi.fn(() => Promise.resolve('/app/dashboard'));
+
+    await renderLoginModal();
+    await setLoginInputValue('loginEmail', 'owner@gmail.com');
+    await setLoginInputValue('loginPassword', 'ValidPass123');
+
+    loginSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledTimes(1);
+    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledWith('Avery');
+    expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
+  });
+
+  it('queues a workspace welcome exactly once after a successful signup reaches the dashboard', async () => {
+    const router = TestBed.inject(Router);
+    vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    postLoginRoutingSpy.resolveDestination = vi.fn(() => Promise.resolve('/app/dashboard'));
+
+    await renderSignupModal();
+    await setSignupInputValue('firstName', 'Avery');
+    await setSignupInputValue('lastName', 'Owner');
+    await setSignupInputValue('email', 'owner@example.com');
+    await setSignupInputValue('password', 'ValidPass123');
+
+    signupSubmitButton().click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(welcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledTimes(1);
+    expect(welcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledWith('Avery');
+    expect(welcomeSpy.queueReturningWelcome).not.toHaveBeenCalled();
   });
 });

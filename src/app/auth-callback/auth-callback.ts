@@ -2,8 +2,10 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, map, of, switchMap, take, timeout } from 'rxjs';
+import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthService } from '../services/auth';
 import { InviteService } from '../services/invites';
+import { PostAuthWelcomeService } from '../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../services/post-login-routing.service';
 import { LoadingStateComponent } from '../shared/ui/loading-state/loading-state.component';
 
@@ -52,7 +54,9 @@ export class AuthCallbackComponent implements OnInit {
     private router: Router,
     private auth: AuthService,
     private invites: InviteService,
-    private postLoginRouting: PostLoginRoutingService
+    private postLoginRouting: PostLoginRoutingService,
+    private companyContext: CompanyContextService,
+    private postAuthWelcome: PostAuthWelcomeService
   ) {}
 
   ngOnInit(): void {
@@ -99,6 +103,7 @@ export class AuthCallbackComponent implements OnInit {
                 return;
               }
               const nextRoute = await this.postLoginRouting.resolveDestination();
+              this.queueReturningWelcomeIfReady(nextRoute);
               await this.router.navigateByUrl(nextRoute || '/app/workspace-access', { replaceUrl: true });
             } catch (error) {
               this.fail((error as { message?: string })?.message || 'Unable to continue after login.');
@@ -135,5 +140,19 @@ export class AuthCallbackComponent implements OnInit {
   private fail(msg: string) {
     this.status = 'error';
     this.message = msg;
+  }
+
+  private queueReturningWelcomeIfReady(nextRoute: string): void {
+    if (!nextRoute.startsWith('/app/dashboard')) {
+      return;
+    }
+
+    const context = this.companyContext.snapshot().context;
+    if (!context.activeBusinessProfileId || !context.activeMemberRole) {
+      return;
+    }
+
+    const firstName = String(context.currentUser?.first_name ?? context.userDisplayName ?? '').trim().split(/\s+/u)[0] || 'there';
+    this.postAuthWelcome.queueReturningWelcome(firstName);
   }
 }

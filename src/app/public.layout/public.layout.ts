@@ -117,7 +117,7 @@ export class PublicLayout implements AfterViewInit, OnDestroy {
       this.isTransitioning = true;
       this.transitionTimer = setTimeout(() => {
         this.isTransitioning = false;
-      }, 420);
+      }, 160);
     }, 0);
   }
 

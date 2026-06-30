@@ -451,21 +451,16 @@
 }
 
 .page-slot.is-transitioning {
-  animation: publicRouteReveal 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: publicRouteFade 0.16s ease-out both;
   transform-origin: 50% 0;
-  will-change: transform, opacity, filter;
 }
 
-@keyframes publicRouteReveal {
+@keyframes publicRouteFade {
   from {
-    opacity: 0;
-    transform: translateY(18px) scale(0.99);
-    filter: blur(3px);
+    opacity: 0.96;
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
   }
 }
 

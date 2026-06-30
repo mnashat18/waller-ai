@@ -4,8 +4,10 @@ import { of } from 'rxjs';
 import { vi } from 'vitest';
 
 import { InviteService } from '../services/invites';
+import { PostAuthWelcomeService } from '../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../services/post-login-routing.service';
 import { AuthService } from '../services/auth';
+import { CompanyContextService } from '../core/context/company-context.service';
 import { AuthCallbackComponent } from './auth-callback';
 
 describe('AuthCallbackComponent', () => {
@@ -14,6 +16,8 @@ describe('AuthCallbackComponent', () => {
   let authSpy: any;
   let inviteSpy: any;
   let postLoginRoutingSpy: any;
+  let companyContextSpy: any;
+  let welcomeSpy: any;
 
   beforeEach(async () => {
     routerSpy = {
@@ -36,6 +40,35 @@ describe('AuthCallbackComponent', () => {
     postLoginRoutingSpy = {
       resolveDestination: vi.fn(() => Promise.resolve('/app/dashboard'))
     };
+    companyContextSpy = {
+      snapshot: vi.fn(() => ({
+        context: {
+          currentUser: {
+            id: 'user-1',
+            email: 'owner@example.com',
+            first_name: 'Avery',
+            last_name: 'Owner'
+          },
+          userId: 'user-1',
+          userDisplayName: 'Avery Owner',
+          userEmail: 'owner@example.com',
+          isAuthenticated: true,
+          authInitialized: true,
+          workspaceInitialized: true,
+          activeBusinessProfileId: 'profile-1',
+          activeBusinessProfileName: 'Wellar',
+          activeDepartmentId: null,
+          activeDepartmentName: null,
+          activeMemberRole: 'owner',
+          availableCompanies: [],
+          hubReason: null
+        }
+      }))
+    };
+    welcomeSpy = {
+      queueReturningWelcome: vi.fn(),
+      queueWorkspaceWelcome: vi.fn()
+    };
 
     await TestBed.configureTestingModule({
       imports: [AuthCallbackComponent],
@@ -43,11 +76,17 @@ describe('AuthCallbackComponent', () => {
         { provide: Router, useValue: routerSpy },
         { provide: AuthService, useValue: authSpy },
         { provide: InviteService, useValue: inviteSpy },
-        { provide: PostLoginRoutingService, useValue: postLoginRoutingSpy }
+        { provide: PostLoginRoutingService, useValue: postLoginRoutingSpy },
+        { provide: CompanyContextService, useValue: companyContextSpy },
+        { provide: PostAuthWelcomeService, useValue: welcomeSpy }
       ]
     }).compileComponents();
 
     fixture = TestBed.createComponent(AuthCallbackComponent);
+  });
+
+  afterEach(() => {
+    fixture?.destroy();
   });
 
   it('redirects INVALID_PROVIDER callbacks to login with the exact safe notice', async () => {
@@ -106,5 +145,24 @@ describe('AuthCallbackComponent', () => {
     expect(postLoginRoutingSpy.resolveDestination).toHaveBeenCalledTimes(1);
     expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
     expect(authSpy.clearAuthRecoveryState).not.toHaveBeenCalled();
+  });
+
+  it('queues a returning-user welcome after a restored callback session resolves to the dashboard', async () => {
+    authSpy.captureAuthFromUrl.mockReturnValue({
+      stored: true,
+      accessToken: 'header.payload.signature',
+      hasCode: false
+    });
+    authSpy.getCurrentUser.mockReturnValue(of({ id: 'user-1' }));
+    postLoginRoutingSpy.resolveDestination.mockResolvedValue('/app/dashboard');
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledTimes(1);
+    expect(welcomeSpy.queueReturningWelcome).toHaveBeenCalledWith('Avery');
+    expect(welcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
   });
 });

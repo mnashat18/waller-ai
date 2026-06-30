@@ -13,13 +13,15 @@ import { Subscription } from 'rxjs';
 import { CompanyContextService } from '../core/context/company-context.service';
 import { isAuthOnlyRoute } from '../core/guards/dashboard-access.guards';
 import { getWorkspaceRouteByUrlPath } from '../ia/wellar-ia';
+import { PostAuthWelcomeService } from '../services/post-auth-welcome.service';
+import { PostAuthWelcomeComponent } from '../shared/ui/post-auth-welcome/post-auth-welcome.component';
 import { SidebarComponent } from './sidebar/sidebar.component';
 import { TopbarComponent } from './topbar/topbar.component';
 
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, SidebarComponent, TopbarComponent],
+  imports: [CommonModule, RouterOutlet, SidebarComponent, TopbarComponent, PostAuthWelcomeComponent],
   template: `
     <div
       class="app-shell"
@@ -66,6 +68,8 @@ import { TopbarComponent } from './topbar/topbar.component';
               </ng-container>
             </nav>
           </div>
+
+          <app-post-auth-welcome [intent]="postAuthWelcomeIntent$ | async"></app-post-auth-welcome>
 
           <main class="app-content">
             <div class="app-content-frame" [class.is-transitioning]="isTransitioning">
@@ -346,8 +350,13 @@ export class AppShellComponent implements OnInit, OnDestroy {
   constructor(
     private router: Router,
     private companyContext: CompanyContextService,
+    private postAuthWelcome: PostAuthWelcomeService,
     private cdr: ChangeDetectorRef
   ) {}
+
+  get postAuthWelcomeIntent$() {
+    return this.postAuthWelcome.intent$;
+  }
 
   ngOnInit(): void {
     this.updateRouteState();

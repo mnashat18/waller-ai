@@ -5,6 +5,7 @@ import { vi } from 'vitest';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { AuthService } from '../../services/auth';
+import { PostAuthWelcomeService } from '../../services/post-auth-welcome.service';
 import { PostLoginRoutingService } from '../../services/post-login-routing.service';
 import {
   WorkspaceActivationService,
@@ -18,6 +19,7 @@ describe('WorkspaceActivatingPageComponent', () => {
   let authSpy: any;
   let companyContextSpy: any;
   let postLoginRoutingSpy: any;
+  let postAuthWelcomeSpy: any;
   let workspaceActivationSpy: any;
 
   const pendingActivation: PendingWorkspaceActivation = {
@@ -35,6 +37,7 @@ describe('WorkspaceActivatingPageComponent', () => {
       getCurrentUserWithFields: vi.fn(() =>
         of({
           id: 'user-1',
+          first_name: 'Owner',
           role: { id: 'role-1', name: 'Owner' },
           active_business_profile: 'profile-1',
           active_member_role: 'owner'
@@ -59,6 +62,10 @@ describe('WorkspaceActivatingPageComponent', () => {
       refreshAuthAndWorkspaceContext: vi.fn(() => Promise.resolve([])),
       resolveDestinationStrict: vi.fn(() => Promise.resolve('/app/dashboard'))
     };
+    postAuthWelcomeSpy = {
+      queueReturningWelcome: vi.fn(),
+      queueWorkspaceWelcome: vi.fn()
+    };
     workspaceActivationSpy = {
       readActivation: vi.fn(() => pendingActivation),
       clearActivation: vi.fn()
@@ -71,11 +78,16 @@ describe('WorkspaceActivatingPageComponent', () => {
         { provide: AuthService, useValue: authSpy },
         { provide: CompanyContextService, useValue: companyContextSpy },
         { provide: PostLoginRoutingService, useValue: postLoginRoutingSpy },
+        { provide: PostAuthWelcomeService, useValue: postAuthWelcomeSpy },
         { provide: WorkspaceActivationService, useValue: workspaceActivationSpy }
       ]
     }).compileComponents();
 
     fixture = TestBed.createComponent(WorkspaceActivatingPageComponent);
+  });
+
+  afterEach(() => {
+    fixture?.destroy();
   });
 
   async function waitForCondition(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
@@ -97,6 +109,8 @@ describe('WorkspaceActivatingPageComponent', () => {
     expect(authSpy.refreshAuthTokenWithStoredRefreshToken).toHaveBeenCalledTimes(1);
     expect(authSpy.getCurrentUserWithFields).toHaveBeenCalled();
     expect(postLoginRoutingSpy.refreshAuthAndWorkspaceContext).toHaveBeenCalledWith({ force: true, failOnError: true });
+    expect(postAuthWelcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledTimes(1);
+    expect(postAuthWelcomeSpy.queueWorkspaceWelcome).toHaveBeenCalledWith('Owner');
     expect(workspaceActivationSpy.clearActivation).toHaveBeenCalled();
     expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
   });
@@ -115,6 +129,7 @@ describe('WorkspaceActivatingPageComponent', () => {
     );
     expect(workspaceActivationSpy.clearActivation).toHaveBeenCalled();
     expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/?auth=login', { replaceUrl: true });
+    expect(postAuthWelcomeSpy.queueWorkspaceWelcome).not.toHaveBeenCalled();
   });
 
   it('redirects without retrying creation when the activation page is revisited without pending state', async () => {
