@@ -190,7 +190,9 @@ function createQueryBuilder(table, state, scope) {
 
     if (table === 'business_profile_members as member') {
       if (equalityFilters.id && equalityFilters.user) {
-        return state.scenario.switchMembership ? [state.scenario.switchMembership] : [];
+        const switchMembership =
+          state.scenario.switchMembershipsById?.[String(equalityFilters.id)] ?? state.scenario.switchMembership;
+        return switchMembership ? [switchMembership] : [];
       }
 
       if (equalityFilters.id) {
@@ -248,7 +250,7 @@ function createQueryBuilder(table, state, scope) {
 
       if (table === 'business_profile_members as member') {
         if (equalityFilters.id && equalityFilters.user) {
-          return state.scenario.switchMembership;
+          return state.scenario.switchMembershipsById?.[String(equalityFilters.id)] ?? state.scenario.switchMembership;
         }
 
         if (equalityFilters.id) {
@@ -304,6 +306,13 @@ function createQueryBuilder(table, state, scope) {
           name: 'DatabaseError',
           code: '23514'
         });
+      }
+
+      if (table === 'directus_users') {
+        state.scenario.directusUserRow = {
+          ...(state.scenario.directusUserRow ?? { id: state.scenario.userId ?? null }),
+          ...updatePayload
+        };
       }
 
       if (table === 'departments' && filters.some((filter) => String(filter.column).split('.').at(-1) === 'id')) {
@@ -417,6 +426,7 @@ function createFakeDatabase(scenario = {}) {
       existingMembership: undefined,
       duplicateOwnerMembership: undefined,
       switchMembership: undefined,
+      switchMembershipsById: {},
       activeMembershipRows: [],
       managerMembersById: {},
       departmentRowsById: {},
@@ -470,6 +480,7 @@ function buildTestHarness(scenario = {}) {
     routeLoggerCalls,
     createWorkspaceHandler: router.handlers.get('POST /workspaces/create'),
     switchWorkspaceHandler: router.handlers.get('POST /workspaces/switch'),
+    contextHandler: router.handlers.get('GET /workspaces/context'),
     createDepartmentHandler: router.handlers.get('POST /organization/departments'),
     updateDepartmentHandler: router.handlers.get('PATCH /organization/departments/:departmentId'),
     deactivateDepartmentHandler: router.handlers.get('POST /organization/departments/:departmentId/deactivate')
@@ -570,6 +581,7 @@ await withOwnerRoleEnv(undefined, async () => {
   assert.equal(createResponse.body.error.code, 'CONFIGURATION_ERROR');
   assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
   assert.equal(database.calls.some((call) => call.table === 'business_profile_members'), false);
+  assert.equal(database.calls.some((call) => call.table === 'directus_users'), false);
 });
 
 await withOwnerRoleEnv('not-a-uuid', async () => {
@@ -595,6 +607,7 @@ await withOwnerRoleEnv('not-a-uuid', async () => {
   assert.equal(createResponse.body.error.code, 'CONFIGURATION_ERROR');
   assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
   assert.equal(database.calls.some((call) => call.table === 'business_profile_members'), false);
+  assert.equal(database.calls.some((call) => call.table === 'directus_users'), false);
 });
 
 await withOwnerRoleEnv(ownerRoleId, async () => {
@@ -623,6 +636,7 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
   assert.equal(createResponse.body.error.code, 'CONFIGURATION_ERROR');
   assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
   assert.equal(database.calls.some((call) => call.table === 'business_profile_members'), false);
+  assert.equal(database.calls.some((call) => call.table === 'directus_users'), false);
 });
 
 await withOwnerRoleEnv(ownerRoleId, async () => {
@@ -689,8 +703,10 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
 
   assert.equal(createResponse.statusCode, 200);
   const directusUserUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'directus_users');
-  assert.equal(directusUserUpdate.payload.role, undefined);
+  assert.equal(directusUserUpdate.payload.role, ownerRoleId);
   assert.equal(directusUserUpdate.payload.active_business_profile, 'existing-workspace');
+  assert.equal(directusUserUpdate.payload.active_department, null);
+  assert.equal(directusUserUpdate.payload.active_member_role, 'owner');
   assert.equal(database.calls.some((call) => call.table === 'business_profiles'), false);
   assert.equal(database.calls.some((call) => call.table === 'business_profile_members' && call.type === 'insert'), false);
 });
@@ -736,6 +752,222 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
   assert.equal(directusUserUpdate.payload.active_business_profile, 'switch-workspace');
   assert.equal(directusUserUpdate.payload.active_department, 'department-1');
   assert.equal(directusUserUpdate.payload.active_member_role, 'hr');
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const ownerMembership = {
+    id: 'membership-owner',
+    user: 'user-context',
+    status: 'active',
+    member_role: 'owner',
+    workspace_id: 'company-a',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Waller Demo Company',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const hrMembership = {
+    id: 'membership-hr',
+    user: 'user-context',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'company-b',
+    department_id: 'department-marketing',
+    joined_at: now,
+    company_name: 'abo ali',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: 'department-marketing',
+    department_name: 'Marketing & Sales',
+    department_business_profile: 'company-b',
+    department_is_active: true
+  };
+  const { database, contextHandler, switchWorkspaceHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [ownerMembership, hrMembership],
+    directusUserRow: {
+      id: 'user-context',
+      active_business_profile: 'company-a',
+      active_department: null,
+      active_member_role: 'owner'
+    },
+    switchMembershipsById: {
+      [String(ownerMembership.id)]: ownerMembership,
+      [String(hrMembership.id)]: hrMembership
+    }
+  });
+
+  const switchResponse = buildFakeResponse();
+  await switchWorkspaceHandler(
+    {
+      accountability: { user: 'user-context' },
+      body: {
+        membership_id: 'membership-hr'
+      }
+    },
+    switchResponse
+  );
+
+  assert.equal(switchResponse.statusCode, 200);
+  const switchUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'directus_users');
+  assert.equal(switchUpdate.payload.role, undefined);
+  assert.equal(switchUpdate.payload.active_business_profile, 'company-b');
+  assert.equal(switchUpdate.payload.active_department, 'department-marketing');
+  assert.equal(switchUpdate.payload.active_member_role, 'hr');
+
+  const contextResponse = buildFakeResponse();
+  await contextHandler(
+    {
+      accountability: { user: 'user-context' }
+    },
+    contextResponse
+  );
+
+  assert.equal(contextResponse.statusCode, 200);
+  assert.equal(contextResponse.body.data.active.membership.id, 'membership-hr');
+  assert.equal(contextResponse.body.data.active.workspace.id, 'company-b');
+  assert.equal(contextResponse.body.data.active.membership.memberRole, 'hr');
+  assert.equal(contextResponse.body.data.memberships.length, 2);
+  assert.deepEqual(
+    contextResponse.body.data.memberships.map((membership) => [membership.id, membership.workspace.id, membership.memberRole]),
+    [
+      ['membership-owner', 'company-a', 'owner'],
+      ['membership-hr', 'company-b', 'hr']
+    ]
+  );
+
+  const ownerSwitchResponse = buildFakeResponse();
+  await switchWorkspaceHandler(
+    {
+      accountability: { user: 'user-context' },
+      body: {
+        membership_id: 'membership-owner'
+      }
+    },
+    ownerSwitchResponse
+  );
+
+  assert.equal(ownerSwitchResponse.statusCode, 200);
+
+  const ownerContextResponse = buildFakeResponse();
+  await contextHandler(
+    {
+      accountability: { user: 'user-context' }
+    },
+    ownerContextResponse
+  );
+
+  assert.equal(ownerContextResponse.statusCode, 200);
+  assert.equal(ownerContextResponse.body.data.active.membership.id, 'membership-owner');
+  assert.equal(ownerContextResponse.body.data.active.workspace.id, 'company-a');
+  assert.equal(ownerContextResponse.body.data.active.membership.memberRole, 'owner');
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const ownerMembership = {
+    id: 'membership-owner-stale',
+    user: 'user-stale',
+    status: 'active',
+    member_role: 'owner',
+    workspace_id: 'company-a',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Waller Demo Company',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const hrMembership = {
+    id: 'membership-hr-stale',
+    user: 'user-stale',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'company-b',
+    department_id: 'department-marketing',
+    joined_at: now,
+    company_name: 'abo ali',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: 'department-marketing',
+    department_name: 'Marketing & Sales',
+    department_business_profile: 'company-b',
+    department_is_active: true
+  };
+  const { contextHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [ownerMembership, hrMembership],
+    directusUserRow: {
+      id: 'user-stale',
+      active_business_profile: 'stale-workspace',
+      active_department: null,
+      active_member_role: 'owner'
+    }
+  });
+
+  const contextResponse = buildFakeResponse();
+  await contextHandler(
+    {
+      accountability: { user: 'user-stale' }
+    },
+    contextResponse
+  );
+
+  assert.equal(contextResponse.statusCode, 200);
+  assert.equal(contextResponse.body.data.active.membership.id, 'membership-owner-stale');
+  assert.equal(contextResponse.body.data.active.workspace.id, 'company-a');
+  assert.equal(contextResponse.body.data.memberships.length, 2);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const switchMembership = {
+    id: 'membership-switch-validate',
+    user: 'user-switch-validate',
+    status: 'active',
+    member_role: 'hr',
+    workspace_id: 'switch-workspace',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Switch Workspace',
+    workspace_is_active: true,
+    plan_code: 'pro',
+    billing_status: 'active',
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, switchWorkspaceHandler } = buildTestHarness({
+    ownerRoleId,
+    switchMembership
+  });
+
+  const switchResponse = buildFakeResponse();
+  await switchWorkspaceHandler(
+    {
+      accountability: { user: 'user-switch-validate' },
+      body: {
+        membership_id: 'membership-switch-validate',
+        workspace_id: 'forbidden'
+      }
+    },
+    switchResponse
+  );
+
+  assert.equal(switchResponse.statusCode, 400);
+  assert.equal(switchResponse.body.error.message, 'Only membership_id is accepted.');
+  assert.equal(database.calls.some((call) => call.table === 'directus_users'), false);
 });
 
 await withOwnerRoleEnv(ownerRoleId, async () => {

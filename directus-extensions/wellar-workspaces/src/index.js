@@ -540,6 +540,56 @@ function selectCanonicalMembership(rows) {
   })[0];
 }
 
+function resolveActiveMembership(validMemberships, directusUserContext) {
+  if (!validMemberships.length) {
+    return null;
+  }
+
+  const activeBusinessProfileId = pickString(directusUserContext?.active_business_profile);
+  if (!activeBusinessProfileId) {
+    return selectCanonicalMembership(validMemberships);
+  }
+
+  const matchingWorkspaceMemberships = validMemberships.filter(
+    (row) => pickString(row.workspace_id) === activeBusinessProfileId
+  );
+  if (!matchingWorkspaceMemberships.length) {
+    return selectCanonicalMembership(validMemberships);
+  }
+
+  const activeDepartmentId = pickString(directusUserContext?.active_department);
+  const activeMemberRole = normalizeRole(directusUserContext?.active_member_role);
+
+  if (activeDepartmentId && activeMemberRole) {
+    const exactMatch = matchingWorkspaceMemberships.filter(
+      (row) =>
+        pickString(row.department_id) === activeDepartmentId &&
+        normalizeRole(row.member_role) === activeMemberRole
+    );
+    if (exactMatch.length) {
+      return selectCanonicalMembership(exactMatch);
+    }
+  }
+
+  if (activeDepartmentId) {
+    const departmentMatches = matchingWorkspaceMemberships.filter(
+      (row) => pickString(row.department_id) === activeDepartmentId
+    );
+    if (departmentMatches.length) {
+      return selectCanonicalMembership(departmentMatches);
+    }
+  }
+
+  if (activeMemberRole) {
+    const roleMatches = matchingWorkspaceMemberships.filter((row) => normalizeRole(row.member_role) === activeMemberRole);
+    if (roleMatches.length) {
+      return selectCanonicalMembership(roleMatches);
+    }
+  }
+
+  return selectCanonicalMembership(matchingWorkspaceMemberships);
+}
+
 async function loadActiveMembershipRows(trx, userId) {
   return trx('business_profile_members as member')
     .innerJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
@@ -1223,7 +1273,7 @@ async function loadOrganizationMembership(trx, userId) {
     .select('id', 'active_business_profile', 'active_department', 'active_member_role')
     .where({ id: userId })
     .first();
-  const active = selectCanonicalMembership(normalized);
+  const active = resolveActiveMembership(normalized, userRow);
   return { rows: normalized, active, userRow };
 }
 
@@ -1234,7 +1284,7 @@ async function loadOrganizationMembershipForWorkspace(trx, userId, workspaceId) 
     .select('id', 'active_business_profile', 'active_department', 'active_member_role')
     .where({ id: userId })
     .first();
-  const active = selectCanonicalMembership(normalized);
+  const active = resolveActiveMembership(normalized, userRow);
   return { rows: normalized, active, userRow };
 }
 
@@ -2572,7 +2622,7 @@ export default {
 
           const membershipRows = await loadActiveMembershipRows(trx, userId);
           const validMembershipRows = membershipRows.filter((row) => validateMembershipRow(row).ok);
-          const activeRow = selectCanonicalMembership(validMembershipRows);
+          const activeRow = resolveActiveMembership(validMembershipRows, userRow);
 
           if (activeRow) {
             const activeWorkspaceId = pickString(userRow?.active_business_profile);
@@ -2706,6 +2756,8 @@ export default {
             `wellar-workspace-create:user:${userId}`
           ]);
 
+          const ownerRoleId = await requireConfiguredOwnerRoleId(trx);
+
           const existingMembership = await trx('business_profile_members as member')
             .leftJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
             .select(
@@ -2729,27 +2781,28 @@ export default {
               existingMembership.status === 'active' &&
               existingMembership.business_profile;
 
-          if (isExistingSelfOwnedWorkspace) {
-            await trx('directus_users')
-              .where({ id: userId })
-              .update({
-                active_business_profile: existingMembership.business_profile,
-                active_department: null,
-                active_member_role: 'owner'
-              });
+            if (isExistingSelfOwnedWorkspace) {
+              await trx('directus_users')
+                .where({ id: userId })
+                .update({
+                  role: ownerRoleId,
+                  active_business_profile: existingMembership.business_profile,
+                  active_department: null,
+                  active_member_role: 'owner'
+                });
 
-            const existingContext = buildExistingContext(existingMembership);
-            return {
-              status: 200,
-              data: {
-                ...existingContext,
-                membership: {
-                  ...existingContext.membership,
-                  businessProfileId: String(existingMembership.business_profile)
+              const existingContext = buildExistingContext(existingMembership);
+              return {
+                status: 200,
+                data: {
+                  ...existingContext,
+                  membership: {
+                    ...existingContext.membership,
+                    businessProfileId: String(existingMembership.business_profile)
+                  }
                 }
-              }
-            };
-          }
+              };
+            }
 
             const error = new Error('This user already belongs to another workspace.');
             error.code = 'EXISTING_MEMBERSHIP';
@@ -2767,8 +2820,6 @@ export default {
             error.code = 'EXISTING_OWNER_MEMBERSHIP';
             throw error;
           }
-
-          const ownerRoleId = await requireConfiguredOwnerRoleId(trx);
 
           const [profile] = await trx('business_profiles')
             .insert(buildBusinessProfileInsertPayload(companyPayload.value, recordIds))
