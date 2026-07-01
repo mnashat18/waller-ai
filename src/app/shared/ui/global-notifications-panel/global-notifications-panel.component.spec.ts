@@ -1,28 +1,28 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideRouter, Router } from '@angular/router';
+import { provideRouter } from '@angular/router';
 import { BehaviorSubject } from 'rxjs';
 import { vi } from 'vitest';
 
-import { NotificationsService } from '../../services/notifications.service';
-import { TopbarComponent } from './topbar.component';
+import { NotificationsService } from '../../../services/notifications.service';
+import { GlobalNotificationsPanelComponent } from './global-notifications-panel.component';
 
-describe('TopbarComponent', () => {
-  let fixture: ComponentFixture<TopbarComponent>;
+describe('GlobalNotificationsPanelComponent', () => {
+  let fixture: ComponentFixture<GlobalNotificationsPanelComponent>;
   let notificationsState$: BehaviorSubject<any>;
 
   beforeEach(async () => {
     notificationsState$ = new BehaviorSubject({
-      unreadCount: 3,
+      unreadCount: 4,
       recentNotifications: [],
       loading: false,
       error: null,
-      activeWorkspaceId: null
+      activeWorkspaceId: 'profile-1'
     });
 
     await TestBed.configureTestingModule({
-      imports: [TopbarComponent],
+      imports: [GlobalNotificationsPanelComponent],
       providers: [
-        provideRouter([{ path: 'app/dashboard', component: TopbarComponent }]),
+        provideRouter([]),
         {
           provide: NotificationsService,
           useValue: {
@@ -34,7 +34,7 @@ describe('TopbarComponent', () => {
       ]
     }).compileComponents();
 
-    fixture = TestBed.createComponent(TopbarComponent);
+    fixture = TestBed.createComponent(GlobalNotificationsPanelComponent);
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -44,22 +44,18 @@ describe('TopbarComponent', () => {
     fixture?.destroy();
   });
 
-  it('renders a compact accessible notification bell without identity text', () => {
-    const text = fixture.nativeElement.textContent as string;
+  it('shows only a bell button with a count badge and opens the notifications panel', () => {
     const bell = fixture.nativeElement.querySelector('button[aria-label="Notifications"]') as HTMLButtonElement;
 
     expect(bell).toBeTruthy();
-    expect(bell.getAttribute('aria-expanded')).toBe('false');
-    expect(text).not.toContain('Owner User');
-    expect(text).not.toContain('owner@example.com');
-    expect(text).not.toContain('Organization Switcher');
-    expect(text).not.toContain('Refresh');
-    expect(text).toContain('3');
+    expect(bell.textContent).not.toContain('Notifications');
+    expect(bell.textContent).toContain('4');
 
     bell.click();
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('Notifications');
     expect(fixture.nativeElement.textContent).toContain('Active organization notification center');
+    expect(fixture.nativeElement.textContent).not.toContain('Refresh');
   });
 });

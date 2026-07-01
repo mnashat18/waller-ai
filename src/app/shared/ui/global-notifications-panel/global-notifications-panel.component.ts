@@ -34,15 +34,6 @@ export class GlobalNotificationsPanelComponent implements OnInit {
     }
   }
 
-  refresh(event: MouseEvent): void {
-    event.stopPropagation();
-    this.notifications.refresh('manual-refresh');
-  }
-
-  viewAll(event: MouseEvent): void {
-    event.stopPropagation();
-  }
-
   openNotification(item: WorkspaceNotification, event: MouseEvent): void {
     event.stopPropagation();
     if (this.isAlertNotification(item)) {
@@ -72,6 +63,11 @@ export class GlobalNotificationsPanelComponent implements OnInit {
   @HostListener('document:click')
   close(): void {
     this.open = false;
+  }
+
+  @HostListener('document:keydown.escape')
+  closeOnEscape(): void {
+    this.close();
   }
 
   private toDisplayLabel(value: string): string {

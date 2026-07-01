@@ -1,38 +1,5 @@
 <header class="app-header__panel">
-  <ng-container *ngIf="state$ | async as state">
-    <div class="app-header__actions">
-      <app-global-notifications-panel></app-global-notifications-panel>
-
-      <div class="app-header__menu" (click)="stopPropagation($event)">
-        <button
-          type="button"
-          (click)="toggleUserMenu($event)"
-          class="app-header__button app-header__button--compact">
-          <span class="app-header__avatar app-header__avatar--dark">
-            {{ (state.ui.sessionLabel || 'U').slice(0, 1).toUpperCase() }}
-          </span>
-          <span class="app-header__button-copy">
-            <strong>{{ state.ui.sessionLabel }}</strong>
-            <small>{{ state.ui.sessionSubLabel }}</small>
-          </span>
-        </button>
-
-        <div *ngIf="userMenuOpen" class="app-header__popover app-header__popover--user">
-          <p class="app-header__user-name">{{ state.ui.sessionLabel }}</p>
-          <p class="app-header__user-email">{{ state.ui.sessionSubLabel }}</p>
-
-          <div class="app-header__role">
-            <app-role-badge [role]="state.context.activeMemberRole"></app-role-badge>
-          </div>
-
-          <button
-            type="button"
-            (click)="logout()"
-            class="app-header__danger">
-            Log out
-          </button>
-        </div>
-      </div>
-    </div>
-  </ng-container>
+  <div class="app-header__actions app-header__actions--compact">
+    <app-global-notifications-panel></app-global-notifications-panel>
+  </div>
 </header>

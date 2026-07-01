@@ -165,6 +165,8 @@ describe('SettingsPageComponent', () => {
     expect(component.activeTab).toBe('profile');
     expect(fixture.nativeElement.textContent).toContain('Account settings');
     expect(fixture.nativeElement.textContent).not.toContain('Organization');
+    expect(fixture.nativeElement.querySelector('.settings-refresh')).toBeFalsy();
+    expect(fixture.nativeElement.textContent).not.toContain('Refresh');
   });
 
   it('switches to Preferences and Security through the tab controls', async () => {

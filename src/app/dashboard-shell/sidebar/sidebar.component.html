@@ -167,6 +167,16 @@
               Profile &amp; settings
             </button>
 
+            <button type="button" class="app-sidebar__account-menu-item" role="menuitem" (click)="openAccountSettings('preferences')">
+              Preferences
+            </button>
+
+            <button type="button" class="app-sidebar__account-menu-item" role="menuitem" (click)="openAccountSettings('security')">
+              Security
+            </button>
+
+            <div *ngIf="vm.canSwitchOrganizations" class="app-sidebar__account-menu-divider" role="separator"></div>
+
             <button
               *ngIf="vm.canSwitchOrganizations"
               type="button"

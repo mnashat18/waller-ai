@@ -165,7 +165,7 @@ export class SidebarComponent implements OnInit, OnDestroy {
     this.openAccountMenu();
   }
 
-  openAccountSettings(tab: 'profile'): void {
+  openAccountSettings(tab: 'profile' | 'preferences' | 'security'): void {
     this.closeAccountMenu();
     void this.router.navigate(['/app/settings'], {
       queryParams: { tab },

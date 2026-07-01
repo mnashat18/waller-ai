@@ -18,10 +18,6 @@
         Manage your identity, local preferences, and session controls from one calm workspace.
       </p>
     </div>
-
-    <button type="button" class="settings-refresh" (click)="refreshContext()" [disabled]="refreshing || loading">
-      {{ refreshing ? 'Refreshing...' : 'Refresh' }}
-    </button>
   </header>
 
   <section *ngIf="loading" class="settings-state-card">
@@ -270,7 +266,7 @@
           <header class="settings-block__header">
             <div>
               <p class="settings-section-eyebrow">Cache</p>
-              <h3>Refresh local workspace state</h3>
+              <h3>Reload local workspace state</h3>
             </div>
           </header>
           <p class="settings-helper">Clear cache removes local browser state and reloads the verified server context.</p>

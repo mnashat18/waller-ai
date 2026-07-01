@@ -1,9 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { BehaviorSubject } from 'rxjs';
 
-import { CompanyContextService } from '../../core/context/company-context.service';
-import { AuthService } from '../../services/auth';
+import { NotificationsService } from '../../services/notifications.service';
 import { HeaderComponent } from './header';
 
 describe('HeaderComponent', () => {
@@ -11,25 +10,24 @@ describe('HeaderComponent', () => {
   let fixture: ComponentFixture<HeaderComponent>;
 
   beforeEach(async () => {
-    const context = {
-      activeBusinessProfileName: null,
-      activeBusinessProfileId: null,
-      activeDepartmentId: null,
-      activeMemberRole: null,
-      availableCompanies: []
-    };
+    const notificationsState$ = new BehaviorSubject({
+      unreadCount: 0,
+      recentNotifications: [],
+      loading: false,
+      error: null,
+      activeWorkspaceId: null
+    });
 
     await TestBed.configureTestingModule({
       imports: [HeaderComponent],
       providers: [
         provideRouter([]),
-        { provide: AuthService, useValue: { logout: () => undefined } },
         {
-          provide: CompanyContextService,
+          provide: NotificationsService,
           useValue: {
-            ensureLoaded: () => of(null),
-            state$: of({ loading: false, error: null, context }),
-            snapshot: () => ({ loading: false, error: null, context })
+            state$: notificationsState$.asObservable(),
+            initialize: () => undefined,
+            refresh: () => undefined
           }
         }
       ]
@@ -38,10 +36,19 @@ describe('HeaderComponent', () => {
 
     fixture = TestBed.createComponent(HeaderComponent);
     component = fixture.componentInstance;
+    fixture.detectChanges();
     await fixture.whenStable();
+    fixture.detectChanges();
   });
 
-  it('should create', () => {
+  it('renders only the compact notification bell in the header actions area', () => {
     expect(component).toBeTruthy();
+    const bell = fixture.nativeElement.querySelector('button[aria-label="Notifications"]') as HTMLButtonElement;
+    const text = fixture.nativeElement.textContent as string;
+
+    expect(bell).toBeTruthy();
+    expect(text).not.toContain('Organization Switcher');
+    expect(text).not.toContain('Refresh');
+    expect(text).not.toContain('owner@example.com');
   });
 });

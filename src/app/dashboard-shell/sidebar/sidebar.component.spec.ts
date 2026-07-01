@@ -454,6 +454,8 @@ describe('SidebarComponent', () => {
     expect(menu).toBeTruthy();
     expect(menu.parentElement).toBe(document.body);
     expect(menu.textContent).toContain('Profile & settings');
+    expect(menu.textContent).toContain('Preferences');
+    expect(menu.textContent).toContain('Security');
     expect(menu.textContent).toContain('Sign out');
     expect(menu.textContent).not.toContain('Switch organization');
 
