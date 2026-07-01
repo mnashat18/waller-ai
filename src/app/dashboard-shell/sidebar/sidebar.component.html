@@ -230,7 +230,9 @@
                     {{ company.name }}
                   </strong>
                   <small>{{ roleLabel(company.role) }}</small>
-                  <small *ngIf="company.isActive && vm.departmentValue">{{ vm.departmentValue }}</small>
+                  <small *ngIf="company.departmentName || (company.isActive && vm.departmentValue)">
+                    {{ company.departmentName || vm.departmentValue }}
+                  </small>
                 </span>
 
                 <span class="app-sidebar__organization-switcher-meta">

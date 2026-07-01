@@ -12,6 +12,7 @@ import {
   WorkspaceContextApiService,
   type WorkspaceContextDepartment,
   type WorkspaceContextPayload,
+  type WorkspaceContextMembership,
   type WorkspaceContextWorkspace
 } from '../../services/workspace-context-api.service';
 
@@ -21,6 +22,8 @@ export type CompanyOption = {
   name: string;
   role: ActiveMemberRole;
   membershipStatus: string | null;
+  departmentId?: string | null;
+  departmentName?: string | null;
   isActive: boolean;
 };
 
@@ -293,10 +296,9 @@ export class CompanyContextService {
       return [];
     }
 
-    const activeContext = await this.loadAuthoritativeUserContext(token);
     let memberships: ActiveMembershipContext[] = [];
     try {
-      memberships = await this.fetchActiveMembershipsForUser(userId, token, activeContext);
+      memberships = await this.fetchActiveMembershipsForUser(userId, token);
     } catch (error) {
       if (options.failOnError) {
         throw error;
@@ -327,11 +329,7 @@ export class CompanyContextService {
       return null;
     }
 
-    const memberships = await this.fetchActiveMembershipsForUser(userId, token, {
-      activeBusinessProfileId: profileId,
-      activeDepartmentId: null,
-      activeMemberRole: null
-    });
+    const memberships = await this.fetchActiveMembershipsForUser(userId, token);
     const claimedMembership =
       memberships.find((membership) =>
         this.normalizeId(membership.business_profile) === profileId &&
@@ -809,11 +807,9 @@ export class CompanyContextService {
     const alreadyLoaded = Boolean(
       hasCurrentUserIdentity &&
       hasCurrentUserEmail &&
-      (
-        current.context.activeBusinessProfileId ||
-        current.context.availableCompanies.length ||
-        current.error
-      )
+      current.context.workspaceInitialized &&
+      current.context.availableCompanies.length > 1 &&
+      !current.error
     );
 
     if (!forceRefresh && alreadyLoaded && !current.loading) {
@@ -833,12 +829,9 @@ export class CompanyContextService {
     const request$ = this.fetchCurrentUserContext(token).pipe(
       timeout(15000),
       switchMap((user) =>
-        forkJoin({
-          companies: this.fetchAccessibleCompanies(user.userId, token, user.activeBusinessProfileId).pipe(
-            catchError(() => of([]))
-          )
-        }).pipe(
-          map(({ companies }) => this.buildState(user, companies))
+        from(this.loadWorkspaceContext(token)).pipe(
+          catchError(() => of(null)),
+          map((workspaceContext) => this.buildState(user, workspaceContext))
         )
       ),
       tap((state) => this.stateSubject.next(state)),
@@ -1015,66 +1008,16 @@ export class CompanyContextService {
     token: string,
     activeBusinessProfileId: string | null
   ): Observable<CompanyOption[]> {
-    if (!userId) {
-      return of([]);
-    }
-
-    const memberParams = new URLSearchParams({
-      limit: '100',
-      fields: 'id,member_role,status,business_profile.id,business_profile.company_name'
-    });
-    memberParams.set('filter[user][_eq]', userId);
-
-    return forkJoin({
-      memberships: this.http.get<{ data?: MembershipRow[] }>(
-        `${this.api}/items/business_profile_members?${memberParams.toString()}&_ts=${Date.now()}`,
-        {
-          headers: this.auth.getAuthHeaders(token),
-          withCredentials: true
-        }
-      ).pipe(
-        map((response) => response.data ?? []),
-        catchError(() => of([]))
-      )
-    }).pipe(
-      map(({ memberships }) => {
-        const options = new Map<string, CompanyOption>();
-
-        for (const row of memberships) {
-          const profileId = this.normalizeId(row?.business_profile);
-          if (!profileId) {
-            continue;
-          }
-
-          const membershipId = this.normalizeId(row?.id);
-          if (!membershipId) {
-            continue;
-          }
-
-          const nextOption: CompanyOption = {
-            id: profileId,
-            membershipId,
-            name: this.pickProfileName(row?.business_profile) ?? `Company ${profileId}`,
-            role: this.normalizeUiRole(row?.member_role) ?? 'employee',
-            membershipStatus: this.pickString(row?.status),
-            isActive: false
-          };
-
-          const currentOption = options.get(profileId);
-          if (!currentOption || this.rolePriority(nextOption.role) > this.rolePriority(currentOption.role)) {
-            options.set(profileId, nextOption);
-          }
-        }
-
-        return Array.from(options.values()).sort((left, right) => left.name.localeCompare(right.name));
-      })
+    return from(this.loadWorkspaceContext(token)).pipe(
+      map((workspaceContext) => this.mapWorkspaceContextToCompanies(workspaceContext, activeBusinessProfileId))
     );
   }
 
   private buildState(
     user: UserContextResponse,
-    companies: CompanyOption[]
+    workspaceContext: WorkspaceContextPayload | null
   ): CompanyContextState {
+    const companies = this.mapWorkspaceContextToCompanies(workspaceContext, user.activeBusinessProfileId);
     const storedContext = this.readStoredContext();
     const isSameUser = !storedContext.userId || !user.userId || storedContext.userId === user.userId;
     const storedActiveProfileId = storedContext.activeBusinessProfileId;
@@ -1193,6 +1136,103 @@ export class CompanyContextService {
     }
 
     return null;
+  }
+
+  private async loadWorkspaceContext(token: string): Promise<WorkspaceContextPayload | null> {
+    try {
+      return await firstValueFrom(this.workspaceContextApi.getContext().pipe(timeout(10000)));
+    } catch {
+      return null;
+    }
+  }
+
+  private mapWorkspaceContextToCompanies(
+    workspaceContext: WorkspaceContextPayload | null,
+    activeBusinessProfileId: string | null = null
+  ): CompanyOption[] {
+    if (!workspaceContext?.memberships?.length) {
+      return [];
+    }
+
+    const options = new Map<string, CompanyOption>();
+    const activeMembershipId = this.normalizeId(workspaceContext.active?.membership?.id);
+    const activeWorkspaceId = this.normalizeId(workspaceContext.active?.workspace?.id);
+    const preferredActiveProfileId = this.normalizeId(activeBusinessProfileId) ?? activeWorkspaceId;
+
+    for (const membership of workspaceContext.memberships) {
+      const option = this.mapWorkspaceMembershipToCompany(membership, activeMembershipId, preferredActiveProfileId);
+      if (!option) {
+        continue;
+      }
+
+      const currentOption = options.get(option.id);
+      if (!currentOption || this.rolePriority(option.role) > this.rolePriority(currentOption.role)) {
+        options.set(option.id, option);
+      }
+    }
+
+    return Array.from(options.values()).sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private mapWorkspaceMembershipToCompany(
+    membership: WorkspaceContextMembership,
+    activeMembershipId: string | null,
+    preferredActiveProfileId: string | null
+  ): CompanyOption | null {
+    const workspace = membership.workspace;
+    const profileId = this.normalizeId(workspace?.id);
+    const membershipId = this.normalizeId(membership.id);
+    if (!profileId || !membershipId) {
+      return null;
+    }
+
+    return {
+      id: profileId,
+      membershipId,
+      name: workspace.companyName ?? `Company ${profileId}`,
+      role: this.normalizeUiRole(membership.memberRole) ?? 'employee',
+      membershipStatus: membership.status,
+      departmentId: membership.department?.id ?? null,
+      departmentName: membership.department?.name ?? null,
+      isActive:
+        membershipId === activeMembershipId ||
+        profileId === preferredActiveProfileId ||
+        Boolean(workspace.isActive)
+    };
+  }
+
+  private mapWorkspaceMembershipToActiveMembership(
+    membership: WorkspaceContextMembership,
+    currentUser: { id: string | null; email: string | null; first_name: string | null; last_name: string | null }
+  ): ActiveMembershipContext | null {
+    const workspace = this.normalizeBusinessProfileFromWorkspace(membership.workspace);
+    const membershipId = this.normalizeId(membership.id);
+    const role = this.normalizeUiRole(membership.memberRole);
+    if (!membershipId || !workspace?.id || !role) {
+      return null;
+    }
+
+    return {
+      id: membershipId,
+      status: membership.status ?? 'active',
+      member_role: role,
+      user: currentUser.id
+        ? {
+            id: currentUser.id,
+            email: currentUser.email,
+            first_name: currentUser.first_name,
+            last_name: currentUser.last_name
+          }
+        : null,
+      business_profile: workspace,
+      department: membership.department
+        ? {
+            id: membership.department.id,
+            name: membership.department.name
+          }
+        : null,
+      joined_at: null
+    };
   }
 
   private readStoredContext(): UserContextResponse {
@@ -1532,54 +1572,28 @@ export class CompanyContextService {
       return null;
     }
 
-    const params = new URLSearchParams({
-      limit: '1',
-      fields: [
-        'id',
-        'status',
-        'member_role',
-        'user',
-        'business_profile',
-        'department',
-        'joined_at',
-        'business_profile.id',
-        'business_profile.company_name',
-        'business_profile.is_active',
-        'business_profile.plan_code',
-        'business_profile.billing_status',
-        'department'
-      ].join(',')
-    });
-    params.set('filter[id][_eq]', normalizedId);
-
-    try {
-      const response = await firstValueFrom(
-        this.http.get<{ data?: Array<ActiveMembershipContext & Record<string, unknown>> }>(
-          `${this.api}/items/business_profile_members?${params.toString()}&_ts=${Date.now()}`,
-          {
-            headers: this.auth.getAuthHeaders(token),
-            withCredentials: true
-          }
-        ).pipe(timeout(7000))
-      );
-
-      const row = (response.data ?? [])[0] ?? null;
-      if (!row) {
-        return null;
-      }
-
-      return {
-        id: this.normalizeId(row.id) ?? normalizedId,
-        status: this.pickString(row.status) ?? 'active',
-        member_role: this.pickString(row.member_role)?.toLowerCase() ?? '',
-        user: row.user ?? null,
-        business_profile: this.normalizeBusinessProfile(row.business_profile),
-        department: this.objectRecord(row.department),
-        joined_at: this.pickString(row.joined_at)
-      };
-    } catch {
+    const workspaceContext = await this.loadWorkspaceContext(token);
+    if (!workspaceContext?.memberships?.length) {
       return null;
     }
+
+    const currentUser = await this.auth.getCurrentUserAfterRestore();
+    const currentUserRecord = currentUser
+      ? {
+          id: this.normalizeId(currentUser.id) ?? null,
+          email: this.pickString(currentUser.email) ?? null,
+          first_name: this.pickString(currentUser.first_name) ?? null,
+          last_name: this.pickString(currentUser.last_name) ?? null
+        }
+      : {
+          id: null,
+          email: null,
+          first_name: null,
+          last_name: null
+        };
+
+    const row = workspaceContext.memberships.find((membership) => this.normalizeId(membership.id) === normalizedId) ?? null;
+    return row ? this.mapWorkspaceMembershipToActiveMembership(row, currentUserRecord) : null;
   }
 
   private async fetchActiveMembershipsForUser(
@@ -1587,78 +1601,29 @@ export class CompanyContextService {
     token: string,
     activeContext?: Pick<UserContextResponse, 'activeBusinessProfileId' | 'activeDepartmentId' | 'activeMemberRole'> | null
   ): Promise<ActiveMembershipContext[]> {
-    const activeProfileId = this.normalizeId(activeContext?.activeBusinessProfileId);
-    const activeDepartmentId = this.normalizeId(activeContext?.activeDepartmentId);
-    const activeRole = this.normalizeUiRole(activeContext?.activeMemberRole);
-
-    const params = new URLSearchParams({
-      limit: activeProfileId && activeRole ? '2' : '100',
-      fields: [
-        'id',
-        'status',
-        'member_role',
-        'user',
-        'business_profile',
-        'department',
-        'business_profile.id',
-        'business_profile.company_name',
-        'business_profile.is_active',
-        'department.id',
-        'department.name',
-        'department.is_active'
-      ].join(',')
-    });
-    params.set('filter[user][_eq]', userId);
-    params.set('filter[status][_eq]', 'active');
-    if (activeProfileId) {
-      params.set('filter[business_profile][_eq]', activeProfileId);
-    }
-    if (activeDepartmentId) {
-      params.set('filter[department][_eq]', activeDepartmentId);
-    }
-    if (activeRole) {
-      params.set('filter[member_role][_eq]', activeRole);
+    const workspaceContext = await this.loadWorkspaceContext(token);
+    if (!workspaceContext?.memberships?.length) {
+      return [];
     }
 
-    const response = await firstValueFrom(
-      this.http.get<{ data?: Array<ActiveMembershipContext & Record<string, unknown>> }>(
-        `${this.api}/items/business_profile_members?${params.toString()}&_ts=${Date.now()}`,
-        {
-          headers: this.auth.getAuthHeaders(token),
-          withCredentials: true
+    const currentUser = await this.auth.getCurrentUserAfterRestore();
+    const currentUserRecord = currentUser
+      ? {
+          id: this.normalizeId(currentUser.id) ?? userId,
+          email: this.pickString(currentUser.email) ?? null,
+          first_name: this.pickString(currentUser.first_name) ?? null,
+          last_name: this.pickString(currentUser.last_name) ?? null
         }
-      ).pipe(timeout(7000))
-    );
-
-    const rows = (response.data ?? [])
-      .map((row) => {
-        const profile = this.normalizeBusinessProfile(row.business_profile);
-        const department = this.objectRecord(row.department);
-        const memberId = this.normalizeId(row.id);
-        const role = this.pickString(row.member_role)?.toLowerCase() ?? '';
-
-        return {
-          id: memberId ?? '',
-          status: this.pickString(row.status) ?? 'active',
-          member_role: role,
-          user: row.user ?? null,
-          business_profile: profile,
-          department: department
-            ? {
-                id: this.normalizeId(department['id']) ?? undefined,
-                name: this.pickString(department['name']) ?? null
-              }
-            : null,
-          joined_at: this.pickString(row.joined_at)
+      : {
+          id: userId,
+          email: null,
+          first_name: null,
+          last_name: null
         };
-      })
-      .filter((row) => Boolean(row.id) && Boolean(row.business_profile?.id));
 
-    if (activeProfileId && activeRole && rows.length > 1) {
-      throw new Error('Multiple active organization contexts were returned for the authoritative active context.');
-    }
-
-    return rows;
+    return workspaceContext.memberships
+      .map((membership) => this.mapWorkspaceMembershipToActiveMembership(membership, currentUserRecord))
+      .filter((row): row is ActiveMembershipContext => Boolean(row?.id) && Boolean(this.normalizeId(row?.business_profile)));
   }
 
   private async loadAuthoritativeUserContext(token: string): Promise<Pick<UserContextResponse, 'activeBusinessProfileId' | 'activeDepartmentId' | 'activeMemberRole'> | null> {

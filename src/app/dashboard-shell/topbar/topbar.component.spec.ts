@@ -45,11 +45,16 @@ describe('TopbarComponent', () => {
   });
 
   it('renders a compact accessible notification bell without identity text', () => {
+    const header = fixture.nativeElement.querySelector('.app-header__panel') as HTMLElement;
+    const actions = fixture.nativeElement.querySelector('.app-header__actions') as HTMLElement;
     const text = fixture.nativeElement.textContent as string;
     const bell = fixture.nativeElement.querySelector('button[aria-label="Notifications"]') as HTMLButtonElement;
 
     expect(bell).toBeTruthy();
     expect(bell.getAttribute('aria-expanded')).toBe('false');
+    expect(header.style.getPropertyValue('justify-content')).toBe('flex-end');
+    expect(header.style.getPropertyValue('width')).toBe('100%');
+    expect(actions.classList.contains('app-header__actions')).toBe(true);
     expect(text).not.toContain('Owner User');
     expect(text).not.toContain('owner@example.com');
     expect(text).not.toContain('Organization Switcher');

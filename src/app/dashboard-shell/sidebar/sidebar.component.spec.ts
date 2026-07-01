@@ -234,6 +234,7 @@ describe('SidebarComponent', () => {
             name: 'Wellar',
             role: 'owner',
             membershipStatus: 'active',
+            departmentName: 'All departments',
             isActive: true
           }
         ]
@@ -267,6 +268,7 @@ describe('SidebarComponent', () => {
             name: 'Waller Demo Company',
             role: 'owner',
             membershipStatus: 'active',
+            departmentName: 'All departments',
             isActive: true
           },
           {
@@ -275,6 +277,7 @@ describe('SidebarComponent', () => {
             name: 'Northline Logistics',
             role: 'manager',
             membershipStatus: 'active',
+            departmentName: 'Operations',
             isActive: false
           }
         ]
@@ -311,6 +314,7 @@ describe('SidebarComponent', () => {
     expect(picker.textContent).toContain('Choose the organization you want to work in');
     expect(picker.textContent).toContain('Waller Demo Company');
     expect(picker.textContent).toContain('Northline Logistics');
+    expect(picker.textContent).toContain('Operations');
   });
 
   it('prevents duplicate switch clicks, reloads context, and routes to the dashboard after switching', async () => {
@@ -326,6 +330,7 @@ describe('SidebarComponent', () => {
             name: 'Waller Demo Company',
             role: 'owner',
             membershipStatus: 'active',
+            departmentName: 'All departments',
             isActive: true
           },
           {
@@ -334,6 +339,7 @@ describe('SidebarComponent', () => {
             name: 'Northline Logistics',
             role: 'manager',
             membershipStatus: 'active',
+            departmentName: 'Operations',
             isActive: false
           }
         ]
@@ -361,6 +367,7 @@ describe('SidebarComponent', () => {
             name: 'Waller Demo Company',
             role: 'owner',
             membershipStatus: 'active',
+            departmentName: 'All departments',
             isActive: false
           },
           {
@@ -369,6 +376,7 @@ describe('SidebarComponent', () => {
             name: 'Northline Logistics',
             role: 'manager',
             membershipStatus: 'active',
+            departmentName: 'Operations',
             isActive: true
           }
         ]

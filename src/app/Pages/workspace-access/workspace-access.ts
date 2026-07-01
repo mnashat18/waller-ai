@@ -40,9 +40,12 @@ export class WorkspaceAccessPageComponent implements OnInit {
   inviteCodeError = '';
   createCompanyOpen = false;
   createCompanyLoading = false;
+  createCompanyLocked = this.readCreateCompanyLock();
   createCompanyError = '';
   createCompanyErrorCode = '';
   createCompanySuccessMessage = '';
+  readonly createCompanyActivationPendingMessage =
+    'Your company was created, but access is still activating. Please refresh this page in a moment.';
   private recoveryReturnUrl: string | null = null;
   private createCompanyIdempotencyKey: string | null = null;
   createCompanyForm = {
@@ -233,6 +236,10 @@ export class WorkspaceAccessPageComponent implements OnInit {
   }
 
   openCreateCompany(): void {
+    if (this.createCompanyLocked) {
+      return;
+    }
+
     this.createCompanyOpen = true;
     this.createCompanyError = '';
     this.createCompanyErrorCode = '';
@@ -241,7 +248,7 @@ export class WorkspaceAccessPageComponent implements OnInit {
   }
 
   createCompany(): void {
-    if (this.createCompanyLoading) {
+    if (this.createCompanyLoading || this.createCompanyLocked) {
       return;
     }
 
@@ -275,11 +282,17 @@ export class WorkspaceAccessPageComponent implements OnInit {
       next: async (route) => {
         this.createCompanySuccessMessage = route === '/app/workspace-activating'
           ? 'Workspace created. Activating your access...'
-          : 'Workspace created. Opening your dashboard...';
+          : route === '/app/dashboard'
+            ? 'Workspace created. Opening your dashboard...'
+            : this.createCompanyActivationPendingMessage;
         this.createCompanyError = '';
         this.createCompanyErrorCode = '';
-        this.createCompanyIdempotencyKey = null;
-        await this.router.navigateByUrl(route, { replaceUrl: true });
+        if (route) {
+          this.createCompanyIdempotencyKey = null;
+          if (route !== '/app/workspace-access') {
+            await this.router.navigateByUrl(route, { replaceUrl: true });
+          }
+        }
       },
       error: (error) => {
         const parsed = this.toCreateCompanyError(error);
@@ -291,32 +304,80 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
   private async activateCreatedWorkspaceContext(context: CreatedWorkspaceContext): Promise<void> {
     await this.companyContext.activateFromMembership({
-      id: context.membership.id,
-      status: context.membership.status,
-      member_role: context.membership.memberRole,
+      id: String(context.businessProfileId ?? ''),
+      status: 'active',
+      member_role: 'owner',
       business_profile: {
-        id: context.workspace.id,
-        company_name: context.workspace.companyName,
-        is_active: context.workspace.isActive
+        id: String(context.businessProfileId ?? ''),
+        company_name: context.companyName,
+        is_active: context.isActive ?? true
       },
       department: null,
       joined_at: null
     });
   }
 
-  private async handleCreatedWorkspace(result: { status: number; context: CreatedWorkspaceContext }): Promise<string> {
+  private async handleCreatedWorkspace(
+    result: { status: number; confirmed: boolean; context: CreatedWorkspaceContext }
+  ): Promise<string> {
     if (result.status === 201) {
-      this.workspaceActivation.startActivation({
-        businessProfileId: result.context.workspace.id,
-        companyName: result.context.workspace.companyName
-      });
-      return '/app/workspace-activating';
+      const activation = await this.resolveCreatedWorkspaceActivation(result);
+      if (activation) {
+        this.createCompanyLocked = true;
+        this.persistCreateCompanyLock(true);
+        this.workspaceActivation.startActivation(activation);
+        return '/app/workspace-activating';
+      }
+
+      this.createCompanyLocked = true;
+      this.persistCreateCompanyLock(true);
+      return '/app/workspace-access';
     }
 
     await this.activateCreatedWorkspaceContext(result.context);
     await this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true });
     const route = await this.postLoginRouting.resolveDestinationStrict();
     return route === '/app/workspace-access' ? '/app/dashboard' : route;
+  }
+
+  private async resolveCreatedWorkspaceActivation(
+    result: { status: number; confirmed: boolean; context: CreatedWorkspaceContext }
+  ): Promise<{ businessProfileId: string; companyName: string | null } | null> {
+    const directWorkspaceId = this.normalizeText(String(result.context.businessProfileId ?? ''), 120);
+    if (result.status === 201 && result.confirmed && directWorkspaceId) {
+      return {
+        businessProfileId: directWorkspaceId,
+        companyName: result.context.companyName ?? null
+      };
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true, failOnError: true });
+        const snapshot = this.companyContext.snapshot().context;
+        const activeBusinessProfileId = this.normalizeText(String(snapshot.activeBusinessProfileId ?? ''), 120);
+        const activeMemberRole = this.normalizeText(String(snapshot.activeMemberRole ?? ''), 40)?.toLowerCase() ?? '';
+        const hasActiveCompany = Boolean(
+          activeBusinessProfileId &&
+          snapshot.availableCompanies.some((company) => company.id === activeBusinessProfileId && company.isActive)
+        );
+
+        if (activeBusinessProfileId && activeMemberRole === 'owner' && hasActiveCompany) {
+          return {
+            businessProfileId: activeBusinessProfileId,
+            companyName: snapshot.activeBusinessProfileName ?? result.context.companyName ?? null
+          };
+        }
+      } catch {
+        // Retry with the next bounded refresh attempt.
+      }
+
+      if (attempt < 2) {
+        await this.delay(250);
+      }
+    }
+
+    return null;
   }
 
   startWorkspaceSetup(): void {
@@ -642,6 +703,38 @@ export class WorkspaceAccessPageComponent implements OnInit {
   private emptyToNull(value: string): string | null {
     const normalized = value.trim();
     return normalized || null;
+  }
+
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private readCreateCompanyLock(): boolean {
+    if (typeof sessionStorage === 'undefined') {
+      return false;
+    }
+
+    try {
+      return sessionStorage.getItem('wellar_workspace_creation_lock_v1') === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  private persistCreateCompanyLock(locked: boolean): void {
+    if (typeof sessionStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      if (locked) {
+        sessionStorage.setItem('wellar_workspace_creation_lock_v1', '1');
+      } else {
+        sessionStorage.removeItem('wellar_workspace_creation_lock_v1');
+      }
+    } catch {
+      // ignore storage errors
+    }
   }
 
   private ensureCreateCompanyIdempotencyKey(): string {

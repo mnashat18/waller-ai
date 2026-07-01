@@ -1706,7 +1706,8 @@ body::selection {
   backdrop-filter: blur(18px);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  width: 100%;
   gap: 1.2rem;
 }
 
@@ -2858,7 +2859,8 @@ body::selection {
   z-index: 35;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  width: 100%;
   gap: 0.9rem;
   padding: 0.82rem 1rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);

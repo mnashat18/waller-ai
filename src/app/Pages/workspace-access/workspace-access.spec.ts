@@ -23,6 +23,7 @@ describe('WorkspaceAccessPageComponent', () => {
   let refreshAuthAndWorkspaceContextSpy: any;
   let resolveDestinationStrictSpy: any;
   let startActivationSpy: any;
+  let companyContextSnapshot: any;
 
   const noWorkspaceState: WorkspaceAccessState = {
     loading: false,
@@ -55,6 +56,14 @@ describe('WorkspaceAccessPageComponent', () => {
       createWorkspace: vi.fn()
     };
     activateFromMembershipSpy = vi.fn(() => Promise.resolve());
+    companyContextSnapshot = {
+      context: {
+        activeBusinessProfileId: null,
+        activeBusinessProfileName: null,
+        activeMemberRole: null,
+        availableCompanies: []
+      }
+    };
     refreshAuthAndWorkspaceContextSpy = vi.fn(() => Promise.resolve());
     resolveDestinationStrictSpy = vi.fn(() => Promise.resolve('/app/dashboard'));
     startActivationSpy = vi.fn();
@@ -110,7 +119,8 @@ describe('WorkspaceAccessPageComponent', () => {
           provide: CompanyContextService,
           useValue: {
             activateFromMembership: activateFromMembershipSpy,
-            clearActiveWorkspaceContext: () => undefined
+            clearActiveWorkspaceContext: () => undefined,
+            snapshot: () => companyContextSnapshot
           }
         },
         {
@@ -174,24 +184,18 @@ describe('WorkspaceAccessPageComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Request organization access');
   });
 
-  it('routes brand-new workspace creation through workspace activation', async () => {
+  it('routes a confirmed 201 with workspace.id through workspace activation', async () => {
     workspaceCreationSpy.createWorkspace.mockReturnValue(
       of({
         status: 201,
+        confirmed: true,
         context: {
-          workspace: {
-            id: 'profile-1',
-            companyName: 'Northwind Logistics',
-            isActive: true,
-            planCode: 'free',
-            billingStatus: 'trialing'
-          },
-          membership: {
-            id: 'member-1',
-            businessProfileId: 'profile-1',
-            memberRole: 'owner',
-            status: 'active'
-          }
+          workspaceId: 'profile-1',
+          businessProfileId: 'profile-1',
+          companyName: 'Northwind Logistics',
+          isActive: true,
+          planCode: 'free',
+          billingStatus: 'trialing'
         }
       })
     );
@@ -233,26 +237,175 @@ describe('WorkspaceAccessPageComponent', () => {
     expect(resolveDestinationStrictSpy).not.toHaveBeenCalled();
     expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/workspace-activating', { replaceUrl: true });
     expect(component.createCompanyError).toBe('');
+    expect(component.createCompanyLocked).toBe(true);
+    expect(component.createCompanySuccessMessage).toBe('Workspace created. Activating your access...');
+  });
+
+  it('routes a confirmed 201 with membership.business_profile_id through workspace activation', async () => {
+    workspaceCreationSpy.createWorkspace.mockReturnValue(
+      of({
+        status: 201,
+        confirmed: true,
+        context: {
+          workspaceId: 'profile-2',
+          businessProfileId: 'profile-2',
+          companyName: 'Northwind Logistics',
+          isActive: true,
+          planCode: 'free',
+          billingStatus: 'trialing'
+        }
+      })
+    );
+
+    loadPage();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.openCreateCompany();
+    component.createCompanyForm.companyName = 'Northwind Logistics';
+    component.createCompanyForm.firstName = 'Jane';
+    component.createCompanyForm.lastName = 'Owner';
+    component.createCompanyForm.workEmail = 'jane.owner@example.com';
+    component.createCompanyForm.country = 'Egypt';
+
+    component.createCompany();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await fixture.whenStable();
+    await waitForCondition(() => routerSpy.navigateByUrl.mock.calls.length > 0);
+
+    expect(startActivationSpy).toHaveBeenCalledWith({
+      businessProfileId: 'profile-2',
+      companyName: 'Northwind Logistics'
+    });
+    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/workspace-activating', { replaceUrl: true });
+  });
+
+  it('confirms a sparse 201 only after refreshed canonical context verifies owner activation', async () => {
+    workspaceCreationSpy.createWorkspace.mockReturnValue(
+      of({
+        status: 201,
+        confirmed: false,
+        context: {
+          workspaceId: null,
+          businessProfileId: null,
+          companyName: 'Northwind Logistics',
+          isActive: null,
+          planCode: null,
+          billingStatus: null
+        }
+      })
+    );
+
+    refreshAuthAndWorkspaceContextSpy.mockImplementation(async () => {
+      companyContextSnapshot.context = {
+        activeBusinessProfileId: 'profile-3',
+        activeBusinessProfileName: 'Northwind Logistics',
+        activeMemberRole: 'owner',
+        availableCompanies: [
+          {
+            id: 'profile-3',
+            isActive: true
+          }
+        ]
+      };
+    });
+
+    loadPage();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.openCreateCompany();
+    component.createCompanyForm.companyName = 'Northwind Logistics';
+    component.createCompanyForm.firstName = 'Jane';
+    component.createCompanyForm.lastName = 'Owner';
+    component.createCompanyForm.workEmail = 'jane.owner@example.com';
+    component.createCompanyForm.country = 'Egypt';
+
+    component.createCompany();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await fixture.whenStable();
+    await waitForCondition(() => routerSpy.navigateByUrl.mock.calls.length > 0);
+
+    expect(refreshAuthAndWorkspaceContextSpy).toHaveBeenCalled();
+    expect(startActivationSpy).toHaveBeenCalledWith({
+      businessProfileId: 'profile-3',
+      companyName: 'Northwind Logistics'
+    });
+    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/workspace-activating', { replaceUrl: true });
+    expect(component.createCompanyLocked).toBe(true);
+    expect(component.createCompanyError).toBe('');
+    expect(component.createCompanySuccessMessage).toBe('Workspace created. Activating your access...');
+  });
+
+  it('locks sparse 201 creation when canonical context still cannot confirm activation', async () => {
+    workspaceCreationSpy.createWorkspace.mockReturnValue(
+      of({
+        status: 201,
+        confirmed: false,
+        context: {
+          workspaceId: null,
+          businessProfileId: null,
+          companyName: 'Northwind Logistics',
+          isActive: null,
+          planCode: null,
+          billingStatus: null
+        }
+      })
+    );
+
+    refreshAuthAndWorkspaceContextSpy.mockImplementation(async () => {
+      companyContextSnapshot.context = {
+        activeBusinessProfileId: null,
+        activeBusinessProfileName: null,
+        activeMemberRole: null,
+        availableCompanies: []
+      };
+    });
+
+    loadPage();
+    await fixture.whenStable();
+
+    const component = fixture.componentInstance;
+    component.openCreateCompany();
+    component.createCompanyForm.companyName = 'Northwind Logistics';
+    component.createCompanyForm.firstName = 'Jane';
+    component.createCompanyForm.lastName = 'Owner';
+    component.createCompanyForm.workEmail = 'jane.owner@example.com';
+    component.createCompanyForm.country = 'Egypt';
+
+    component.createCompany();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    await fixture.whenStable();
+    await waitForCondition(() => component.createCompanyLocked);
+
+    expect(refreshAuthAndWorkspaceContextSpy).toHaveBeenCalledTimes(3);
+    expect(startActivationSpy).not.toHaveBeenCalled();
+    expect(routerSpy.navigateByUrl).not.toHaveBeenCalledWith('/app/workspace-activating', { replaceUrl: true });
+    expect(component.createCompanyLocked).toBe(true);
+    expect(component.createCompanyError).toBe('');
+    expect(component.createCompanySuccessMessage).toBe(
+      'Your company was created, but access is still activating. Please refresh this page in a moment.'
+    );
+
+    component.createCompany();
+    expect(workspaceCreationSpy.createWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it('keeps existing-workspace recovery on the direct post-create route flow', async () => {
     workspaceCreationSpy.createWorkspace.mockReturnValue(
       of({
         status: 200,
+        confirmed: true,
         context: {
-          workspace: {
-            id: 'profile-1',
-            companyName: 'Northwind Logistics',
-            isActive: true,
-            planCode: 'free',
-            billingStatus: 'trialing'
-          },
-          membership: {
-            id: 'member-1',
-            businessProfileId: 'profile-1',
-            memberRole: 'owner',
-            status: 'active'
-          }
+          workspaceId: 'profile-1',
+          businessProfileId: 'profile-1',
+          companyName: 'Northwind Logistics',
+          isActive: true,
+          planCode: 'free',
+          billingStatus: 'trialing'
         }
       })
     );
@@ -277,7 +430,9 @@ describe('WorkspaceAccessPageComponent', () => {
     expect(startActivationSpy).not.toHaveBeenCalled();
     expect(activateFromMembershipSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: 'member-1',
+        id: 'profile-1',
+        status: 'active',
+        member_role: 'owner',
         business_profile: expect.objectContaining({ id: 'profile-1' })
       })
     );
@@ -288,7 +443,7 @@ describe('WorkspaceAccessPageComponent', () => {
   });
 
   it('prevents duplicate submissions while the first request is in flight', async () => {
-    const createSubject = new Subject<{ status: number; context: unknown }>();
+    const createSubject = new Subject<{ status: number; confirmed: boolean; context: unknown }>();
     workspaceCreationSpy.createWorkspace.mockReturnValue(createSubject.asObservable());
 
     loadPage();
@@ -309,20 +464,14 @@ describe('WorkspaceAccessPageComponent', () => {
 
     createSubject.next({
       status: 201,
+      confirmed: true,
       context: {
-        workspace: {
-          id: 'profile-1',
-          companyName: 'Northwind Logistics',
-          isActive: true,
-          planCode: 'free',
-          billingStatus: 'trialing'
-        },
-        membership: {
-          id: 'member-1',
-          businessProfileId: 'profile-1',
-          memberRole: 'owner',
-          status: 'active'
-        }
+        workspaceId: 'profile-1',
+        businessProfileId: 'profile-1',
+        companyName: 'Northwind Logistics',
+        isActive: true,
+        planCode: 'free',
+        billingStatus: 'trialing'
       }
     });
     createSubject.complete();

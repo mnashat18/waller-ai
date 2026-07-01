@@ -263,8 +263,14 @@
                   <button
                     type="submit"
                     class="workspace-access-button workspace-access-button--primary"
-                    [disabled]="createCompanyLoading || createCompanyFormRef.invalid">
-                    {{ createCompanyLoading ? 'Creating workspace...' : createCompanyError ? 'Retry' : 'Create Company Workspace' }}
+                    [disabled]="createCompanyLoading || createCompanyLocked || createCompanyFormRef.invalid">
+                    {{ createCompanyLoading
+                      ? 'Creating workspace...'
+                      : createCompanyLocked
+                        ? 'Workspace created'
+                        : createCompanyError
+                          ? 'Retry'
+                          : 'Create Company Workspace' }}
                   </button>
                   <button type="button" class="workspace-access-button" (click)="createCompanyOpen = false" [disabled]="createCompanyLoading">
                     Hide form
