@@ -394,7 +394,8 @@ describe('WorkspaceAccessPageComponent', () => {
     expect(workspaceCreationSpy.createWorkspace).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps existing-workspace recovery on the direct post-create route flow', async () => {
+  it('keeps existing-workspace recovery on the canonical post-create route flow without fabricating membership ids', async () => {
+    resolveDestinationStrictSpy.mockResolvedValue('/app/workspace-access');
     workspaceCreationSpy.createWorkspace.mockReturnValue(
       of({
         status: 200,
@@ -425,21 +426,17 @@ describe('WorkspaceAccessPageComponent', () => {
     await fixture.whenStable();
     await new Promise((resolve) => setTimeout(resolve, 0));
     await fixture.whenStable();
-    await waitForCondition(() => routerSpy.navigateByUrl.mock.calls.length > 0);
+    await fixture.whenStable();
 
     expect(startActivationSpy).not.toHaveBeenCalled();
-    expect(activateFromMembershipSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'profile-1',
-        status: 'active',
-        member_role: 'owner',
-        business_profile: expect.objectContaining({ id: 'profile-1' })
-      })
-    );
     expect(refreshAuthAndWorkspaceContextSpy).toHaveBeenCalledWith({ force: true });
     expect(resolveDestinationStrictSpy).toHaveBeenCalled();
-    expect(routerSpy.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
+    expect(routerSpy.navigateByUrl).not.toHaveBeenCalled();
     expect(component.createCompanyError).toBe('');
+    expect(component.createCompanyLocked).toBe(true);
+    expect(component.createCompanySuccessMessage).toBe(
+      'Your company was created, but access is still activating. Please refresh this page in a moment.'
+    );
   });
 
   it('prevents duplicate submissions while the first request is in flight', async () => {

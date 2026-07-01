@@ -24,6 +24,7 @@ export type CreateWorkspaceInput = {
 
 export type CreatedWorkspaceContext = {
   workspaceId: string | null;
+  membershipId: string | null;
   businessProfileId: string | null;
   companyName: string | null;
   isActive: boolean | null;
@@ -97,7 +98,7 @@ export class WorkspaceCreationService {
         const data = this.extractContext(response);
         return {
           status: response.status,
-          confirmed: Boolean(data?.businessProfileId),
+          confirmed: Boolean(data?.workspaceId || data?.businessProfileId),
           context: data ?? this.buildSparseContext()
         };
       })
@@ -146,6 +147,7 @@ export class WorkspaceCreationService {
 
     return {
       workspaceId,
+      membershipId: this.normalizeId(value.membership?.id),
       businessProfileId: workspaceId,
       companyName,
       isActive,
@@ -157,6 +159,7 @@ export class WorkspaceCreationService {
   private buildSparseContext(): CreatedWorkspaceContext {
     return {
       workspaceId: null,
+      membershipId: null,
       businessProfileId: null,
       companyName: null,
       isActive: null,

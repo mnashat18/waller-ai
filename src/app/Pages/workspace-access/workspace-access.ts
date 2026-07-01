@@ -302,21 +302,6 @@ export class WorkspaceAccessPageComponent implements OnInit {
     });
   }
 
-  private async activateCreatedWorkspaceContext(context: CreatedWorkspaceContext): Promise<void> {
-    await this.companyContext.activateFromMembership({
-      id: String(context.businessProfileId ?? ''),
-      status: 'active',
-      member_role: 'owner',
-      business_profile: {
-        id: String(context.businessProfileId ?? ''),
-        company_name: context.companyName,
-        is_active: context.isActive ?? true
-      },
-      department: null,
-      joined_at: null
-    });
-  }
-
   private async handleCreatedWorkspace(
     result: { status: number; confirmed: boolean; context: CreatedWorkspaceContext }
   ): Promise<string> {
@@ -331,13 +316,13 @@ export class WorkspaceAccessPageComponent implements OnInit {
 
       this.createCompanyLocked = true;
       this.persistCreateCompanyLock(true);
-      return '/app/workspace-access';
+      await this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true });
+      return await this.postLoginRouting.resolveDestinationStrict();
     }
 
-    await this.activateCreatedWorkspaceContext(result.context);
     await this.postLoginRouting.refreshAuthAndWorkspaceContext({ force: true });
     const route = await this.postLoginRouting.resolveDestinationStrict();
-    return route === '/app/workspace-access' ? '/app/dashboard' : route;
+    return route;
   }
 
   private async resolveCreatedWorkspaceActivation(

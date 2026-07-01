@@ -69,6 +69,7 @@ describe('WorkspaceCreationService', () => {
     expect(result.status).toBe(201);
     expect(result.confirmed).toBe(true);
     expect(result.context.workspaceId).toBe('profile-1');
+    expect(result.context.membershipId).toBeNull();
     expect(result.context.businessProfileId).toBe('profile-1');
     expect(result.context.companyName).toBe('Northwind Logistics');
   });
@@ -97,6 +98,7 @@ describe('WorkspaceCreationService', () => {
             billing_status: 'trialing'
           },
           membership: {
+            id: 'member-2',
             business_profile_id: 'profile-2'
           }
         }
@@ -109,6 +111,7 @@ describe('WorkspaceCreationService', () => {
     expect(result.status).toBe(201);
     expect(result.confirmed).toBe(true);
     expect(result.context.workspaceId).toBe('profile-2');
+    expect(result.context.membershipId).toBe('member-2');
     expect(result.context.businessProfileId).toBe('profile-2');
   });
 
@@ -143,6 +146,7 @@ describe('WorkspaceCreationService', () => {
     expect(result.status).toBe(201);
     expect(result.confirmed).toBe(false);
     expect(result.context.workspaceId).toBeNull();
+    expect(result.context.membershipId).toBeNull();
     expect(result.context.businessProfileId).toBeNull();
     expect(result.context.companyName).toBe('Northwind Logistics');
   });
