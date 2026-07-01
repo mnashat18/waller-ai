@@ -1,16 +1,13 @@
 import { CommonModule } from '@angular/common';
 import { Component, HostListener, OnInit } from '@angular/core';
-import { Router } from '@angular/router';
-import { combineLatest } from 'rxjs';
-import { finalize } from 'rxjs/operators';
+import { NavigationEnd, NavigationStart, Router } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { map } from 'rxjs/operators';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { AuthService } from '../../services/auth';
 import { NotificationsService } from '../../services/notifications.service';
 import { GlobalNotificationsPanelComponent } from '../../shared/ui/global-notifications-panel/global-notifications-panel.component';
-import { CompanyContextChipComponent } from '../../shared/ui/company-context-chip/company-context-chip.component';
-import { EmptyStateComponent } from '../../shared/ui/empty-state/empty-state.component';
 import { RoleBadgeComponent } from '../../shared/ui/role-badge/role-badge.component';
 
 @Component({
@@ -19,8 +16,6 @@ import { RoleBadgeComponent } from '../../shared/ui/role-badge/role-badge.compon
   imports: [
     CommonModule,
     GlobalNotificationsPanelComponent,
-    CompanyContextChipComponent,
-    EmptyStateComponent,
     RoleBadgeComponent
   ],
   templateUrl: './topbar.component.html'
@@ -28,10 +23,8 @@ import { RoleBadgeComponent } from '../../shared/ui/role-badge/role-badge.compon
 export class TopbarComponent implements OnInit {
   readonly state$;
 
-  companyMenuOpen = false;
   userMenuOpen = false;
-  switchingCompanyId: string | null = null;
-  refreshingContext = false;
+  private routerNavigationSubscription?: Subscription;
 
   constructor(
     private companyContext: CompanyContextService,
@@ -39,50 +32,32 @@ export class TopbarComponent implements OnInit {
     private notifications: NotificationsService,
     private router: Router
   ) {
-    this.state$ = combineLatest({
-      state: this.companyContext.state$,
-      activeMembership: this.companyContext.activeMembership$,
-      activeBusinessProfile: this.companyContext.activeBusinessProfile$,
-      activeMemberRole: this.companyContext.activeMemberRole$
-    }).pipe(
-      map(({ state, activeMembership, activeBusinessProfile, activeMemberRole }) => {
-        const mergedContext = {
-          ...state.context,
-          activeBusinessProfileId: activeBusinessProfile?.id ?? state.context.activeBusinessProfileId,
-          activeBusinessProfileName:
-            activeBusinessProfile?.company_name ?? state.context.activeBusinessProfileName,
-          activeMemberRole:
-            activeMemberRole ??
-            (activeMembership?.member_role ? (String(activeMembership.member_role).toLowerCase() as any) : state.context.activeMemberRole)
-        };
-
-        const email = this.resolveDisplayEmail(mergedContext.currentUser?.email, mergedContext.userEmail);
+    this.state$ = this.companyContext.state$.pipe(
+      map((state) => {
+        const email = this.resolveDisplayEmail(state.context.currentUser?.email, state.context.userEmail);
         const displayName = this.resolveDisplayName(
-          mergedContext.currentUser?.first_name,
-          mergedContext.currentUser?.last_name,
+          state.context.currentUser?.first_name,
+          state.context.currentUser?.last_name,
           email
         );
-        const sessionLabel = !mergedContext.authInitialized
+        const sessionLabel = !state.context.authInitialized
           ? 'Loading session...'
-          : !mergedContext.isAuthenticated
+          : !state.context.isAuthenticated
             ? 'Signed out'
             : displayName;
-        const sessionSubLabel = !mergedContext.authInitialized
+        const sessionSubLabel = !state.context.authInitialized
           ? 'Loading session...'
-          : !mergedContext.isAuthenticated
+          : !state.context.isAuthenticated
             ? 'Signed out'
             : email ?? 'No email available';
 
         return {
           ...state,
-          context: mergedContext,
           ui: {
             sessionLabel,
             sessionSubLabel,
-            showSignedOut: mergedContext.authInitialized && !mergedContext.isAuthenticated,
-            showSessionLoading: !mergedContext.authInitialized,
-            showWorkspaceLoading: !mergedContext.workspaceInitialized,
-            hasActiveWorkspace: Boolean(mergedContext.activeBusinessProfileId)
+            showSignedOut: state.context.authInitialized && !state.context.isAuthenticated,
+            showSessionLoading: !state.context.authInitialized
           }
         };
       })
@@ -92,55 +67,26 @@ export class TopbarComponent implements OnInit {
   ngOnInit(): void {
     void this.companyContext.initializeAppContext();
     this.notifications.initialize();
+    this.routerNavigationSubscription = this.router.events.subscribe((event) => {
+      if (event instanceof NavigationStart || event instanceof NavigationEnd) {
+        this.userMenuOpen = false;
+      }
+    });
   }
 
-  toggleCompanyMenu(event: MouseEvent): void {
-    event.stopPropagation();
-    this.companyMenuOpen = !this.companyMenuOpen;
-    this.userMenuOpen = false;
+  ngOnDestroy(): void {
+    this.routerNavigationSubscription?.unsubscribe();
   }
 
   toggleUserMenu(event: MouseEvent): void {
     event.stopPropagation();
     this.userMenuOpen = !this.userMenuOpen;
-    this.companyMenuOpen = false;
-  }
-
-  refreshContext(): void {
-    this.refreshingContext = true;
-    void this.companyContext.initializeAppContext(true).finally(() => {
-      this.refreshingContext = false;
-      this.notifications.refresh('context-refresh');
-    });
-  }
-
-  switchCompany(companyId: string): void {
-    this.switchingCompanyId = companyId;
-    this.companyContext.switchCompany(companyId).pipe(
-      finalize(() => {
-        this.switchingCompanyId = null;
-        this.companyMenuOpen = false;
-      })
-    ).subscribe({
-      next: () => {
-        if (typeof window !== 'undefined') {
-          window.location.assign('/app/dashboard');
-          return;
-        }
-        this.router.navigateByUrl('/app/dashboard');
-      }
-    });
   }
 
   logout(): void {
     this.auth.logout();
     this.userMenuOpen = false;
     this.router.navigateByUrl('/');
-  }
-
-  goToWorkspaceAccess(): void {
-    this.companyMenuOpen = false;
-    this.router.navigateByUrl('/app/workspace-access');
   }
 
   stopPropagation(event: MouseEvent): void {
@@ -190,7 +136,6 @@ export class TopbarComponent implements OnInit {
 
   @HostListener('document:click')
   closeMenus(): void {
-    this.companyMenuOpen = false;
     this.userMenuOpen = false;
   }
 }

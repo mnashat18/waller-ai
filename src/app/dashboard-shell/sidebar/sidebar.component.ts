@@ -1,10 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { ApplicationRef, EmbeddedViewRef, ElementRef, Component, OnDestroy, TemplateRef, ViewChild, inject } from '@angular/core';
-import { IsActiveMatchOptions, Router, RouterLink, RouterLinkActive } from '@angular/router';
-import { combineLatest } from 'rxjs';
+import { ApplicationRef, EmbeddedViewRef, ElementRef, Component, OnDestroy, OnInit, TemplateRef, ViewChild, inject } from '@angular/core';
+import { IsActiveMatchOptions, NavigationEnd, NavigationStart, Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { firstValueFrom, Subscription, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 
-import { CompanyContextService } from '../../core/context/company-context.service';
+import { CompanyContextService, type CompanyOption } from '../../core/context/company-context.service';
 import {
   getSidebarNavForRole,
   normalizeActiveMemberRole,
@@ -31,6 +31,8 @@ type SidebarVm = {
   userDisplayName: string;
   userInitials: string;
   userEmail: string | null;
+  availableCompanies: CompanyOption[];
+  canSwitchOrganizations: boolean;
   groups: SidebarNavGroupVm[];
   emptyStateTitle: string;
   emptyStateDescription: string;
@@ -45,7 +47,7 @@ type AccountMenuPlacement = 'above' | 'below';
   templateUrl: './sidebar.component.html',
   styleUrl: './sidebar.component.css'
 })
-export class SidebarComponent implements OnDestroy {
+export class SidebarComponent implements OnInit, OnDestroy {
   private readonly companyContext = inject(CompanyContextService);
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
@@ -72,6 +74,7 @@ export class SidebarComponent implements OnDestroy {
         items: group.items
       }));
       const isEmployee = role === 'employee';
+      const availableCompanies = state.context.availableCompanies ?? [];
 
       this.accountDisplayName = userDisplayName;
       this.accountEmail = userEmail;
@@ -92,6 +95,8 @@ export class SidebarComponent implements OnDestroy {
         userDisplayName,
         userInitials,
         userEmail,
+        availableCompanies,
+        canSwitchOrganizations: availableCompanies.length > 1,
         groups: navGroups,
         emptyStateTitle: isEmployee ? 'Employee access' : 'Organization unavailable',
         emptyStateDescription: isEmployee
@@ -102,6 +107,7 @@ export class SidebarComponent implements OnDestroy {
   );
 
   accountMenuOpen = false;
+  organizationSwitcherOpen = false;
   accountMenuPlacement: AccountMenuPlacement = 'above';
   accountMenuPosition = {
     top: 0,
@@ -114,14 +120,25 @@ export class SidebarComponent implements OnDestroy {
   accountEmail: string | null = null;
   accountInitials = 'U';
   accountRole: ActiveMemberRole | null = null;
+  switchingCompanyId: string | null = null;
+  organizationSwitchError = '';
   private accountMenuViewRef: EmbeddedViewRef<unknown> | null = null;
   private accountMenuElement: HTMLElement | null = null;
   private accountMenuCleanup: Array<() => void> = [];
+  private routerEventsSubscription?: Subscription;
 
   @ViewChild('accountMenuTrigger') private accountMenuTrigger?: ElementRef<HTMLButtonElement>;
   @ViewChild('accountMenuTemplate') private accountMenuTemplate?: TemplateRef<unknown>;
 
   onNavigate(_item: SidebarNavItem): void {}
+
+  ngOnInit(): void {
+    this.routerEventsSubscription = this.router.events.subscribe((event) => {
+      if (event instanceof NavigationStart || event instanceof NavigationEnd) {
+        this.closeAccountMenu();
+      }
+    });
+  }
 
   routerLinkActiveOptions(item: SidebarNavItem): IsActiveMatchOptions {
     return {
@@ -133,6 +150,7 @@ export class SidebarComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.routerEventsSubscription?.unsubscribe();
     this.destroyAccountMenuOverlay();
   }
 
@@ -147,7 +165,7 @@ export class SidebarComponent implements OnDestroy {
     this.openAccountMenu();
   }
 
-  openAccountSettings(tab: 'profile' | 'preferences' | 'security'): void {
+  openAccountSettings(tab: 'profile'): void {
     this.closeAccountMenu();
     void this.router.navigate(['/app/settings'], {
       queryParams: { tab },
@@ -162,7 +180,15 @@ export class SidebarComponent implements OnDestroy {
 
     if (event.key === 'Escape') {
       event.preventDefault();
-      this.closeAccountMenu(true);
+      if (this.organizationSwitcherOpen) {
+        this.closeOrganizationSwitcher(true);
+      } else {
+        this.closeAccountMenu(true);
+      }
+      return;
+    }
+
+    if (this.organizationSwitcherOpen) {
       return;
     }
 
@@ -182,6 +208,62 @@ export class SidebarComponent implements OnDestroy {
         ? (currentIndex + 1) % items.length
         : (currentIndex <= 0 ? items.length : currentIndex) - 1;
     items[nextIndex]?.focus();
+  }
+
+  openOrganizationSwitcher(): void {
+    if (!this.accountMenuOpen || this.organizationSwitcherOpen) {
+      return;
+    }
+
+    this.organizationSwitchError = '';
+    this.organizationSwitcherOpen = true;
+    const finalizeOpen = () => {
+      this.repositionAccountMenu();
+      this.focusFirstOrganizationSwitcherItem();
+    };
+    setTimeout(finalizeOpen, 0);
+  }
+
+  closeOrganizationSwitcher(restoreFocus = false): void {
+    if (!this.organizationSwitcherOpen) {
+      return;
+    }
+
+    this.organizationSwitcherOpen = false;
+    this.organizationSwitchError = '';
+    this.switchingCompanyId = null;
+
+    const finalizeClose = () => {
+      this.repositionAccountMenu();
+      if (restoreFocus) {
+        this.focusFirstAccountMenuItem();
+      }
+    };
+    setTimeout(finalizeClose, 0);
+  }
+
+  async switchOrganization(companyId: string): Promise<void> {
+    if (!this.accountMenuOpen || !this.organizationSwitcherOpen || this.switchingCompanyId || !companyId) {
+      return;
+    }
+
+    const selected = this.companyContext.snapshot().context.availableCompanies.find((item) => item.id === companyId) ?? null;
+    if (!selected || selected.isActive) {
+      return;
+    }
+
+    this.switchingCompanyId = companyId;
+    this.organizationSwitchError = '';
+
+    try {
+      await firstValueFrom(this.companyContext.switchCompany(selected.id));
+      this.closeAccountMenu(true);
+      void this.router.navigateByUrl('/app/dashboard', { replaceUrl: true });
+    } catch {
+      this.organizationSwitchError = 'Could not switch organization. Please try again.';
+    } finally {
+      this.switchingCompanyId = null;
+    }
   }
 
   logout(): void {
@@ -295,7 +377,7 @@ export class SidebarComponent implements OnDestroy {
     return normalized;
   }
 
-  private roleLabel(role: ActiveMemberRole | null): string {
+  roleLabel(role: ActiveMemberRole | null): string {
     if (role === 'owner') return 'Owner';
     if (role === 'hr') return 'HR';
     if (role === 'manager') return 'Manager';
@@ -308,6 +390,9 @@ export class SidebarComponent implements OnDestroy {
       return;
     }
 
+    this.organizationSwitcherOpen = false;
+    this.organizationSwitchError = '';
+    this.switchingCompanyId = null;
     this.accountMenuOpen = true;
     this.mountAccountMenuOverlay();
   }
@@ -320,6 +405,9 @@ export class SidebarComponent implements OnDestroy {
       return;
     }
 
+    this.organizationSwitcherOpen = false;
+    this.organizationSwitchError = '';
+    this.switchingCompanyId = null;
     this.accountMenuOpen = false;
     this.destroyAccountMenuOverlay();
 
@@ -351,7 +439,7 @@ export class SidebarComponent implements OnDestroy {
     this.accountMenuElement = host;
     this.repositionAccountMenu();
     this.attachAccountMenuListeners();
-    this.focusFirstAccountMenuItem();
+    this.focusAccountMenuContent();
   }
 
   private repositionAccountMenu(): void {
@@ -447,9 +535,28 @@ export class SidebarComponent implements OnDestroy {
     this.accountMenuItems()[0]?.focus();
   }
 
+  private focusFirstOrganizationSwitcherItem(): void {
+    this.organizationSwitcherItems()[0]?.focus();
+  }
+
+  private focusAccountMenuContent(): void {
+    if (this.organizationSwitcherOpen) {
+      this.focusFirstOrganizationSwitcherItem();
+      return;
+    }
+
+    this.focusFirstAccountMenuItem();
+  }
+
   private accountMenuItems(): HTMLButtonElement[] {
     return Array.from(
       this.accountMenuElement?.querySelectorAll<HTMLButtonElement>('.app-sidebar__account-menu-item') ?? []
+    );
+  }
+
+  private organizationSwitcherItems(): HTMLButtonElement[] {
+    return Array.from(
+      this.accountMenuElement?.querySelectorAll<HTMLButtonElement>('.app-sidebar__organization-switcher-item') ?? []
     );
   }
 

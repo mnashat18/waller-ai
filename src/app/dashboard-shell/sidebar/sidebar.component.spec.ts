@@ -1,7 +1,7 @@
 ﻿import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, Subject, of } from 'rxjs';
 import { vi } from 'vitest';
 
 import { CompanyContextService, type CompanyContextState } from '../../core/context/company-context.service';
@@ -14,7 +14,7 @@ import { SidebarComponent } from './sidebar.component';
 })
 class DummyRouteComponent {}
 
-const createContextState = (): CompanyContextState => ({
+const createContextState = (overrides: Partial<CompanyContextState['context']> = {}): CompanyContextState => ({
   loading: false,
   error: null,
   context: {
@@ -36,7 +36,8 @@ const createContextState = (): CompanyContextState => ({
     activeDepartmentName: null,
     activeMemberRole: 'owner',
     availableCompanies: [],
-    hubReason: null
+    hubReason: null,
+    ...overrides
   }
 });
 
@@ -81,6 +82,7 @@ describe('SidebarComponent', () => {
   let activeMembership$: BehaviorSubject<any>;
   let activeBusinessProfile$: BehaviorSubject<any>;
   let authLogoutSpy: any;
+  let switchCompanySpy: any;
 
   beforeEach(async () => {
     state$ = new BehaviorSubject<CompanyContextState>(createContextState());
@@ -92,6 +94,7 @@ describe('SidebarComponent', () => {
       department: null
     });
     activeBusinessProfile$ = new BehaviorSubject({ id: 'profile-1', company_name: 'Wellar' });
+    switchCompanySpy = vi.fn(() => of(createContextState()));
 
     await TestBed.configureTestingModule({
       imports: [SidebarComponent],
@@ -133,7 +136,9 @@ describe('SidebarComponent', () => {
             state$: state$.asObservable(),
             activeMembership$: activeMembership$.asObservable(),
             activeBusinessProfile$: activeBusinessProfile$.asObservable(),
-            clearActiveWorkspaceContext: () => undefined
+            clearActiveWorkspaceContext: () => undefined,
+            snapshot: () => state$.value,
+            switchCompany: switchCompanySpy
           }
         },
         {
@@ -219,6 +224,204 @@ describe('SidebarComponent', () => {
     expect(control.textContent).toContain('Owner');
   });
 
+  it('hides Switch organization when only one verified membership is available', async () => {
+    state$.next(
+      createContextState({
+        availableCompanies: [
+          {
+            id: 'profile-1',
+            membershipId: 'membership-1',
+            name: 'Wellar',
+            role: 'owner',
+            membershipStatus: 'active',
+            isActive: true
+          }
+        ]
+      })
+    );
+    activeMembership$.next({
+      id: 'membership-1',
+      member_role: 'owner',
+      status: 'active',
+      business_profile: { id: 'profile-1', company_name: 'Wellar' },
+      department: null
+    });
+    activeBusinessProfile$.next({ id: 'profile-1', company_name: 'Wellar' });
+    fixture.detectChanges();
+
+    const trigger = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+
+    const menu = document.body.querySelector('.app-sidebar__account-menu') as HTMLElement;
+    expect(menu.textContent).not.toContain('Switch organization');
+  });
+
+  it('shows Switch organization for multiple verified memberships and opens the compact picker', async () => {
+    state$.next(
+      createContextState({
+        availableCompanies: [
+          {
+            id: 'profile-1',
+            membershipId: 'membership-1',
+            name: 'Waller Demo Company',
+            role: 'owner',
+            membershipStatus: 'active',
+            isActive: true
+          },
+          {
+            id: 'profile-2',
+            membershipId: 'membership-2',
+            name: 'Northline Logistics',
+            role: 'manager',
+            membershipStatus: 'active',
+            isActive: false
+          }
+        ]
+      })
+    );
+    activeMembership$.next({
+      id: 'membership-1',
+      member_role: 'owner',
+      status: 'active',
+      business_profile: { id: 'profile-1', company_name: 'Waller Demo Company' },
+      department: null
+    });
+    activeBusinessProfile$.next({ id: 'profile-1', company_name: 'Waller Demo Company' });
+    fixture.detectChanges();
+
+    const trigger = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+
+    const menu = document.body.querySelector('.app-sidebar__account-menu') as HTMLElement;
+    expect(menu.textContent).toContain('Switch organization');
+
+    const switchButton = Array.from(menu.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Switch organization')
+    ) as HTMLButtonElement;
+    switchButton.click();
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    const picker = document.body.querySelector('.app-sidebar__organization-switcher-panel') as HTMLElement;
+    expect(picker).toBeTruthy();
+    expect(picker.textContent).toContain('Switch organization');
+    expect(picker.textContent).toContain('Choose the organization you want to work in');
+    expect(picker.textContent).toContain('Waller Demo Company');
+    expect(picker.textContent).toContain('Northline Logistics');
+  });
+
+  it('prevents duplicate switch clicks, reloads context, and routes to the dashboard after switching', async () => {
+    const pendingSwitch$ = new Subject<CompanyContextState>();
+    vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+
+    state$.next(
+      createContextState({
+        availableCompanies: [
+          {
+            id: 'profile-1',
+            membershipId: 'membership-1',
+            name: 'Waller Demo Company',
+            role: 'owner',
+            membershipStatus: 'active',
+            isActive: true
+          },
+          {
+            id: 'profile-2',
+            membershipId: 'membership-2',
+            name: 'Northline Logistics',
+            role: 'manager',
+            membershipStatus: 'active',
+            isActive: false
+          }
+        ]
+      })
+    );
+    activeMembership$.next({
+      id: 'membership-1',
+      member_role: 'owner',
+      status: 'active',
+      business_profile: { id: 'profile-1', company_name: 'Waller Demo Company' },
+      department: null
+    });
+    activeBusinessProfile$.next({ id: 'profile-1', company_name: 'Waller Demo Company' });
+
+    switchCompanySpy.mockImplementation((companyId: string) => {
+      expect(companyId).toBe('profile-2');
+      const nextState = createContextState({
+        activeBusinessProfileId: 'profile-2',
+        activeBusinessProfileName: 'Northline Logistics',
+        activeMemberRole: 'manager',
+        availableCompanies: [
+          {
+            id: 'profile-1',
+            membershipId: 'membership-1',
+            name: 'Waller Demo Company',
+            role: 'owner',
+            membershipStatus: 'active',
+            isActive: false
+          },
+          {
+            id: 'profile-2',
+            membershipId: 'membership-2',
+            name: 'Northline Logistics',
+            role: 'manager',
+            membershipStatus: 'active',
+            isActive: true
+          }
+        ]
+      });
+
+      state$.next(nextState);
+      activeMembership$.next({
+        id: 'membership-2',
+        member_role: 'manager',
+        status: 'active',
+        business_profile: { id: 'profile-2', company_name: 'Northline Logistics' },
+        department: null
+      });
+      activeBusinessProfile$.next({ id: 'profile-2', company_name: 'Northline Logistics' });
+      return pendingSwitch$.asObservable();
+    });
+
+    fixture.detectChanges();
+
+    const trigger = fixture.nativeElement.querySelector('.app-sidebar__account-control') as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+
+    const menu = document.body.querySelector('.app-sidebar__account-menu') as HTMLElement;
+    const switchButton = Array.from(menu.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Switch organization')
+    ) as HTMLButtonElement;
+    switchButton.click();
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    const picker = document.body.querySelector('.app-sidebar__organization-switcher-panel') as HTMLElement;
+    const targetRow = Array.from(picker.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Northline Logistics')
+    ) as HTMLButtonElement;
+    expect(targetRow.disabled).toBe(false);
+
+    targetRow.click();
+    targetRow.click();
+    expect(switchCompanySpy).toHaveBeenCalledTimes(1);
+
+    pendingSwitch$.next(state$.value);
+    pendingSwitch$.complete();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(document.body.querySelector('.app-sidebar__account-menu')).toBeFalsy();
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
+    expect(fixture.nativeElement.textContent).toContain('Northline Logistics');
+    expect(fixture.nativeElement.textContent).toContain('Manager');
+  });
+
   it('keeps the account footer anchored without sticky positioning', () => {
     const body = fixture.nativeElement.querySelector('.app-sidebar__body') as HTMLElement;
     const footer = fixture.nativeElement.querySelector('.app-sidebar__footer') as HTMLElement;
@@ -250,10 +453,9 @@ describe('SidebarComponent', () => {
     const menu = document.body.querySelector('.app-sidebar__account-menu') as HTMLElement;
     expect(menu).toBeTruthy();
     expect(menu.parentElement).toBe(document.body);
-    expect(menu.textContent).toContain('Profile');
-    expect(menu.textContent).toContain('Preferences');
-    expect(menu.textContent).toContain('Security');
+    expect(menu.textContent).toContain('Profile & settings');
     expect(menu.textContent).toContain('Sign out');
+    expect(menu.textContent).not.toContain('Switch organization');
 
     const profileButton = menu.querySelector('.app-sidebar__account-menu-item') as HTMLButtonElement;
     profileButton.click();

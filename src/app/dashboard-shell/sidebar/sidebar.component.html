@@ -141,6 +141,7 @@
       <ng-template #accountMenuTemplate>
         <div
           class="app-sidebar__account-menu"
+          id="app-sidebar-account-menu"
           [class.app-sidebar__account-menu--above]="accountMenuPlacement === 'above'"
           [style.top.px]="accountMenuPosition.top"
           [style.left.px]="accountMenuPosition.left"
@@ -148,20 +149,31 @@
           [style.maxHeight.px]="accountMenuPosition.maxHeight"
           (click)="$event.stopPropagation()"
           (keydown)="handleAccountMenuKeydown($event)">
-          <div id="app-sidebar-account-menu" class="app-sidebar__account-menu-panel" role="menu" aria-label="Account menu">
+          <div
+            *ngIf="!organizationSwitcherOpen"
+            class="app-sidebar__account-menu-panel"
+            role="menu"
+            aria-label="Account menu">
             <div class="app-sidebar__account-menu-header">
-              <p>{{ accountDisplayName }}</p>
-              <span>{{ accountEmail || 'Account controls' }}</span>
+              <div class="app-sidebar__account-menu-avatar" aria-hidden="true">{{ accountInitials }}</div>
+              <div class="app-sidebar__account-menu-copy">
+                <p>{{ accountDisplayName }}</p>
+                <span>{{ accountEmail || 'Account controls' }}</span>
+              </div>
+              <app-role-badge *ngIf="accountRole" [role]="accountRole"></app-role-badge>
             </div>
 
             <button type="button" class="app-sidebar__account-menu-item" role="menuitem" (click)="openAccountSettings('profile')">
-              Profile
+              Profile &amp; settings
             </button>
-            <button type="button" class="app-sidebar__account-menu-item" role="menuitem" (click)="openAccountSettings('preferences')">
-              Preferences
-            </button>
-            <button type="button" class="app-sidebar__account-menu-item" role="menuitem" (click)="openAccountSettings('security')">
-              Security
+
+            <button
+              *ngIf="vm.canSwitchOrganizations"
+              type="button"
+              class="app-sidebar__account-menu-item"
+              role="menuitem"
+              (click)="openOrganizationSwitcher()">
+              Switch organization
             </button>
 
             <div class="app-sidebar__account-menu-divider" role="separator"></div>
@@ -169,6 +181,54 @@
             <button type="button" class="app-sidebar__account-menu-item app-sidebar__account-menu-item--danger" role="menuitem" (click)="logout()">
               Sign out
             </button>
+          </div>
+
+          <div
+            *ngIf="organizationSwitcherOpen"
+            id="app-sidebar-organization-switcher"
+            class="app-sidebar__organization-switcher-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="app-sidebar-organization-switcher-title"
+            (click)="$event.stopPropagation()"
+            (keydown)="handleAccountMenuKeydown($event)">
+            <div class="app-sidebar__organization-switcher-header">
+              <button type="button" class="app-sidebar__organization-switcher-back" (click)="closeOrganizationSwitcher(true)">
+                Back
+              </button>
+              <div class="app-sidebar__organization-switcher-header-copy">
+                <p id="app-sidebar-organization-switcher-title">Switch organization</p>
+                <span>Choose the organization you want to work in</span>
+              </div>
+            </div>
+
+            <p *ngIf="organizationSwitchError" class="app-sidebar__organization-switcher-error">
+              {{ organizationSwitchError }}
+            </p>
+
+            <div class="app-sidebar__organization-switcher-list">
+              <button
+                *ngFor="let company of vm.availableCompanies"
+                type="button"
+                class="app-sidebar__organization-switcher-item"
+                [class.is-active]="company.isActive"
+                [disabled]="switchingCompanyId === company.id || company.isActive"
+                (click)="switchOrganization(company.id)">
+                <span class="app-sidebar__organization-switcher-item-copy">
+                  <strong>
+                    <span *ngIf="company.isActive" aria-hidden="true">✓</span>
+                    {{ company.name }}
+                  </strong>
+                  <small>{{ roleLabel(company.role) }}</small>
+                  <small *ngIf="company.isActive && vm.departmentValue">{{ vm.departmentValue }}</small>
+                </span>
+
+                <span class="app-sidebar__organization-switcher-meta">
+                  <em *ngIf="company.isActive">Current</em>
+                  <em *ngIf="switchingCompanyId === company.id">Switching...</em>
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </ng-template>

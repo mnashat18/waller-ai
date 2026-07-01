@@ -1161,23 +1161,97 @@ export class OperationsAdminService {
   }
 
   createInvite(input: CreateInviteInput): Observable<void> {
-    void input;
-    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+    return this.ensureScopedContext().pipe(
+      switchMap((context) => {
+        const payload = this.buildCreateInvitePayload(input, context);
+        return this.http.post(
+          `${this.api}/items/request_invites`,
+          payload,
+          {
+            headers: this.headers(context.token),
+            withCredentials: true
+          }
+        ).pipe(
+          timeout(12000),
+          map(() => undefined),
+          catchError((error) => throwError(() => this.toCreateInviteError(error)))
+        );
+      })
+    );
   }
 
   resendInvite(inviteId: string): Observable<void> {
-    void inviteId;
-    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+    return this.ensureScopedContext().pipe(
+      switchMap((context) => {
+        const now = new Date();
+        const expiresAt = new Date(now.getTime());
+        expiresAt.setDate(expiresAt.getDate() + 7);
+
+        return this.http.patch(
+          `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`,
+          {
+            status: 'sent',
+            sent_at: now.toISOString(),
+            expires_at: expiresAt.toISOString()
+          },
+          {
+            headers: this.headers(context.token),
+            withCredentials: true
+          }
+        ).pipe(
+          timeout(12000),
+          map(() => undefined),
+          catchError((error) => throwError(() => this.toCreateInviteError(error)))
+        );
+      })
+    );
   }
 
   expireInvite(inviteId: string): Observable<void> {
-    void inviteId;
-    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+    return this.ensureScopedContext().pipe(
+      switchMap((context) =>
+        this.http.patch(
+          `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`,
+          {
+            status: 'expired',
+            expires_at: new Date().toISOString()
+          },
+          {
+            headers: this.headers(context.token),
+            withCredentials: true
+          }
+        ).pipe(
+          timeout(12000),
+          map(() => undefined),
+          catchError((error) => throwError(() => this.toCreateInviteError(error)))
+        )
+      )
+    );
   }
 
   revokeInvite(inviteId: string): Observable<void> {
-    void inviteId;
-    return throwError(() => new Error(this.organizationWorkflowPrerequisiteMessage()));
+    return this.ensureScopedContext().pipe(
+      switchMap((context) => {
+        const endpoint = `${this.api}/items/request_invites/${encodeURIComponent(inviteId)}`;
+        const request = (status: string) =>
+          this.http.patch(
+            endpoint,
+            { status },
+            {
+              headers: this.headers(context.token),
+              withCredentials: true
+            }
+          ).pipe(
+            timeout(12000),
+            map(() => undefined),
+            catchError((error) => throwError(() => this.toCreateInviteError(error)))
+          );
+
+        return request('cancelled').pipe(
+          catchError(() => request('revoked'))
+        );
+      })
+    );
   }
 
   private organizationWorkflowPrerequisiteMessage(): string {

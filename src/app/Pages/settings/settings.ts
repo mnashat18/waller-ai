@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { firstValueFrom, type Observable } from 'rxjs';
@@ -144,13 +144,10 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   viewState: SettingsViewState = 'loading';
   loadError = '';
   refreshing = false;
-  switchingWorkspace = false;
-  switchingMessage = '';
   membershipError = '';
   membershipForbidden = false;
 
   activeTab: SettingsTabId = 'profile';
-  workspaceDropdownOpen = false;
   savingAccount = false;
   accountTouched = false;
   clearingWorkspaceCache = false;
@@ -205,22 +202,12 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadPreferences();
     const requestedTab = this.normalizeInitialTab(this.route.snapshot.queryParamMap.get('tab'));
-    if (requestedTab === 'organization') {
-      void this.redirectLegacyOrganizationTab();
-      return;
-    }
-
     this.activeTab = requestedTab ?? 'profile';
     void this.loadSettings();
   }
 
   ngOnDestroy(): void {
     this.clearAvatarPreview();
-  }
-
-  @HostListener('document:click')
-  closeWorkspaceDropdown(): void {
-    this.workspaceDropdownOpen = false;
   }
 
   async refreshContext(): Promise<void> {
@@ -531,51 +518,6 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
     this.avatarPreviewUrl = null;
   }
 
-  toggleWorkspaceDropdown(event: MouseEvent): void {
-    event.stopPropagation();
-    this.workspaceDropdownOpen = !this.workspaceDropdownOpen;
-  }
-
-  async switchWorkspace(membershipId: string): Promise<void> {
-    if (this.switchingWorkspace || !membershipId || this.memberships.length <= 1) {
-      return;
-    }
-
-    const selected = this.memberships.find((item) => item.id === membershipId) ?? null;
-    const previous = this.activeMembership;
-
-    if (!selected || !previous || selected.id === previous.id) {
-      this.workspaceDropdownOpen = false;
-      return;
-    }
-
-    const token = this.auth.getStoredAccessToken();
-    if (!token) {
-      this.pushToast('error', 'Session expired. Please sign in again.');
-      return;
-    }
-
-    this.switchingWorkspace = true;
-    this.switchingMessage = 'Switching organization...';
-
-    try {
-      await firstValueFrom(this.workspaceContextApi.switchMembership(selected.id));
-      await this.loadSettings(true, false);
-      this.workspaceDropdownOpen = false;
-      this.pushToast('success', 'Organization switched successfully.');
-      await this.router.navigateByUrl('/app/dashboard');
-    } catch (error) {
-      this.activeMembership = previous;
-      this.pushToast(
-        'error',
-        this.readWorkspaceContextError(error, 'Organization switch failed. Your previous organization is still active.')
-      );
-    } finally {
-      this.switchingWorkspace = false;
-      this.switchingMessage = '';
-    }
-  }
-
   roleSummaryText(): string {
     const role = this.resolveAccessRole(this.activeMembership?.memberRoleRaw ?? this.user?.active_member_role);
     if (role === 'owner') {
@@ -671,25 +613,12 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
     return membership.id;
   }
 
-  private normalizeInitialTab(value: string | null): SettingsTabId | 'organization' | null {
+  private normalizeInitialTab(value: string | null): SettingsTabId | null {
     const normalized = (value ?? '').trim().toLowerCase();
     if (normalized === 'profile' || normalized === 'preferences' || normalized === 'security') {
       return normalized;
     }
-    if (normalized === 'organization') {
-      return 'organization';
-    }
     return null;
-  }
-
-  private async redirectLegacyOrganizationTab(): Promise<void> {
-    const role = this.resolveAccessRole(this.companyContext.snapshot().context.activeMemberRole);
-    if (role === 'owner' || role === 'hr') {
-      await this.router.navigateByUrl('/app/company', { replaceUrl: true });
-      return;
-    }
-
-    this.activeTab = 'profile';
   }
 
   private async loadSettings(forceRefresh = false, allowRedirect = true): Promise<void> {

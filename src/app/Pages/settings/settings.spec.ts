@@ -239,14 +239,8 @@ describe('SettingsPageComponent', () => {
     expect((component as any).reloadCurrentUser).toHaveBeenCalled();
   });
 
-  it('redirects legacy organization tab URLs for owners and HR users', async () => {
+  it('ignores the legacy organization tab and stays on Profile', async () => {
     await createComponent('organization', 'owner');
-
-    expect(router.navigateByUrl).toHaveBeenCalledWith('/app/company', { replaceUrl: true });
-  });
-
-  it('falls back to Profile when the legacy organization tab is requested without owner or HR access', async () => {
-    await createComponent('organization', 'manager');
 
     expect(router.navigateByUrl).not.toHaveBeenCalledWith('/app/company', { replaceUrl: true });
     expect(component.activeTab).toBe('profile');
