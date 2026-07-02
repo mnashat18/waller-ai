@@ -145,6 +145,7 @@ describe('AppShellComponent', () => {
 
     expect(initializeCallCount).toBe(1);
     expect(component.shellMounted).toBe(true);
+    expect(fixture.nativeElement.querySelector('.app-shell__loading')).toBeNull();
   });
 
   it('mounts the shell for authenticated users without an active workspace once context is ready', async () => {

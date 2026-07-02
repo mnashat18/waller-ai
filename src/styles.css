@@ -129,11 +129,10 @@ body {
 .card {
   @apply bg-white dark:bg-slate-900
          rounded-xl p-6 border border-slate-200 dark:border-slate-800
-         shadow-sm transition-all duration-200 ease-out;
+         shadow-sm;
 }
 
 .card:hover {
-  transform: translateY(-2px);
   box-shadow: 0 12px 40px rgba(0,0,0,0.08);
 }
 
@@ -204,15 +203,14 @@ body {
    Skeleton Loader
 ========================= */
 .skeleton {
-  @apply bg-slate-200 dark:bg-slate-700
-         animate-pulse rounded;
+  @apply bg-slate-200 dark:bg-slate-700 rounded;
 }
 
 /* =========================
    Skeleton Loaders
 ========================= */
 .skeleton {
-  @apply bg-slate-200 dark:bg-slate-700 rounded animate-pulse;
+  @apply bg-slate-200 dark:bg-slate-700 rounded;
 }
 
 .skeleton-text {
@@ -252,24 +250,22 @@ pre {
 }
 /* Page transitions */
 .page-enter {
-  opacity: 0;
-  transform: translateY(10px);
+  opacity: 1;
+  transform: none;
 }
 
 .page-enter-active {
   opacity: 1;
-  transform: translateY(0);
-  transition: 0.4s ease;
+  transform: none;
+  transition: none;
 }
 
 /* Cards */
 .card {
   @apply bg-white dark:bg-slate-900 rounded-xl p-6 border shadow-sm;
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
 .card:hover {
-  transform: translateY(-4px);
   box-shadow: 0 15px 40px rgba(0,0,0,0.08);
 }
 @keyframes authEnter {
@@ -787,12 +783,10 @@ body {
   border-radius: 20px;
   box-shadow: var(--app-shadow-strong);
   backdrop-filter: blur(12px);
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card:hover,
 .stat-card:hover {
-  transform: translateY(-6px);
   border-color: rgba(56, 189, 248, 0.5);
   box-shadow: 0 30px 70px rgba(56, 189, 248, 0.2);
 }
@@ -936,16 +930,7 @@ body {
 }
 
 .fade-in {
-  animation: fadeUp 0.5s ease both;
-}
-
-@keyframes fadeUp {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  animation: none;
 }
 
 .page-shell {
@@ -1453,9 +1438,7 @@ body::selection {
 .page-shell .panel:hover,
 .page-shell .list-card:hover,
 .page-shell .kpi-card:hover,
-.app-shell .app-content-frame:hover,
 .app-shell .app-header__panel:hover {
-  transform: translateY(-4px);
   box-shadow: var(--wellar-shadow-strong);
 }
 
@@ -1492,17 +1475,7 @@ body::selection {
   display: block;
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
-  animation: skeletonSweep 1.4s infinite;
-}
-
-@keyframes skeletonSweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.08));
 }
 
 .page-shell {
@@ -2953,7 +2926,7 @@ body::selection {
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(9, 14, 28, 0.96);
   box-shadow: 0 30px 80px rgba(2, 6, 23, 0.45);
-  animation: menuPop 0.16s ease-out both;
+  animation: none;
 }
 
 .app-content {
@@ -2993,12 +2966,21 @@ body::selection {
 
 .app-content-frame.is-transitioning,
 .root-route-shell.is-transitioning {
-  animation: appShellFade 0.14s ease-out both;
+  animation: none;
 }
 
 .app-shell .app-content-frame > *,
 .app-shell .app-content-frame > * > * {
   animation: none !important;
+}
+
+.app-shell .app-content-frame,
+.app-shell .app-content-frame *,
+.app-shell .app-content-frame *::before,
+.app-shell .app-content-frame *::after {
+  animation: none !important;
+  transition: none !important;
+  transform: none;
 }
 
 .app-dashboard-panel,
@@ -3155,38 +3137,6 @@ body::selection {
   background: rgba(255, 255, 255, 0.04);
 }
 
-
-@keyframes appShellFade {
-  from {
-    opacity: 0.96;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes pageEntry {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes sectionEntry {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
 @keyframes signalPulse {
   0%,
   100% {
@@ -3194,17 +3144,6 @@ body::selection {
   }
   50% {
     box-shadow: 0 0 0 6px rgba(56, 189, 248, 0);
-  }
-}
-
-@keyframes menuPop {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.99);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 

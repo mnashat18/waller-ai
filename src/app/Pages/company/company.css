@@ -88,14 +88,12 @@
   font: inherit;
   font-weight: 750;
   cursor: pointer;
-  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
 }
 
 .company-tabs button:hover,
 .company-tabs button:focus-visible {
   background: rgba(148, 163, 184, 0.12);
   color: #f8fafc;
-  transform: translateY(-1px);
 }
 
 .company-tabs button.active {

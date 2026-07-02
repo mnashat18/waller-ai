@@ -720,11 +720,9 @@ type DirectusUser = {
       font-size: 0.9rem;
       font-weight: 700;
       background: rgba(255, 255, 255, 0.04);
-      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
     }
 
     .request-shell__button:hover {
-      transform: translateY(-1px);
       border-color: rgba(56, 189, 248, 0.28);
       background: rgba(255, 255, 255, 0.08);
     }
@@ -757,7 +755,6 @@ type DirectusUser = {
       border-radius: 999px;
       border: 2px solid rgba(148, 163, 184, 0.25);
       border-top-color: #7dd3fc;
-      animation: requestSpin 0.8s linear infinite;
     }
 
     .request-next-steps {
@@ -771,10 +768,6 @@ type DirectusUser = {
 
     .request-next-steps strong {
       color: #f8fafc;
-    }
-
-    @keyframes requestSpin {
-      to { transform: rotate(360deg); }
     }
 
     @media (prefers-reduced-motion: reduce) {

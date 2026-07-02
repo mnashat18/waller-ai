@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
-import { finalize } from 'rxjs/operators';
+import { Subscription } from 'rxjs';
+import { distinctUntilChanged, finalize, map } from 'rxjs/operators';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { InviteService } from '../../services/invites';
@@ -42,7 +43,7 @@ import { StatusBadgeComponent } from '../../shared/ui/status-badge/status-badge.
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.css'
 })
-export class Dashboard implements OnInit {
+export class Dashboard implements OnInit, OnDestroy {
   loading = true;
   state: 'loadingContext' | 'loadingDashboard' | 'ready' | 'error' = 'loadingContext';
   errorMessage = '';
@@ -53,6 +54,10 @@ export class Dashboard implements OnInit {
   onboardingDismissed = false;
 
   private readonly onboardingDismissKey = 'wellar_onboarding_checklist_dismissed_v1';
+  private contextSubscription?: Subscription;
+  private bootstrapGeneration = 0;
+  private watchedContextKey: string | null = null;
+  private currentDashboardContextKey: string | null = null;
 
   constructor(
     private dashboardService: OperationalDashboardService,
@@ -65,7 +70,12 @@ export class Dashboard implements OnInit {
 
   ngOnInit(): void {
     this.onboardingDismissed = this.readOnboardingDismissed();
+    this.startWatchingContext();
     void this.bootstrap();
+  }
+
+  ngOnDestroy(): void {
+    this.contextSubscription?.unsubscribe();
   }
 
   refresh(): void {
@@ -323,6 +333,8 @@ export class Dashboard implements OnInit {
   }
 
   private async bootstrap(): Promise<void> {
+    const generation = ++this.bootstrapGeneration;
+    let resolvedContextKey: string | null = null;
     try {
       this.state = 'loadingContext';
       this.loading = true;
@@ -330,6 +342,9 @@ export class Dashboard implements OnInit {
       this.view = null;
 
       const context = await this.resolveDashboardContext();
+      if (generation !== this.bootstrapGeneration) {
+        return;
+      }
 
       if (!context?.activeMembership?.id || !context?.activeBusinessProfile?.id) {
         const inviteFlowDetected = this.hasInviteClaimSignal();
@@ -343,25 +358,48 @@ export class Dashboard implements OnInit {
         return;
       }
 
+      resolvedContextKey = this.contextKey({
+        userId: context.activeMembership?.user?.id ?? this.workspaceContext.snapshot().context.userId ?? null,
+        activeBusinessProfileId: context.activeBusinessProfile?.id ?? null,
+        activeMemberRole: context.activeMemberRole ?? null,
+        activeDepartmentId: this.workspaceContext.snapshot().context.activeDepartmentId ?? null
+      });
       this.activeMembership = context.activeMembership;
       this.activeBusinessProfile = context.activeBusinessProfile;
       this.activeMemberRole = context.activeMemberRole;
+      this.currentDashboardContextKey = resolvedContextKey;
 
       this.state = 'loadingDashboard';
 
-      await this.loadDashboardData(context.activeBusinessProfile.id);
+      await this.loadDashboardData(context.activeBusinessProfile.id, generation);
+      if (generation !== this.bootstrapGeneration) {
+        return;
+      }
 
       this.state = 'ready';
     } catch {
+      if (generation !== this.bootstrapGeneration) {
+        return;
+      }
       this.state = 'error';
       this.errorMessage = 'Dashboard failed to load.';
     } finally {
+      if (generation !== this.bootstrapGeneration) {
+        return;
+      }
       this.loading = this.state !== 'ready' && this.state !== 'error';
       this.cdr.detectChanges();
+      if (
+        resolvedContextKey &&
+        this.watchedContextKey &&
+        this.watchedContextKey !== resolvedContextKey
+      ) {
+        void this.bootstrap();
+      }
     }
   }
 
-  private loadDashboardData(_businessProfileId: string): Promise<void> {
+  private loadDashboardData(_businessProfileId: string, generation: number): Promise<void> {
     this.loading = true;
     this.errorMessage = '';
     this.view = null;
@@ -369,15 +407,26 @@ export class Dashboard implements OnInit {
     return new Promise((resolve, reject) => {
       this.dashboardService.getDashboardData(_businessProfileId).pipe(
         finalize(() => {
+          if (generation !== this.bootstrapGeneration) {
+            return;
+          }
           this.loading = false;
           this.cdr.detectChanges();
         })
       ).subscribe({
         next: (view) => {
+          if (generation !== this.bootstrapGeneration) {
+            resolve();
+            return;
+          }
           this.view = view;
           resolve();
         },
         error: (error) => {
+          if (generation !== this.bootstrapGeneration) {
+            resolve();
+            return;
+          }
           this.errorMessage = error?.message || 'Failed to load dashboard data.';
           reject(error);
         }
@@ -448,5 +497,46 @@ export class Dashboard implements OnInit {
     }
 
     return false;
+  }
+
+  private startWatchingContext(): void {
+    if (this.contextSubscription) {
+      return;
+    }
+
+    this.watchedContextKey = this.contextKey(this.workspaceContext.snapshot().context);
+    this.contextSubscription = this.workspaceContext.context$.pipe(
+      map((context) => this.contextKey(context)),
+      distinctUntilChanged()
+    ).subscribe((contextKey) => {
+      if (contextKey === this.watchedContextKey) {
+        return;
+      }
+
+      this.watchedContextKey = contextKey;
+      if (!this.currentDashboardContextKey) {
+        return;
+      }
+
+      if (contextKey === this.currentDashboardContextKey) {
+        return;
+      }
+
+      void this.bootstrap();
+    });
+  }
+
+  private contextKey(context: {
+    activeBusinessProfileId: string | null;
+    activeMemberRole: string | null;
+    activeDepartmentId: string | null;
+    userId: string | null;
+  }): string {
+    return [
+      context.userId ?? '',
+      context.activeBusinessProfileId ?? '',
+      context.activeMemberRole ?? '',
+      context.activeDepartmentId ?? ''
+    ].join('|');
   }
 }

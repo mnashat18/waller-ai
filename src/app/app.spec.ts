@@ -18,6 +18,8 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.root-route-shell')).toBeTruthy();
+    const shell = compiled.querySelector('.root-route-shell');
+    expect(shell).toBeTruthy();
+    expect(shell?.classList.contains('is-transitioning')).toBe(false);
   });
 });

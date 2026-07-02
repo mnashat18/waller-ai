@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { BehaviorSubject, of } from 'rxjs';
 
 import { CompanyContextService } from '../../core/context/company-context.service';
 import { InviteService } from '../../services/invites';
@@ -12,6 +12,7 @@ describe('Dashboard', () => {
   let component: Dashboard;
   let fixture: ComponentFixture<Dashboard>;
   let refreshContextSpy: { (): Promise<never[]>; calls: { count(): number } };
+  let contextSubject: BehaviorSubject<any>;
 
   beforeEach(async () => {
     const calls: unknown[] = [];
@@ -26,6 +27,14 @@ describe('Dashboard', () => {
         }
       }
     );
+    contextSubject = new BehaviorSubject({
+      activeBusinessProfileId: 'profile-1',
+      activeBusinessProfileName: 'Test Company',
+      activeDepartmentId: null,
+      activeDepartmentName: null,
+      activeMemberRole: 'owner',
+      userId: 'user-1'
+    });
 
     await TestBed.configureTestingModule({
       imports: [Dashboard],
@@ -40,8 +49,10 @@ describe('Dashboard', () => {
               activeDepartment: null,
               activeMemberRole: 'owner'
             }),
+            context$: contextSubject.asObservable(),
             snapshot: () => ({
               context: {
+                userId: 'user-1',
                 activeBusinessProfileId: 'profile-1',
                 activeBusinessProfileName: 'Test Company',
                 activeDepartmentId: null,

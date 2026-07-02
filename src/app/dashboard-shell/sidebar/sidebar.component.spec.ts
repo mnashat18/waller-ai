@@ -428,6 +428,23 @@ describe('SidebarComponent', () => {
     expect(router.navigateByUrl).toHaveBeenCalledWith('/app/dashboard', { replaceUrl: true });
     expect(fixture.nativeElement.textContent).toContain('Northline Logistics');
     expect(fixture.nativeElement.textContent).toContain('Manager');
+
+    trigger.click();
+    fixture.detectChanges();
+    const refreshedMenu = document.body.querySelector('.app-sidebar__account-menu') as HTMLElement;
+    const refreshedPickerButton = Array.from(refreshedMenu.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Switch organization')
+    ) as HTMLButtonElement;
+    refreshedPickerButton.click();
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    const refreshedPicker = document.body.querySelector('.app-sidebar__organization-switcher-panel') as HTMLElement;
+    const currentRows = Array.from(refreshedPicker.querySelectorAll('.app-sidebar__organization-switcher-item.is-active')) as HTMLElement[];
+    expect(currentRows).toHaveLength(1);
+    expect(currentRows[0].textContent).toContain('Northline Logistics');
+    expect(currentRows[0].textContent).toContain('Current');
   });
 
   it('keeps the account footer anchored without sticky positioning', () => {

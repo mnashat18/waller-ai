@@ -81,8 +81,11 @@ describe('CompanyContextService canonical organization context', () => {
       ]
     });
 
-    const contextRequest = httpMock.expectOne(`${environment.API_URL}/wellar/workspaces/context`);
+    const contextRequest = httpMock.expectOne((req) =>
+      req.url === `${environment.API_URL}/wellar/workspaces/context` && req.params.has('_ts')
+    );
     expect(contextRequest.request.method).toBe('GET');
+    expect(contextRequest.request.params.get('_ts')).toBeTruthy();
     contextRequest.flush({
       data: {
         active: {
@@ -152,5 +155,97 @@ describe('CompanyContextService canonical organization context', () => {
     expect(state.context.availableCompanies.find((company) => company.id === 'profile-2')?.departmentName).toBe('Operations');
     expect(state.context.availableCompanies.some((company) => company.isActive)).toBe(true);
     httpMock.expectNone((req) => req.url.includes('/items/business_profile_members'));
+  });
+
+  it('marks only the canonical active membership as current even when other memberships remain active', async () => {
+    const statePromise = firstValueFrom(service.ensureLoaded(true));
+
+    const userRequest = httpMock.expectOne((req) => req.url.includes('/users/me'));
+    expect(userRequest.request.method).toBe('GET');
+    userRequest.flush({
+      data: {
+        id: 'user-1',
+        email: 'owner@example.com',
+        first_name: 'Avery',
+        last_name: 'Owner',
+        active_business_profile: 'profile-2',
+        active_department: null,
+        active_member_role: 'manager'
+      }
+    });
+
+    const profileRequest = httpMock.expectOne((req) => req.url.includes('/items/business_profiles'));
+    expect(profileRequest.request.method).toBe('GET');
+    profileRequest.flush({ data: [] });
+
+    const contextRequest = httpMock.expectOne((req) =>
+      req.url === `${environment.API_URL}/wellar/workspaces/context` && req.params.has('_ts')
+    );
+    expect(contextRequest.request.method).toBe('GET');
+    contextRequest.flush({
+      data: {
+        active: {
+          workspace: {
+            id: 'profile-2',
+            companyName: 'Northline Logistics',
+            isActive: true,
+            planCode: null,
+            billingStatus: null
+          },
+          membership: {
+            id: 'membership-2',
+            status: 'active',
+            memberRole: 'manager'
+          },
+          department: {
+            id: 'department-2',
+            name: 'Operations'
+          }
+        },
+        memberships: [
+          {
+            id: 'membership-1',
+            status: 'active',
+            memberRole: 'owner',
+            workspace: {
+              id: 'profile-1',
+              companyName: 'Waller Demo Company',
+              isActive: true,
+              planCode: null,
+              billingStatus: null
+            },
+            department: {
+              id: 'department-1',
+              name: 'All departments'
+            }
+          },
+          {
+            id: 'membership-2',
+            status: 'active',
+            memberRole: 'manager',
+            workspace: {
+              id: 'profile-2',
+              companyName: 'Northline Logistics',
+              isActive: true,
+              planCode: null,
+              billingStatus: null
+            },
+            department: {
+              id: 'department-2',
+              name: 'Operations'
+            }
+          }
+        ],
+        invitations: []
+      }
+    });
+
+    const state = await statePromise;
+
+    expect(state.context.availableCompanies.find((company) => company.id === 'profile-1')?.isActive).toBe(false);
+    expect(state.context.availableCompanies.find((company) => company.id === 'profile-2')?.isActive).toBe(true);
+    expect(state.context.availableCompanies.filter((company) => company.isActive)).toHaveLength(1);
+    expect(state.context.activeBusinessProfileId).toBe('profile-2');
+    expect(state.context.activeMemberRole).toBe('manager');
   });
 });

@@ -1009,7 +1009,7 @@ export class CompanyContextService {
     activeBusinessProfileId: string | null
   ): Observable<CompanyOption[]> {
     return from(this.loadWorkspaceContext(token)).pipe(
-      map((workspaceContext) => this.mapWorkspaceContextToCompanies(workspaceContext, activeBusinessProfileId))
+      map((workspaceContext) => this.mapWorkspaceContextToCompanies(workspaceContext))
     );
   }
 
@@ -1017,13 +1017,15 @@ export class CompanyContextService {
     user: UserContextResponse,
     workspaceContext: WorkspaceContextPayload | null
   ): CompanyContextState {
-    const companies = this.mapWorkspaceContextToCompanies(workspaceContext, user.activeBusinessProfileId);
+    const companies = this.mapWorkspaceContextToCompanies(workspaceContext);
     const storedContext = this.readStoredContext();
     const isSameUser = !storedContext.userId || !user.userId || storedContext.userId === user.userId;
     const storedActiveProfileId = storedContext.activeBusinessProfileId;
     const verifiedMembership = this.getVerifiedActiveMembershipForUser(user.userId);
     const verifiedProfile = this.normalizeBusinessProfile(verifiedMembership?.business_profile);
     const verifiedRole = this.normalizeUiRole(verifiedMembership?.member_role);
+    const activeWorkspaceId = this.normalizeId(workspaceContext?.active?.workspace?.id);
+    const activeDepartmentFromContext = workspaceContext?.active?.department ?? null;
     const firstAccessibleCompany = companies[0] ?? null;
     const storedCompany =
       isSameUser && storedActiveProfileId && companies.some((item) => item.id === storedActiveProfileId)
@@ -1035,9 +1037,10 @@ export class CompanyContextService {
         ? user.activeBusinessProfileId
         : null;
     const activeBusinessProfileId =
+      activeWorkspaceId ??
+      verifiedProfile?.id ??
       userSelectedProfileId ??
       storedCompany ??
-      verifiedProfile?.id ??
       fallbackProfileId;
 
     const matchingCompany = companies.find((item) => item.id === activeBusinessProfileId) ?? null;
@@ -1076,20 +1079,23 @@ export class CompanyContextService {
       workspaceInitialized: true,
       activeBusinessProfileId,
       activeBusinessProfileName:
+        workspaceContext?.active?.workspace?.companyName ??
+        verifiedProfile?.company_name ??
         user.activeBusinessProfileName ??
         user.activeCompanyName ??
         matchingCompany?.name ??
-        verifiedProfile?.company_name ??
         (isSameUser ? storedContext.activeBusinessProfileName : null) ??
         firstAccessibleCompany?.name ??
         null,
       activeDepartmentId:
-        user.activeDepartmentId ??
+        this.normalizeId(activeDepartmentFromContext) ??
         this.normalizeId(verifiedMembership?.department) ??
+        user.activeDepartmentId ??
         (isSameUser ? storedContext.activeDepartmentId : null),
       activeDepartmentName:
-        user.activeDepartmentName ??
+        this.pickDepartmentName(activeDepartmentFromContext) ??
         this.pickDepartmentName(verifiedMembership?.department) ??
+        user.activeDepartmentName ??
         (isSameUser ? storedContext.activeDepartmentName : null) ??
         (isSameUser ? storedContext.activeDepartmentId : null) ??
         null,
@@ -1147,8 +1153,7 @@ export class CompanyContextService {
   }
 
   private mapWorkspaceContextToCompanies(
-    workspaceContext: WorkspaceContextPayload | null,
-    activeBusinessProfileId: string | null = null
+    workspaceContext: WorkspaceContextPayload | null
   ): CompanyOption[] {
     if (!workspaceContext?.memberships?.length) {
       return [];
@@ -1156,11 +1161,9 @@ export class CompanyContextService {
 
     const options = new Map<string, CompanyOption>();
     const activeMembershipId = this.normalizeId(workspaceContext.active?.membership?.id);
-    const activeWorkspaceId = this.normalizeId(workspaceContext.active?.workspace?.id);
-    const preferredActiveProfileId = this.normalizeId(activeBusinessProfileId) ?? activeWorkspaceId;
 
     for (const membership of workspaceContext.memberships) {
-      const option = this.mapWorkspaceMembershipToCompany(membership, activeMembershipId, preferredActiveProfileId);
+      const option = this.mapWorkspaceMembershipToCompany(membership, activeMembershipId);
       if (!option) {
         continue;
       }
@@ -1176,8 +1179,7 @@ export class CompanyContextService {
 
   private mapWorkspaceMembershipToCompany(
     membership: WorkspaceContextMembership,
-    activeMembershipId: string | null,
-    preferredActiveProfileId: string | null
+    activeMembershipId: string | null
   ): CompanyOption | null {
     const workspace = membership.workspace;
     const profileId = this.normalizeId(workspace?.id);
@@ -1194,10 +1196,7 @@ export class CompanyContextService {
       membershipStatus: membership.status,
       departmentId: membership.department?.id ?? null,
       departmentName: membership.department?.name ?? null,
-      isActive:
-        membershipId === activeMembershipId ||
-        profileId === preferredActiveProfileId ||
-        Boolean(workspace.isActive)
+      isActive: membershipId === activeMembershipId
     };
   }
 

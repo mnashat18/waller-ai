@@ -45,8 +45,12 @@ describe('WorkspaceContextApiService', () => {
       ]);
     });
 
-    const req = httpMock.expectOne(`${environment.API_URL}/wellar/workspaces/context`);
+    const req = httpMock.expectOne((request) =>
+      request.url === `${environment.API_URL}/wellar/workspaces/context` &&
+      request.params.has('_ts')
+    );
     expect(req.request.method).toBe('GET');
+    expect(req.request.params.get('_ts')).toBeTruthy();
     req.flush({
       data: {
         active: {

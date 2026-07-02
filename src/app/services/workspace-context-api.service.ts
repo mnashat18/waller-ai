@@ -92,10 +92,13 @@ export class WorkspaceContextApiService {
     private readonly auth: AuthService
   ) {}
 
-  getContext(): Observable<WorkspaceContextPayload> {
+  getContext(forceRefresh = true): Observable<WorkspaceContextPayload> {
     const token = this.requireToken();
+    const contextUrl = forceRefresh
+      ? `${this.api}/wellar/workspaces/context?_ts=${Date.now()}`
+      : `${this.api}/wellar/workspaces/context`;
 
-    return this.http.get<unknown>(`${this.api}/wellar/workspaces/context`, {
+    return this.http.get<unknown>(contextUrl, {
       headers: this.auth.getAuthHeaders(token),
       withCredentials: true
     }).pipe(
