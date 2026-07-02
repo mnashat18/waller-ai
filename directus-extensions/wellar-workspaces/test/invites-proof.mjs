@@ -137,6 +137,21 @@ function createQueryBuilder(table, state, scope) {
     filters: [],
     whereInValues: []
   };
+  let recordedRead = false;
+
+  function recordRead() {
+    if (recordedRead) {
+      return;
+    }
+    recordedRead = true;
+    state.calls.push({
+      type: 'select',
+      table,
+      scope,
+      filters: [...call.filters],
+      whereInValues: [...call.whereInValues]
+    });
+  }
 
   const builder = {
     leftJoin() { return builder; },
@@ -233,8 +248,12 @@ function createQueryBuilder(table, state, scope) {
 
       return Promise.resolve(1);
     },
-    first: async () => buildRow(table, call, state),
+    first: async () => {
+      recordRead();
+      return buildRow(table, call, state);
+    },
     then(resolve, reject) {
+      recordRead();
       if (table === 'directus_roles' && call.whereInValues.length) {
         const rows = call.whereInValues
           .map((id) => state.roleIds.includes(id) ? { id } : null)
@@ -437,6 +456,13 @@ await withRoleEnv(async () => {
     assert.equal(duplicateInviteResponse.body.data.inviteId, inAppResponse.body.data.inviteId);
     assert.equal(database.state.calls.filter((call) => call.table === 'request_invites' && call.type === 'insert').length, 1);
     assert.equal(database.state.calls.filter((call) => call.table === 'notifications' && call.type === 'insert').length, 1);
+    const pendingInviteLookup = database.state.calls.find((call) =>
+      call.table === 'request_invites as invite' &&
+      call.scope === 'transaction' &&
+      call.filters?.some((filter) => filter.column === 'invite.business_profile' && filter.value === 'profile-1') &&
+      call.filters?.some((filter) => filter.column === 'invite.email' && filter.value === 'new.person@example.com')
+    );
+    assert.ok(pendingInviteLookup, 'existing pending invite lookup should qualify invite.business_profile and invite.email');
 
     const inviteId = inAppResponse.body.data.inviteId;
     const detailResponse = createFakeResponse();

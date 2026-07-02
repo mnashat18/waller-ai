@@ -830,10 +830,8 @@ async function loadExistingPendingInvite(trx, workspaceId, email) {
       'invite.requested_by_user',
       'department.name as department_name'
     )
-    .where({
-      business_profile: workspaceId,
-      email: normalizedEmail
-    })
+    .where('invite.business_profile', workspaceId)
+    .andWhere('invite.email', normalizedEmail)
     .whereIn('invite.status', ['pending', 'sent'])
     .orderBy('invite.id', 'desc')
     .first();
