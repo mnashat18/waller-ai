@@ -328,11 +328,15 @@ export type InvitesPageData = {
 
 export type CreateInviteInput = {
   email?: string | null;
-  phone?: string | null;
   member_role?: string | null;
   department?: string | null;
-  invite_type?: string | null;
-  note?: string | null;
+};
+
+export type CreateInviteResult = {
+  ok: boolean;
+  message: string;
+  inviteId: string | null;
+  deliveryChannel: 'in_app' | 'email' | null;
 };
 
 type MemberRecord = {
@@ -551,14 +555,12 @@ type ScopedContext = {
 };
 
 type CreateInvitePayload = {
-  email?: string;
-  phone?: string;
+  email: string;
   status: 'pending';
   requested_by_user: string;
   business_profile: string;
   member_role: string;
   department?: string | null;
-  invite_type: 'email' | 'phone';
 };
 
 type InviteErrorCode =
@@ -1160,12 +1162,12 @@ export class OperationsAdminService {
     );
   }
 
-  createInvite(input: CreateInviteInput): Observable<void> {
+  createInvite(input: CreateInviteInput): Observable<CreateInviteResult> {
     return this.ensureScopedContext().pipe(
       switchMap((context) => {
         const payload = this.buildCreateInvitePayload(input, context);
-        return this.http.post(
-          `${this.api}/items/request_invites`,
+        return this.http.post<{ data?: { inviteId?: string | null; deliveryChannel?: string | null; message?: string; ok?: boolean } }>(
+          `${this.api}/wellar/workspaces/invites`,
           payload,
           {
             headers: this.headers(context.token),
@@ -1173,7 +1175,16 @@ export class OperationsAdminService {
           }
         ).pipe(
           timeout(12000),
-          map(() => undefined),
+          map((response) => {
+            const data = response?.data ?? {};
+            const dataRecord = data as Record<string, unknown>;
+            return {
+              ok: data.ok !== false,
+              message: this.pickString(data.message) ?? 'Invite sent.',
+              inviteId: this.pickString(dataRecord['inviteId'] ?? dataRecord['invite_id']) ?? null,
+              deliveryChannel: this.normalizeInviteDeliveryChannel(dataRecord['deliveryChannel'] ?? dataRecord['delivery_channel'] ?? null)
+            };
+          }),
           catchError((error) => throwError(() => this.toCreateInviteError(error)))
         );
       })
@@ -2937,30 +2948,26 @@ export class OperationsAdminService {
       throw this.createInviteError('PERMISSION_DENIED', 'You do not have permission to send invites.');
     }
 
+    const memberRole = this.toBackendMemberRole(input.member_role ?? 'employee');
+    if (memberRole === 'owner') {
+      throw this.createInviteError('INVALID_EMAIL', 'Owner invitations are not supported.');
+    }
+
     const email = this.pickString(input.email)?.trim().toLowerCase() ?? '';
-    const phone = this.pickString(input.phone)?.trim() ?? '';
-    if (!email && !phone) {
+    if (!email) {
       throw this.createInviteError('INVALID_EMAIL', 'Enter a valid email address.');
     }
-    if (email && !this.isValidEmail(email)) {
+    if (!this.isValidEmail(email)) {
       throw this.createInviteError('INVALID_EMAIL', 'Enter a valid email address.');
     }
 
-    const inviteType = email ? 'email' : 'phone';
     const payload: CreateInvitePayload = {
       status: 'pending',
       requested_by_user: actorUserId,
       business_profile: context.businessProfileId,
-      member_role: this.toBackendMemberRole(input.member_role ?? 'employee'),
-      invite_type: inviteType
+      member_role: memberRole,
+      email
     };
-
-    if (email) {
-      payload.email = email;
-    }
-    if (!email && phone) {
-      payload.phone = phone;
-    }
 
     const departmentId = this.normalizeId(input.department);
     if (departmentId) {
@@ -3026,6 +3033,14 @@ export class OperationsAdminService {
       code === 'SERVER_ERROR'
     ) {
       return code;
+    }
+    return null;
+  }
+
+  private normalizeInviteDeliveryChannel(value: unknown): 'in_app' | 'email' | null {
+    const normalized = this.pickString(value)?.toLowerCase() ?? '';
+    if (normalized === 'in_app' || normalized === 'email') {
+      return normalized;
     }
     return null;
   }

@@ -14,6 +14,40 @@ export type ClaimInviteResponse = {
   raw: unknown;
 };
 
+export type WorkspaceInviteUser = {
+  id: string | null;
+  email: string | null;
+  displayName: string | null;
+};
+
+export type WorkspaceInviteDetail = {
+  id: string;
+  email: string;
+  inviteType: string | null;
+  status: string;
+  memberRole: string;
+  businessProfileId: string | null;
+  companyName: string;
+  departmentId: string | null;
+  departmentName: string | null;
+  expiresAt: string | null;
+  requestedByUser: WorkspaceInviteUser | null;
+  canAct: boolean;
+};
+
+export type WorkspaceInviteActionResponse = {
+  ok: boolean;
+  message: string;
+  inviteId: string | null;
+  businessProfileId: string | null;
+  membershipId: string | null;
+  memberRole: string | null;
+  departmentId: string | null;
+  inviteType: string | null;
+  status: string | null;
+  canAct: boolean;
+};
+
 /** Stable classification of why an invite claim failed. */
 export type ClaimInviteErrorKind =
   | 'missing-token'
@@ -101,6 +135,42 @@ export class InviteService {
     );
   }
 
+  getInvite(inviteId: string): Observable<WorkspaceInviteDetail> {
+    return defer(() => {
+      const normalizedInviteId = inviteId.trim();
+      if (!normalizedInviteId) {
+        throw new Error('Invite id is missing.');
+      }
+
+      const accessToken = this.auth.getStoredAccessToken();
+      if (!accessToken) {
+        throw new Error('Please sign in first.');
+      }
+
+      return this.http.get<unknown>(
+        `${environment.API_URL}/wellar/workspaces/invites/${encodeURIComponent(normalizedInviteId)}?_ts=${Date.now()}`,
+        {
+          headers: new HttpHeaders({
+            Authorization: `Bearer ${accessToken}`
+          }),
+          withCredentials: true
+        }
+      ).pipe(
+        map((response) => this.normalizeInviteDetail(response))
+      );
+    }).pipe(
+      catchError((error) => throwError(() => this.toInviteActionError(error)))
+    );
+  }
+
+  acceptInvite(inviteId: string): Observable<WorkspaceInviteActionResponse> {
+    return this.postInviteAction(inviteId, 'accept');
+  }
+
+  declineInvite(inviteId: string): Observable<WorkspaceInviteActionResponse> {
+    return this.postInviteAction(inviteId, 'decline');
+  }
+
   /** True when an error originated from {@link claimInvite}. */
   isClaimInviteError(error: unknown): error is ClaimInviteError {
     return Boolean((error as { isClaimInviteError?: unknown })?.isClaimInviteError);
@@ -144,6 +214,10 @@ export class InviteService {
 
     this.debugFlow('claim failed', { kind, status, detail: detail ? 'present' : null });
     return typed;
+  }
+
+  private toInviteActionError(error: unknown): ClaimInviteError {
+    return this.toClaimInviteError(error);
   }
 
   private classifyClaimError(error: unknown, status: number, detail: string | null): ClaimInviteErrorKind {
@@ -601,6 +675,131 @@ export class InviteService {
 
     const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
     return `${normalizedBase}/flows/trigger/${encodeURIComponent(normalizedFlowId)}`;
+  }
+
+  private postInviteAction(
+    inviteId: string,
+    action: 'accept' | 'decline'
+  ): Observable<WorkspaceInviteActionResponse> {
+    return defer(() => {
+      const normalizedInviteId = inviteId.trim();
+      if (!normalizedInviteId) {
+        throw new Error('Invite id is missing.');
+      }
+
+      const accessToken = this.auth.getStoredAccessToken();
+      if (!accessToken) {
+        throw new Error('Please sign in first.');
+      }
+
+      return this.http.post<unknown>(
+        `${environment.API_URL}/wellar/workspaces/invites/${encodeURIComponent(normalizedInviteId)}/${action}`,
+        {},
+        {
+          headers: new HttpHeaders({
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }),
+          withCredentials: true
+        }
+      ).pipe(
+        map((response) => this.normalizeInviteActionResponse(response))
+      );
+    }).pipe(
+      catchError((error) => throwError(() => this.toInviteActionError(error)))
+    );
+  }
+
+  private normalizeInviteDetail(response: unknown): WorkspaceInviteDetail {
+    const root = this.objectRecord(response);
+    const payload = this.objectRecord(root?.['data']) ?? root;
+    if (!payload) {
+      throw new Error('Invite details were incomplete.');
+    }
+
+    const id = this.normalizeId(payload['id']);
+    const email = this.pickString(payload['email']);
+    const memberRole = this.pickString(payload['memberRole'] ?? payload['member_role'])?.toLowerCase() ?? '';
+    const status = this.pickString(payload['status']) ?? 'pending';
+    const companyName = this.pickString(payload['companyName'] ?? payload['company_name']) ?? 'Workspace invitation';
+
+    if (!id || !email || !memberRole) {
+      throw new Error('Invite details were incomplete.');
+    }
+
+    return {
+      id,
+      email,
+      inviteType: this.pickString(payload['inviteType'] ?? payload['invite_type'])?.toLowerCase() ?? null,
+      status,
+      memberRole,
+      businessProfileId: this.normalizeId(
+        payload['businessProfileId'] ??
+        payload['business_profile_id'] ??
+        payload['business_profile'] ??
+        this.objectRecord(payload['businessProfile'])?.['id']
+      ),
+      companyName,
+      departmentId: this.normalizeId(payload['departmentId'] ?? payload['department_id'] ?? payload['department']),
+      departmentName: this.pickString(payload['departmentName'] ?? payload['department_name'] ?? this.objectRecord(payload['department'])?.['name']) ?? null,
+      expiresAt: this.pickString(payload['expiresAt'] ?? payload['expires_at']) ?? null,
+      requestedByUser: this.normalizeInviteUser(
+        payload['requestedByUser'] ??
+        payload['requested_by_user'] ??
+        payload['requestedBy']
+      ),
+      canAct: this.pickBoolean(payload['canAct'] ?? payload['can_act']) ?? false
+    };
+  }
+
+  private normalizeInviteActionResponse(response: unknown): WorkspaceInviteActionResponse {
+    const root = this.objectRecord(response);
+    const payload = this.objectRecord(root?.['data']) ?? root;
+    if (!payload) {
+      throw new Error('Invite action response was incomplete.');
+    }
+
+    const ok = this.pickBoolean(payload['ok']) ?? true;
+    const message = this.pickString(payload['message']) ?? 'Invite updated.';
+    const inviteId = this.normalizeId(payload['inviteId'] ?? payload['invite_id'] ?? payload['id']);
+
+    return {
+      ok,
+      message,
+      inviteId,
+      businessProfileId: this.normalizeId(payload['businessProfileId'] ?? payload['business_profile_id'] ?? payload['business_profile']),
+      membershipId: this.normalizeId(payload['membershipId'] ?? payload['membership_id']),
+      memberRole: this.pickString(payload['memberRole'] ?? payload['member_role'])?.toLowerCase() ?? null,
+      departmentId: this.normalizeId(payload['departmentId'] ?? payload['department_id'] ?? payload['department']),
+      inviteType: this.pickString(payload['inviteType'] ?? payload['invite_type'])?.toLowerCase() ?? null,
+      status: this.pickString(payload['status']) ?? null,
+      canAct: this.pickBoolean(payload['canAct'] ?? payload['can_act']) ?? false
+    };
+  }
+
+  private normalizeInviteUser(value: unknown): WorkspaceInviteUser | null {
+    const record = this.objectRecord(value);
+    if (!record) {
+      return null;
+    }
+
+    const id = this.normalizeId(record['id']);
+    const email = this.pickString(record['email']);
+    const displayName =
+      this.pickString(record['displayName']) ??
+      this.pickString(record['display_name']) ??
+      this.pickString([record['first_name'], record['last_name']].filter(Boolean).join(' ')) ??
+      null;
+
+    if (!id && !email && !displayName) {
+      return null;
+    }
+
+    return {
+      id,
+      email,
+      displayName
+    };
   }
 
   private normalizeClaimResponse(response: unknown): ClaimInviteResponse {

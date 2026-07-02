@@ -515,8 +515,332 @@ function publicInvitation(row) {
     email: row.email ?? 'Unavailable',
     memberRole: normalizeRole(row.member_role) ?? 'employee',
     status: row.status ?? 'pending',
-    department: publicDepartment(row)
+    department: publicDepartment(row),
+    inviteType: normalizeInviteType(row.invite_type)
   };
+}
+
+function normalizeInviteType(value) {
+  const normalized = pickString(value)?.toLowerCase() ?? '';
+  if (normalized === 'email' || normalized === 'in_app') {
+    return normalized;
+  }
+  return normalized || null;
+}
+
+function normalizeEmail(value) {
+  return pickString(value)?.toLowerCase() ?? null;
+}
+
+function buildPersonName(record) {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+
+  const firstName = pickString(record.first_name);
+  const lastName = pickString(record.last_name);
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  return fullName || pickString(record.name) || null;
+}
+
+function publicInviteRequestedBy(row) {
+  const id = pickString(row?.requested_by_user_id ?? row?.requested_by_user);
+  const email = pickString(row?.requested_by_user_email);
+  const displayName = buildPersonName({
+    first_name: row?.requested_by_user_first_name,
+    last_name: row?.requested_by_user_last_name
+  });
+
+  if (!id && !email && !displayName) {
+    return null;
+  }
+
+  return {
+    id,
+    email,
+    displayName
+  };
+}
+
+function publicInviteDetail(row, overrides = {}) {
+  const department = publicDepartment({
+    department: row.department,
+    department_id: row.department_id,
+    department_name: row.department_name
+  });
+  const businessProfileId = pickString(row.business_profile?.id ?? row.business_profile);
+  const companyName = pickString(row.company_name) ?? 'Workspace invitation';
+  const inviteType = normalizeInviteType(row.invite_type);
+
+  return {
+    id: String(row.id),
+    email: row.email ?? 'Unavailable',
+    inviteType,
+    status: row.status ?? 'pending',
+    memberRole: normalizeRole(row.member_role) ?? 'employee',
+    businessProfileId,
+    companyName,
+    departmentId: department?.id ?? null,
+    departmentName: department?.name ?? null,
+    expiresAt: row.expires_at ?? null,
+    requestedByUser: publicInviteRequestedBy(row),
+    canAct: Boolean(overrides.canAct ?? false)
+  };
+}
+
+function buildInviteNotificationMeta(row, inviterUserId, notificationId = null) {
+  return JSON.stringify({
+    type: 'workspace_invitation',
+    screen: 'invite_detail',
+    invite_id: String(row.id),
+    invite_type: normalizeInviteType(row.invite_type),
+    business_profile_id: pickString(row.business_profile?.id ?? row.business_profile),
+    department_id: pickString(row.department?.id ?? row.department_id),
+    requested_by_user: inviterUserId,
+    notification_id: notificationId
+  });
+}
+
+function buildInviteNotificationTitle(companyName) {
+  return `${companyName || 'Workspace'} invitation`;
+}
+
+function buildInviteNotificationBody(companyName, role) {
+  const roleLabel = normalizeRole(role) === 'hr'
+    ? 'HR'
+    : normalizeRole(role) === 'manager'
+      ? 'Manager'
+      : 'Employee';
+  return `You have been invited to join ${companyName || 'this organization'} as ${roleLabel}.`;
+}
+
+async function loadDirectusUserByEmail(trx, email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  return trx('directus_users')
+    .select('id', 'email', 'status', 'first_name', 'last_name')
+    .where({ email: normalizedEmail })
+    .first();
+}
+
+async function loadDirectusUserById(trx, userId) {
+  const normalizedUserId = pickString(userId);
+  if (!normalizedUserId) {
+    return null;
+  }
+
+  return trx('directus_users')
+    .select('id', 'email', 'status', 'first_name', 'last_name')
+    .where({ id: normalizedUserId })
+    .first();
+}
+
+async function loadRequestInviteById(trx, inviteId) {
+  const normalizedInviteId = pickString(inviteId);
+  if (!normalizedInviteId) {
+    return null;
+  }
+
+  return trx('request_invites as invite')
+    .leftJoin('business_profiles as profile', 'profile.id', 'invite.business_profile')
+    .leftJoin('departments as department', 'department.id', 'invite.department')
+    .leftJoin('directus_users as requested_by_user', 'requested_by_user.id', 'invite.requested_by_user')
+    .select(
+      'invite.id',
+      'invite.email',
+      'invite.member_role',
+      'invite.status',
+      'invite.business_profile',
+      'invite.department',
+      'invite.invite_type',
+      'invite.token',
+      'invite.sent_at',
+      'invite.claimed_at',
+      'invite.expires_at',
+      'invite.accepted_user',
+      'invite.requested_by_user',
+      'profile.company_name',
+      'department.name as department_name',
+      'requested_by_user.id as requested_by_user_id',
+      'requested_by_user.email as requested_by_user_email',
+      'requested_by_user.first_name as requested_by_user_first_name',
+      'requested_by_user.last_name as requested_by_user_last_name'
+    )
+    .where('invite.id', normalizedInviteId)
+    .first();
+}
+
+async function loadInviteNotification(trx, inviteId, userId) {
+  const normalizedInviteId = pickString(inviteId);
+  const normalizedUserId = pickString(userId);
+  if (!normalizedInviteId || !normalizedUserId) {
+    return null;
+  }
+
+  return trx('notifications')
+    .select('id', 'status', 'read_at', 'seen_at', 'user', 'link_type', 'link_id')
+    .where({
+      user: normalizedUserId,
+      link_type: 'invite',
+      link_id: normalizedInviteId
+    })
+    .first();
+}
+
+async function updateInviteNotification(trx, inviteId, userId, status = 'read') {
+  const notification = await loadInviteNotification(trx, inviteId, userId);
+  if (!notification?.id) {
+    return null;
+  }
+
+  const updatePayload = {
+    status,
+    read_at: trx.fn.now()
+  };
+
+  await trx('notifications')
+    .where({ id: notification.id })
+    .update(updatePayload);
+
+  return notification.id;
+}
+
+async function ensureInviteNotification(trx, inviteRow, inviterUserId, targetUserId) {
+  const existing = await loadInviteNotification(trx, inviteRow.id, targetUserId);
+  if (existing?.id) {
+    return existing.id;
+  }
+
+  const [notification] = await trx('notifications')
+    .insert({
+      user: targetUserId,
+      business_profile: null,
+      title: buildInviteNotificationTitle(inviteRow.company_name),
+      body: buildInviteNotificationBody(inviteRow.company_name, inviteRow.member_role),
+      type: 'invite',
+      status: 'unread',
+      link_type: 'invite',
+      link_id: String(inviteRow.id),
+      read_at: null,
+      meta: buildInviteNotificationMeta(inviteRow, inviterUserId)
+    })
+    .returning(['id']);
+
+  if (!notification?.id) {
+    throw new Error('Invite notification creation did not return an id.');
+  }
+
+  return String(notification.id);
+}
+
+function pickInviteActionMessage(channel) {
+  return channel === 'in_app'
+    ? 'Invitation sent in Wellar.'
+    : 'Email invitation sent.';
+}
+
+function resolveDirectusBaseUrl(env = process.env) {
+  return pickString(env.DIRECTUS_URL) ?? pickString(env.API_URL) ?? '';
+}
+
+async function createExternalInviteViaDirectusApi({ baseUrl, authorization, payload }) {
+  const normalizedBase = pickString(baseUrl)?.replace(/\/+$/, '');
+  if (!normalizedBase) {
+    const error = new Error('Directus URL is not configured.');
+    error.code = 'CONFIGURATION_ERROR';
+    throw error;
+  }
+
+  const response = await fetch(`${normalizedBase}/items/request_invites`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authorization ? { Authorization: authorization } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      body?.errors?.[0]?.extensions?.reason ||
+      body?.errors?.[0]?.message ||
+      body?.error?.message ||
+      body?.message ||
+      'Request invitation could not be created.';
+    const error = new Error(message);
+    error.code =
+      response.status === 403 ? 'FORBIDDEN' :
+      response.status === 404 ? 'NOT_FOUND' :
+      response.status === 409 ? 'CONFLICT' :
+      'SERVER_ERROR';
+    error.status = response.status;
+    throw error;
+  }
+
+  const data = body?.data ?? body ?? {};
+  const record = Array.isArray(data) ? data[0] ?? null : data;
+  return record && typeof record === 'object' ? record : null;
+}
+
+function normalizeInviteCreateSummary(row) {
+  if (!row) {
+    return null;
+  }
+
+  const invite = {
+    id: String(row.id ?? ''),
+    email: pickString(row.email),
+    member_role: normalizeRole(row.member_role) ?? 'employee',
+    status: pickString(row.status) ?? 'pending',
+    invite_type: normalizeInviteType(row.invite_type),
+    business_profile: pickString(row.business_profile?.id ?? row.business_profile),
+    department: pickString(row.department?.id ?? row.department),
+    expires_at: pickString(row.expires_at) ?? null,
+    requested_by_user: pickString(row.requested_by_user?.id ?? row.requested_by_user)
+  };
+
+  if (!invite.id || !invite.email) {
+    return null;
+  }
+
+  return invite;
+}
+
+async function loadExistingPendingInvite(trx, workspaceId, email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  return trx('request_invites as invite')
+    .leftJoin('departments as department', 'department.id', 'invite.department')
+    .select(
+      'invite.id',
+      'invite.email',
+      'invite.member_role',
+      'invite.status',
+      'invite.business_profile',
+      'invite.department',
+      'invite.invite_type',
+      'invite.expires_at',
+      'invite.requested_by_user',
+      'department.name as department_name'
+    )
+    .where({
+      business_profile: workspaceId,
+      email: normalizedEmail
+    })
+    .whereIn('invite.status', ['pending', 'sent'])
+    .orderBy('invite.id', 'desc')
+    .first();
+}
+
+async function loadExistingInviteNotificationForUser(trx, inviteId, userId) {
+  return loadInviteNotification(trx, inviteId, userId);
 }
 
 function buildExistingContext(row) {
@@ -768,6 +1092,7 @@ async function loadPendingInvitations(trx, workspaceId) {
       'invite.email',
       'invite.member_role',
       'invite.status',
+      'invite.invite_type',
       'invite.department as department_id',
       'department.name as department_name'
     )
@@ -1508,6 +1833,7 @@ async function loadOrganizationInvites(trx, workspaceId) {
       'invite.email',
       'invite.member_role',
       'invite.status',
+      'invite.invite_type',
       'invite.department as department_id',
       'department.name as department_name'
     )
@@ -2678,6 +3004,220 @@ export default {
       }
     });
 
+    router.post('/workspaces/invites', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const body = req.body ?? {};
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return badRequest(res, 'Request body must be a JSON object.');
+      }
+
+      const allowedKeys = new Set(['email', 'member_role', 'department']);
+      const unexpectedKeys = Object.keys(body).filter((key) => !allowedKeys.has(key));
+      if (unexpectedKeys.length) {
+        return badRequest(res, 'Only email, member_role, and department are accepted.');
+      }
+
+      const normalizedEmail = normalizeEmail(body.email);
+      if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        return badRequest(res, 'A valid email address is required.');
+      }
+
+      const requestedRole = normalizeRole(body.member_role);
+      if (!['hr', 'manager', 'employee'].includes(requestedRole)) {
+        return badRequest(res, 'Invitations can only be sent for HR, manager, or employee roles.');
+      }
+
+      const departmentId = pickString(body.department);
+      const inviteExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-workspace-invite:${normalizedEmail}:${userId}`
+          ]);
+
+          const { active, userRow } = await loadOrganizationMembership(trx, userId);
+          if (!active) {
+            throw Object.assign(new Error('A verified active organization membership is required.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const inviterRole = normalizeRole(active.member_role);
+          if (inviterRole !== 'owner' && inviterRole !== 'hr') {
+            throw Object.assign(new Error('Owner or HR access is required.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          if (departmentId) {
+            const department = await trx('departments as department')
+              .select('department.id', 'department.name', 'department.is_active', 'department.business_profile')
+              .where({
+                id: departmentId,
+                business_profile: active.workspace_id
+              })
+              .first();
+
+            if (!department?.id) {
+              throw Object.assign(new Error('The selected department does not belong to the active workspace.'), {
+                code: 'CONFLICT'
+              });
+            }
+
+            if (department.is_active === false) {
+              throw Object.assign(new Error('The selected department is inactive.'), {
+                code: 'CONFLICT'
+              });
+            }
+          }
+
+          const targetUser = await loadDirectusUserByEmail(trx, normalizedEmail);
+          const targetUserId = pickString(targetUser?.id);
+
+          if (targetUserId) {
+            const existingMembership = await trx('business_profile_members as member')
+              .select('member.id', 'member.status', 'member.member_role')
+              .where({
+                user: targetUserId,
+                business_profile: active.workspace_id
+              })
+              .whereIn('member.status', ['active', 'invited'])
+              .first();
+
+            if (existingMembership?.id) {
+              throw Object.assign(new Error('This person already has access to the active organization.'), {
+                code: 'CONFLICT'
+              });
+            }
+          }
+
+          const existingPendingInvite = await loadExistingPendingInvite(trx, active.workspace_id, normalizedEmail);
+          if (existingPendingInvite?.id) {
+            return {
+              status: 200,
+              data: {
+                ok: true,
+                message: pickInviteActionMessage(normalizeInviteType(existingPendingInvite.invite_type)),
+                inviteId: String(existingPendingInvite.id),
+                deliveryChannel: normalizeInviteType(existingPendingInvite.invite_type),
+                invite: publicInvitation(existingPendingInvite)
+              }
+            };
+          }
+
+          if (targetUserId) {
+            const [invite] = await trx('request_invites')
+              .insert({
+                email: normalizedEmail,
+                member_role: requestedRole,
+                business_profile: active.workspace_id,
+                requested_by_user: userId,
+                invite_type: 'in_app',
+                status: 'pending',
+                department: departmentId ?? null,
+                sent_at: null,
+                claimed_at: null,
+                expires_at: inviteExpiresAt,
+                accepted_user: null
+              })
+              .returning([
+                'id',
+                'email',
+                'member_role',
+                'status',
+                'business_profile',
+                'department',
+                'invite_type',
+                'expires_at',
+                'requested_by_user'
+              ]);
+
+            if (!invite?.id) {
+              throw new Error('Invitation creation did not return an id.');
+            }
+
+            const notificationId = await ensureInviteNotification(trx, {
+              ...invite,
+              company_name: active.company_name ?? userRow?.company_name ?? 'Workspace'
+            }, userId, targetUserId);
+
+            return {
+              status: 201,
+              data: {
+                ok: true,
+                message: pickInviteActionMessage('in_app'),
+                inviteId: String(invite.id),
+                deliveryChannel: 'in_app',
+                notificationId,
+                invite: publicInvitation(invite)
+              }
+            };
+          }
+
+          const baseUrl = resolveDirectusBaseUrl();
+          const authorization = pickString(req?.headers?.authorization);
+          await createExternalInviteViaDirectusApi({
+            baseUrl,
+            authorization,
+            payload: {
+              email: normalizedEmail,
+              member_role: requestedRole,
+              business_profile: active.workspace_id,
+              requested_by_user: userId,
+              invite_type: 'email',
+              status: 'pending',
+              department: departmentId ?? null,
+              sent_at: null,
+              claimed_at: null,
+              expires_at: inviteExpiresAt
+            }
+          });
+
+          const invite = await loadExistingPendingInvite(trx, active.workspace_id, normalizedEmail);
+          if (!invite?.id) {
+            throw new Error('Invitation creation did not return an id.');
+          }
+
+          return {
+            status: 201,
+            data: {
+              ok: true,
+              message: pickInviteActionMessage('email'),
+              inviteId: String(invite.id),
+              deliveryChannel: 'email',
+              invite: publicInvitation(invite)
+            }
+          };
+        });
+
+        return res.status(result.status).json({ data: result.data });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+        if (error?.code === 'BAD_REQUEST') {
+          return badRequest(res, error.message);
+        }
+        if (error?.code === 'CONFIGURATION_ERROR') {
+          return configurationError(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] invite creation failed');
+        return serverError(res, 'Invitation could not be created.');
+      }
+    });
+
     router.get('/workspaces/context', async (req, res) => {
       const userId = req?.accountability?.user;
       if (!userId) {
@@ -2723,6 +3263,363 @@ export default {
       } catch (error) {
         logger?.error?.(error, '[wellar] workspace context failed');
         return serverError(res, 'Workspace context could not be loaded.');
+      }
+    });
+
+    router.get('/workspaces/invites/:inviteId', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const inviteId = pickString(req?.params?.inviteId);
+      if (!inviteId) {
+        return badRequest(res, 'inviteId is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-invite-detail:${inviteId}:${userId}`
+          ]);
+
+          const userRow = await loadDirectusUserById(trx, userId);
+          const normalizedCurrentEmail = normalizeEmail(userRow?.email);
+          if (!normalizedCurrentEmail) {
+            throw Object.assign(new Error('The current account email could not be verified.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const invite = await loadRequestInviteById(trx, inviteId);
+          if (!invite?.id) {
+            throw Object.assign(new Error('The requested invitation was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          if (normalizeInviteType(invite.invite_type) !== 'in_app') {
+            throw Object.assign(new Error('The requested invitation was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          if (normalizeEmail(invite.email) !== normalizedCurrentEmail) {
+            throw Object.assign(new Error('The requested invitation was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const status = pickString(invite.status)?.toLowerCase() ?? 'pending';
+          const canAct = status === 'pending';
+
+          return {
+            invite: {
+              ...publicInviteDetail(invite, { canAct }),
+              canAct
+            }
+          };
+        });
+
+        return res.status(200).json({ data: result.invite });
+      } catch (error) {
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] invite detail lookup failed');
+        return serverError(res, 'Invitation could not be loaded.');
+      }
+    });
+
+    router.post('/workspaces/invites/:inviteId/accept', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const inviteId = pickString(req?.params?.inviteId);
+      if (!inviteId) {
+        return badRequest(res, 'inviteId is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-invite-accept:${inviteId}:${userId}`
+          ]);
+
+          const roleMap = await requireConfiguredActiveMembershipRoleMap(trx);
+          const userRow = await loadDirectusUserById(trx, userId);
+          const normalizedCurrentEmail = normalizeEmail(userRow?.email);
+          if (!normalizedCurrentEmail) {
+            throw Object.assign(new Error('The current account email could not be verified.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const invite = await loadRequestInviteById(trx, inviteId);
+          if (!invite?.id) {
+            throw Object.assign(new Error('The requested invitation was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          if (normalizeInviteType(invite.invite_type) !== 'in_app') {
+            throw Object.assign(new Error('The requested invitation was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          if (normalizeEmail(invite.email) !== normalizedCurrentEmail) {
+            throw Object.assign(new Error('This invitation must be accepted using the invited email address.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const currentStatus = pickString(invite.status)?.toLowerCase() ?? 'pending';
+          const existingMembership = await trx('business_profile_members as member')
+            .select('member.id', 'member.status', 'member.member_role', 'member.business_profile', 'member.department')
+            .where({
+              user: userId,
+              business_profile: invite.business_profile
+            })
+            .where('status', 'active')
+            .first();
+
+          if (currentStatus === 'pending') {
+            const departmentId = pickString(invite.department);
+            if (departmentId) {
+              const department = await trx('departments as department')
+                .select('department.id', 'department.is_active', 'department.business_profile')
+                .where({ id: departmentId, business_profile: invite.business_profile })
+                .first();
+
+              if (!department?.id) {
+                throw Object.assign(new Error('The invitation department is no longer valid.'), {
+                  code: 'CONFLICT'
+                });
+              }
+              if (department.is_active === false) {
+                throw Object.assign(new Error('The invitation department is inactive.'), {
+                  code: 'CONFLICT'
+                });
+              }
+            }
+
+            if (existingMembership?.id) {
+              await trx('request_invites')
+                .where({ id: invite.id })
+                .update({
+                  status: 'claimed',
+                  accepted_user: userId,
+                  claimed_at: trx.fn.now()
+                });
+              await updateInviteNotification(trx, invite.id, userId, 'read');
+
+              return {
+                ok: true,
+                message: 'Invitation already accepted.',
+                inviteId: String(invite.id),
+                status: 'claimed',
+                canAct: false,
+                businessProfileId: pickString(invite.business_profile),
+                membershipId: String(existingMembership.id),
+                memberRole: normalizeRole(existingMembership.member_role) ?? normalizeRole(invite.member_role) ?? 'employee',
+                departmentId: pickString(existingMembership.department ?? invite.department),
+                inviteType: normalizeInviteType(invite.invite_type)
+              };
+            }
+
+            const [membership] = await trx('business_profile_members')
+              .insert({
+                user: userId,
+                business_profile: invite.business_profile,
+                member_role: normalizeRole(invite.member_role) ?? 'employee',
+                department: invite.department ?? null,
+                status: 'active',
+                joined_at: trx.fn.now()
+              })
+              .returning(['id', 'business_profile', 'member_role', 'department']);
+
+            if (!membership?.id) {
+              throw new Error('Invite acceptance did not return a membership id.');
+            }
+
+            await trx('request_invites')
+              .where({ id: invite.id })
+              .update({
+                status: 'claimed',
+                accepted_user: userId,
+                claimed_at: trx.fn.now()
+              });
+
+            await updateInviteNotification(trx, invite.id, userId, 'read');
+
+            return {
+              ok: true,
+              message: 'Invitation accepted. The organization is now available in Profile → Switch Organization.',
+              inviteId: String(invite.id),
+              status: 'claimed',
+              canAct: false,
+              businessProfileId: pickString(membership.business_profile) ?? pickString(invite.business_profile),
+              membershipId: String(membership.id),
+              memberRole: normalizeRole(membership.member_role) ?? normalizeRole(invite.member_role) ?? 'employee',
+              departmentId: pickString(membership.department ?? invite.department),
+              inviteType: normalizeInviteType(invite.invite_type)
+            };
+          }
+
+          if (currentStatus === 'claimed' || currentStatus === 'accepted') {
+            if (pickString(invite.accepted_user) === String(userId) && existingMembership?.id) {
+              await updateInviteNotification(trx, invite.id, userId, 'read');
+              return {
+                ok: true,
+                message: 'Invitation already accepted.',
+                inviteId: String(invite.id),
+                status: 'claimed',
+                canAct: false,
+                businessProfileId: pickString(invite.business_profile),
+                membershipId: String(existingMembership.id),
+                memberRole: normalizeRole(existingMembership.member_role) ?? normalizeRole(invite.member_role) ?? 'employee',
+                departmentId: pickString(existingMembership.department ?? invite.department),
+                inviteType: normalizeInviteType(invite.invite_type)
+              };
+            }
+
+            throw Object.assign(new Error('This invitation has already been claimed.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          throw Object.assign(new Error('This invitation is no longer pending.'), {
+            code: 'CONFLICT'
+          });
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] invite acceptance failed');
+        return serverError(res, 'Invitation could not be accepted.');
+      }
+    });
+
+    router.post('/workspaces/invites/:inviteId/decline', async (req, res) => {
+      const userId = req?.accountability?.user;
+      if (!userId) {
+        return unauthorized(res, 'Authentication is required.');
+      }
+
+      const inviteId = pickString(req?.params?.inviteId);
+      if (!inviteId) {
+        return badRequest(res, 'inviteId is required.');
+      }
+
+      try {
+        const result = await database.transaction(async (trx) => {
+          await trx.raw('select pg_advisory_xact_lock(hashtext(?))', [
+            `wellar-invite-decline:${inviteId}:${userId}`
+          ]);
+
+          const userRow = await loadDirectusUserById(trx, userId);
+          const normalizedCurrentEmail = normalizeEmail(userRow?.email);
+          if (!normalizedCurrentEmail) {
+            throw Object.assign(new Error('The current account email could not be verified.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          const invite = await loadRequestInviteById(trx, inviteId);
+          if (!invite?.id) {
+            throw Object.assign(new Error('The requested invitation was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          if (normalizeInviteType(invite.invite_type) !== 'in_app') {
+            throw Object.assign(new Error('The requested invitation was not found.'), {
+              code: 'NOT_FOUND'
+            });
+          }
+
+          if (normalizeEmail(invite.email) !== normalizedCurrentEmail) {
+            throw Object.assign(new Error('This invitation must be accepted using the invited email address.'), {
+              code: 'FORBIDDEN'
+            });
+          }
+
+          const currentStatus = pickString(invite.status)?.toLowerCase() ?? 'pending';
+          if (currentStatus === 'revoked') {
+            await updateInviteNotification(trx, invite.id, userId, 'read');
+            return {
+              ok: true,
+              message: 'Invitation already declined.',
+              inviteId: String(invite.id),
+              status: 'revoked',
+              canAct: false,
+              businessProfileId: pickString(invite.business_profile),
+              membershipId: null,
+              memberRole: normalizeRole(invite.member_role) ?? 'employee',
+              departmentId: pickString(invite.department),
+              inviteType: normalizeInviteType(invite.invite_type)
+            };
+          }
+          if (currentStatus === 'claimed' || currentStatus === 'accepted') {
+            throw Object.assign(new Error('This invitation has already been claimed.'), {
+              code: 'CONFLICT'
+            });
+          }
+
+          await trx('request_invites')
+            .where({ id: invite.id })
+            .update({
+              status: 'revoked',
+              claimed_at: null
+            });
+
+          await updateInviteNotification(trx, invite.id, userId, 'read');
+
+          return {
+            ok: true,
+            message: 'Invitation declined.',
+            inviteId: String(invite.id),
+            status: 'revoked',
+            canAct: false,
+            businessProfileId: pickString(invite.business_profile),
+            membershipId: null,
+            memberRole: normalizeRole(invite.member_role) ?? 'employee',
+            departmentId: pickString(invite.department),
+            inviteType: normalizeInviteType(invite.invite_type)
+          };
+        });
+
+        return res.status(200).json({ data: result });
+      } catch (error) {
+        if (error?.code === 'FORBIDDEN') {
+          return forbidden(res, error.message);
+        }
+        if (error?.code === 'NOT_FOUND') {
+          return notFound(res, error.message);
+        }
+        if (error?.code === 'CONFLICT') {
+          return conflict(res, error.message);
+        }
+
+        logger?.error?.(error, '[wellar] invite decline failed');
+        return serverError(res, 'Invitation could not be declined.');
       }
     });
 

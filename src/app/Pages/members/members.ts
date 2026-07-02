@@ -219,15 +219,14 @@ export class MembersPageComponent implements OnInit {
       department:
         this.currentRole === 'manager'
           ? this.companyContext.snapshot().context.activeDepartmentId ?? null
-          : this.toNullable(this.inviteForm.department),
-      invite_type: 'member_onboarding'
+          : this.toNullable(this.inviteForm.department)
     };
 
     this.operationsAdmin.createInvite(payload).subscribe({
-      next: () => {
+      next: (result) => {
         this.savingInvite = false;
         this.showInviteModal = false;
-        this.feedbackMessage = `Invite sent to ${this.inviteForm.email.trim()}`;
+        this.feedbackMessage = result.message || `Invite sent to ${this.inviteForm.email.trim()}`;
         this.loadPage();
       },
       error: (error) => {

@@ -177,23 +177,27 @@ describe('OperationsAdminService department manager assignment', () => {
     service.createInvite({
       email: ' new.person@example.com ',
       member_role: 'manager',
-      department: 'department-2',
-      invite_type: 'member_onboarding',
-      note: 'ignore me'
-    }).subscribe();
+      department: 'department-2'
+    }).subscribe((result) => {
+      expect(result).toEqual({
+        ok: true,
+        message: 'Invitation sent in Wellar.',
+        inviteId: 'invite-1',
+        deliveryChannel: 'in_app'
+      });
+    });
 
-    const req = httpMock.expectOne(`${environment.API_URL}/items/request_invites`);
+    const req = httpMock.expectOne(`${environment.API_URL}/wellar/workspaces/invites`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body).toEqual({
       status: 'pending',
       requested_by_user: 'user-1',
       business_profile: 'workspace-1',
       member_role: 'manager',
-      invite_type: 'email',
       email: 'new.person@example.com',
       department: 'department-2'
     });
-    req.flush({ data: { id: 'invite-1' } });
+    req.flush({ data: { inviteId: 'invite-1', deliveryChannel: 'in_app', message: 'Invitation sent in Wellar.' } });
   });
 
   it('re-sends invites by rotating the expiry window and marking the invite sent', () => {

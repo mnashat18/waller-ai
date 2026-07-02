@@ -387,7 +387,9 @@ export class WorkspaceAccessPageComponent implements OnInit {
           return;
         }
 
-        void this.completeInviteClaim(result, null);
+        this.errorMessage = '';
+        this.inviteClaimMessage = result.message;
+        this.load();
       },
       error: () => {
         this.submittingInviteId = null;
@@ -410,6 +412,8 @@ export class WorkspaceAccessPageComponent implements OnInit {
           return;
         }
 
+        this.errorMessage = '';
+        this.inviteClaimMessage = result.message;
         this.load();
       },
       error: () => {

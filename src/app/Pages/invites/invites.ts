@@ -25,10 +25,8 @@ import { ViewportDialogComponent } from '../../shared/ui/viewport-dialog/viewpor
 
 type InviteForm = {
   email: string;
-  phone: string;
   member_role: string;
   department: string;
-  invite_type: string;
 };
 
 @Component({
@@ -121,8 +119,8 @@ export class InvitesPageComponent implements OnInit {
   }
 
   sendInvite(): void {
-    if (!this.inviteForm.email.trim() && !this.inviteForm.phone.trim()) {
-      this.feedbackMessage = 'Enter an email or phone number before sending an invite.';
+    if (!this.inviteForm.email.trim()) {
+      this.feedbackMessage = 'Enter an email before sending an invite.';
       return;
     }
 
@@ -131,17 +129,15 @@ export class InvitesPageComponent implements OnInit {
 
     const payload: CreateInviteInput = {
       email: this.toNullable(this.inviteForm.email),
-      phone: this.toNullable(this.inviteForm.phone),
       member_role: this.inviteForm.member_role,
-      department: this.toNullable(this.inviteForm.department),
-      invite_type: this.inviteForm.invite_type
+      department: this.toNullable(this.inviteForm.department)
     };
 
     this.operationsAdmin.createInvite(payload).subscribe({
-      next: () => {
+      next: (result) => {
         this.saving = false;
         this.showCreateModal = false;
-        this.feedbackMessage = 'Invite sent.';
+        this.feedbackMessage = result.message || 'Invite sent.';
         this.loadPage();
       },
       error: (error) => {
@@ -251,10 +247,8 @@ export class InvitesPageComponent implements OnInit {
   private defaultInviteForm(): InviteForm {
     return {
       email: '',
-      phone: '',
       member_role: 'employee',
-      department: '',
-      invite_type: 'member_onboarding'
+      department: ''
     };
   }
 

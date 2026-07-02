@@ -46,7 +46,6 @@ type InviteForm = {
   email: string;
   role: string;
   department: string;
-  note: string;
 };
 
 type StatusFilterOption = {
@@ -484,9 +483,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
     const inviteInput: CreateInviteInput = {
       email,
       member_role: this.normalizeRoleForUi(this.inviteForm.role || 'employee'),
-      department: this.toNullable(this.inviteForm.department),
-      invite_type: 'member_onboarding',
-      note: this.toNullable(this.inviteForm.note)
+      department: this.toNullable(this.inviteForm.department)
     };
 
     this.savingInvite = true;
@@ -497,9 +494,14 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
         this.savingInvite = false;
       })
     ).subscribe({
-      next: () => {
+      next: (result) => {
         this.showInviteModal = false;
-        this.pushFeedback('success', 'Invite sent successfully.');
+        this.pushFeedback(
+          'success',
+          result.deliveryChannel === 'in_app'
+            ? 'Invitation sent in Wellar.'
+            : 'Email invitation sent.'
+        );
         this.loadPage();
       },
       error: (error) => {
@@ -1339,8 +1341,7 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
     return {
       email: '',
       role: 'employee',
-      department: '',
-      note: ''
+      department: ''
     };
   }
 

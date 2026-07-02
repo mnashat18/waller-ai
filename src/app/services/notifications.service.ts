@@ -355,12 +355,15 @@ export class NotificationsService implements OnDestroy {
           sort: '-date_created'
         });
 
-        if (schema.availableFields.has('business_profile')) {
+        const hasBusinessProfileField = schema.availableFields.has('business_profile');
+        if (hasBusinessProfileField && userScopeField && userId) {
+          params.set('filter[_or][0][business_profile][_eq]', workspaceId);
+          params.set('filter[_or][1][business_profile][_null]', 'true');
+          params.set(`filter[_or][1][${userScopeField}][_eq]`, userId);
+        } else if (hasBusinessProfileField) {
           params.set('filter[business_profile][_eq]', workspaceId);
-        }
-        if (userScopeField && userId) {
-          params.set(`filter[_or][0][${userScopeField}][_eq]`, userId);
-          params.set(`filter[_or][1][${userScopeField}][_null]`, 'true');
+        } else if (userScopeField && userId) {
+          params.set(`filter[${userScopeField}][_eq]`, userId);
         }
 
         const response = await firstValueFrom(

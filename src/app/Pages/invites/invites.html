@@ -192,10 +192,6 @@
           <input [(ngModel)]="inviteForm.email" name="inviteCreateEmail" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm" />
         </label>
         <label class="grid gap-2 text-sm font-medium text-slate-700">
-          Phone
-          <input [(ngModel)]="inviteForm.phone" name="inviteCreatePhone" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm" />
-        </label>
-        <label class="grid gap-2 text-sm font-medium text-slate-700">
           Access Level
           <select [(ngModel)]="inviteForm.member_role" name="inviteCreateRole" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
             <option value="employee">Employee</option>
@@ -209,10 +205,6 @@
             <option value="">No department</option>
             <option *ngFor="let option of pageData?.departments ?? []" [value]="option.id">{{ option.name }}</option>
           </select>
-        </label>
-        <label class="grid gap-2 text-sm font-medium text-slate-700 md:col-span-2">
-          Invite Type
-          <input [(ngModel)]="inviteForm.invite_type" name="inviteCreateType" class="rounded-2xl border border-slate-200 px-4 py-3 text-sm" />
         </label>
       </form>
 

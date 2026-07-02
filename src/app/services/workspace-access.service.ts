@@ -217,19 +217,41 @@ export class WorkspaceAccessService {
   }
 
   acceptInvite(invite: WorkspaceAccessInvite): Observable<WorkspaceActionResult> {
-    void invite;
-    return of({
-      ok: false,
-      message: 'Enter the invitation code from your invitation link to join this organization.'
-    });
+    return this.invites.acceptInvite(invite.id).pipe(
+      map((response) => ({
+        ok: response.ok,
+        message: response.message,
+        businessProfileId: response.businessProfileId,
+        memberRole: this.normalizeRole(response.memberRole) ?? invite.memberRole,
+        departmentId: response.departmentId,
+        membershipId: response.membershipId
+      })),
+      catchError((error) =>
+        of({
+          ok: false,
+          message: this.invites.getReadableInviteError(error)
+        })
+      )
+    );
   }
 
   declineInvite(inviteId: string): Observable<WorkspaceActionResult> {
-    void inviteId;
-    return of({
-      ok: false,
-      message: 'Invitation decline requires a server-side invitation action flow.'
-    });
+    return this.invites.declineInvite(inviteId).pipe(
+      map((response) => ({
+        ok: response.ok,
+        message: response.message,
+        businessProfileId: response.businessProfileId,
+        memberRole: this.normalizeRole(response.memberRole) ?? null,
+        departmentId: response.departmentId,
+        membershipId: response.membershipId
+      })),
+      catchError((error) =>
+        of({
+          ok: false,
+          message: this.invites.getReadableInviteError(error)
+        })
+      )
+    );
   }
 
   claimInviteByToken(inviteToken: string): Observable<WorkspaceActionResult> {

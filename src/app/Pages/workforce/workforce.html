@@ -359,15 +359,6 @@
           <p *ngIf="!hasDepartments" class="text-xs text-slate-400">No departments are available for this workspace.</p>
         </label>
 
-        <label class="grid gap-2 text-sm font-medium text-slate-200 md:col-span-2">
-          Note
-          <textarea
-            [(ngModel)]="inviteForm.note"
-            name="inviteNote"
-            rows="3"
-            placeholder="Optional context"
-            class="app-form-control"></textarea>
-        </label>
       </div>
 
       <p *ngIf="inviteFormError" class="mt-3 text-sm text-rose-300">{{ inviteFormError }}</p>
