@@ -13,6 +13,7 @@ describe('GlobalNotificationsPanelComponent', () => {
   let notificationsState$: BehaviorSubject<any>;
   let inviteDetails$: BehaviorSubject<any>;
   let refreshCompanyContext: ReturnType<typeof vi.fn>;
+  let markNotificationRead: ReturnType<typeof vi.fn>;
   let openInvite: ReturnType<typeof vi.fn>;
   let acceptInvite: ReturnType<typeof vi.fn>;
   let declineInvite: ReturnType<typeof vi.fn>;
@@ -45,6 +46,7 @@ describe('GlobalNotificationsPanelComponent', () => {
       canAct: true
     });
     refreshCompanyContext = vi.fn(() => of({}));
+    markNotificationRead = vi.fn(() => Promise.resolve());
     openInvite = vi.fn(() => inviteDetails$.asObservable());
     acceptInvite = vi.fn(() => of({
       ok: true,
@@ -80,7 +82,8 @@ describe('GlobalNotificationsPanelComponent', () => {
           useValue: {
             state$: notificationsState$.asObservable(),
             initialize: vi.fn(),
-            refresh: vi.fn()
+            refresh: vi.fn(),
+            markNotificationRead
           }
         },
         {
@@ -160,6 +163,8 @@ describe('GlobalNotificationsPanelComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
+    expect(markNotificationRead).toHaveBeenCalledWith('notification-1');
+    expect(markNotificationRead).toHaveBeenCalledTimes(1);
     expect(openInvite).toHaveBeenCalledWith('invite-1');
     expect(openInvite).toHaveBeenCalledTimes(1);
     expect(fixture.nativeElement.textContent).toContain('Invitation details');
@@ -382,8 +387,50 @@ describe('GlobalNotificationsPanelComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
 
+    expect(markNotificationRead).toHaveBeenCalledWith('notification-2');
+    expect(markNotificationRead).toHaveBeenCalledTimes(1);
     expect(fixture.nativeElement.textContent).toContain('Read-only notification details');
     expect(fixture.nativeElement.textContent).not.toContain('Accept');
     expect(fixture.nativeElement.textContent).not.toContain('Decline');
+  });
+
+  it('does not change invite status when opening an invitation notification', async () => {
+    notificationsState$.next({
+      unreadCount: 1,
+      loading: false,
+      error: null,
+      activeWorkspaceId: 'profile-1',
+      recentNotifications: [
+        {
+          id: 'notification-3',
+          title: 'Northwind Logistics invitation',
+          message: 'You have been invited to join Northwind Logistics as Manager.',
+          status: 'unread',
+          dateCreated: '2026-07-01T12:00:00.000Z',
+          iconKey: 'invite',
+          linkType: 'invite',
+          linkId: 'invite-1'
+        }
+      ]
+    });
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const bell = fixture.nativeElement.querySelector('button[aria-label="Notifications"]') as HTMLButtonElement;
+    bell.click();
+    fixture.detectChanges();
+
+    const item = fixture.nativeElement.querySelector('article') as HTMLElement;
+    item.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(markNotificationRead).toHaveBeenCalledWith('notification-3');
+    expect(markNotificationRead).toHaveBeenCalledTimes(1);
+    expect(openInvite).toHaveBeenCalledWith('invite-1');
+    expect(fixture.componentInstance.selectedInvite?.status).toBe('pending');
+    expect(acceptInvite).not.toHaveBeenCalled();
+    expect(declineInvite).not.toHaveBeenCalled();
   });
 });

@@ -50,6 +50,8 @@ export class GlobalNotificationsPanelComponent implements OnInit {
 
   openNotification(item: WorkspaceNotification, event: MouseEvent): void {
     event.stopPropagation();
+    void this.notifications.markNotificationRead(item.id);
+
     if (this.isAlertNotification(item)) {
       this.closeDetail();
       this.open = false;

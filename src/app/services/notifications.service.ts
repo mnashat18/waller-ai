@@ -55,6 +55,9 @@ export type WorkspaceNotification = {
   iconKey: string | null;
   linkType: string | null;
   linkId: string | null;
+  isUnread: boolean;
+  readAt: string | null;
+  seenAt: string | null;
 };
 
 export type NotificationsState = {
@@ -78,6 +81,11 @@ type NotificationSchema = {
   unreadMode: 'read_at' | 'seen_at' | 'status';
   iconField: 'category' | 'type' | null;
   messageField: 'message' | 'body';
+};
+
+type PendingReadRequest = {
+  promise: Promise<void>;
+  optimisticTimestamp: string;
 };
 
 const BASE_FIELDS = [
@@ -113,6 +121,7 @@ export class NotificationsService implements OnDestroy {
   private currentWorkspaceId: string | null = null;
   private currentUserId: string | null = null;
   private loadVersion = 0;
+  private readonly pendingReadRequests = new Map<string, PendingReadRequest>();
 
   readonly state$ = this.stateSubject.asObservable();
 
@@ -152,6 +161,40 @@ export class NotificationsService implements OnDestroy {
       return;
     }
     void this.loadForWorkspace(this.currentWorkspaceId, this.currentUserId, reason);
+  }
+
+  markNotificationRead(notificationId: string): Promise<void> {
+    const id = this.normalizeId(notificationId);
+    if (!id) {
+      return Promise.resolve();
+    }
+
+    const current = this.stateSubject.value.recentNotifications.find((item) => item.id === id);
+    if (!current?.isUnread) {
+      return Promise.resolve();
+    }
+
+    const pending = this.pendingReadRequests.get(id);
+    if (pending) {
+      return pending.promise;
+    }
+
+    const previousItem = current;
+    const optimisticTimestamp = new Date().toISOString();
+    this.applyOptimisticReadState(id, optimisticTimestamp);
+
+    const request = this.persistNotificationRead(id).catch((error) => {
+      this.rollbackOptimisticReadState(id, previousItem, optimisticTimestamp);
+      throw error;
+    }).finally(() => {
+      this.pendingReadRequests.delete(id);
+    });
+
+    this.pendingReadRequests.set(id, {
+      promise: request,
+      optimisticTimestamp
+    });
+    return request;
   }
 
   clear(): void {
@@ -461,13 +504,7 @@ export class NotificationsService implements OnDestroy {
   }
 
   private countUnread(rows: NotificationRow[], schema: NotificationSchema): number {
-    if (schema.unreadMode === 'read_at') {
-      return rows.filter((row) => row.read_at == null || this.normalizeText(row.read_at) === '').length;
-    }
-    if (schema.unreadMode === 'seen_at') {
-      return rows.filter((row) => row.seen_at == null || this.normalizeText(row.seen_at) === '').length;
-    }
-    return rows.filter((row) => OPEN_STATUS_VALUES.has(this.normalizeText(row.status))).length;
+    return rows.filter((row) => this.isRowUnread(row, schema)).length;
   }
 
   private mapNotification(row: NotificationRow, schema: NotificationSchema): WorkspaceNotification | null {
@@ -481,7 +518,8 @@ export class NotificationsService implements OnDestroy {
       ? sanitizeDisplayValue(this.pickText(row.message) ?? this.pickText(row.body), 'No additional detail was returned.')
       : sanitizeDisplayValue(this.pickText(row.body) ?? this.pickText(row.message), 'No additional detail was returned.');
 
-    const status = this.pickText(row.status);
+    const unread = this.isRowUnread(row, schema);
+    const status = this.toDisplayStatus(row.status, unread);
     const iconSource = schema.iconField === 'category'
       ? this.pickText(row.category)
       : schema.iconField === 'type'
@@ -496,8 +534,129 @@ export class NotificationsService implements OnDestroy {
       dateCreated: row.date_created ?? null,
       iconKey: iconSource ? this.normalizeText(iconSource) : null,
       linkType: this.pickText(row.link_type),
-      linkId: this.normalizeId(row.link_id)
+      linkId: this.normalizeId(row.link_id),
+      isUnread: unread,
+      readAt: row.read_at ?? null,
+      seenAt: row.seen_at ?? null
     };
+  }
+
+  private isRowUnread(row: NotificationRow, schema: NotificationSchema): boolean {
+    if (schema.unreadMode === 'read_at') {
+      return row.read_at == null || this.normalizeText(row.read_at) === '';
+    }
+    if (schema.unreadMode === 'seen_at') {
+      return row.seen_at == null || this.normalizeText(row.seen_at) === '';
+    }
+    return OPEN_STATUS_VALUES.has(this.normalizeText(row.status));
+  }
+
+  private toDisplayStatus(status: string | null | undefined, unread: boolean): string | null {
+    const normalized = this.normalizeText(status);
+    if (!unread && OPEN_STATUS_VALUES.has(normalized)) {
+      return 'read';
+    }
+    return this.pickText(status);
+  }
+
+  private applyOptimisticReadState(notificationId: string, optimisticTimestamp: string): void {
+    const state = this.stateSubject.value;
+    let changed = false;
+    const nextNotifications = state.recentNotifications.map((item) => {
+      if (item.id !== notificationId || !item.isUnread) {
+        return item;
+      }
+
+      changed = true;
+      return {
+        ...item,
+        status: 'read',
+        isUnread: false,
+        readAt: item.readAt ?? optimisticTimestamp,
+        seenAt: item.seenAt ?? optimisticTimestamp
+      };
+    });
+
+    if (!changed) {
+      return;
+    }
+
+    this.stateSubject.next({
+      ...state,
+      unreadCount: Math.max(0, state.unreadCount - 1),
+      recentNotifications: nextNotifications
+    });
+  }
+
+  private rollbackOptimisticReadState(
+    notificationId: string,
+    previousItem: WorkspaceNotification,
+    optimisticTimestamp: string
+  ): void {
+    const state = this.stateSubject.value;
+    const index = state.recentNotifications.findIndex((item) => item.id === notificationId);
+    if (index < 0) {
+      return;
+    }
+
+    const current = state.recentNotifications[index];
+    const stillOptimistic =
+      current.readAt === optimisticTimestamp ||
+      current.seenAt === optimisticTimestamp ||
+      (
+        current.status === 'read' &&
+        !current.readAt &&
+        !current.seenAt
+      );
+    if (current.isUnread || !stillOptimistic) {
+      return;
+    }
+
+    const nextNotifications = [...state.recentNotifications];
+    nextNotifications[index] = previousItem;
+
+    this.stateSubject.next({
+      ...state,
+      unreadCount: state.unreadCount + 1,
+      recentNotifications: nextNotifications
+    });
+  }
+
+  private async persistNotificationRead(notificationId: string): Promise<void> {
+    if (!this.currentWorkspaceId) {
+      throw new Error('Active workspace context is missing.');
+    }
+
+    const token = this.auth.getStoredAccessToken();
+    if (!token) {
+      throw new Error('No active access token.');
+    }
+
+    const schema = await this.resolveSchema(token, this.currentWorkspaceId);
+    const payload: Record<string, string> = {};
+    const timestamp = new Date().toISOString();
+
+    if (schema.unreadMode === 'read_at') {
+      payload['read_at'] = timestamp;
+    } else if (schema.unreadMode === 'seen_at') {
+      payload['seen_at'] = timestamp;
+    }
+
+    if (schema.availableFields.has('status')) {
+      payload['status'] = 'read';
+    }
+
+    if (!Object.keys(payload).length) {
+      throw new Error('Notification read persistence is not supported by the available schema.');
+    }
+
+    await firstValueFrom(
+      this.http.patch(
+        `${this.api}/items/notifications/${encodeURIComponent(notificationId)}`,
+        payload,
+        { headers: this.auth.getAuthHeaders(token), withCredentials: true }
+      )
+    );
   }
 
   private toContextSnapshot(context: CompanyContext): ContextSnapshot {

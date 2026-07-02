@@ -145,4 +145,198 @@ describe('NotificationsService notification filters', () => {
     );
     notificationsRequest.flush({ data: [] });
   });
+
+  it('marks an unread notification read and decrements the count once', async () => {
+    service.initialize();
+
+    const fieldsRequest = httpMock.expectOne((req) => req.url.includes('/fields/notifications'));
+    fieldsRequest.flush({
+      data: [
+        { field: 'id' },
+        { field: 'status' },
+        { field: 'title' },
+        { field: 'message' },
+        { field: 'business_profile' },
+        { field: 'date_created' },
+        { field: 'user_created' },
+        { field: 'read_at' },
+        { field: 'type' },
+        { field: 'link_type' },
+        { field: 'link_id' }
+      ]
+    });
+
+    const notificationsRequest = httpMock.expectOne((req) => req.url.includes('/items/notifications'));
+    notificationsRequest.flush({
+      data: [
+        {
+          id: 'notification-1',
+          status: 'unread',
+          title: 'Read me',
+          message: 'Open me',
+          business_profile: 'profile-1',
+          date_created: '2026-07-01T12:00:00.000Z',
+          read_at: null,
+          type: 'info',
+          link_type: 'info',
+          link_id: 'notification-1'
+        }
+      ]
+    });
+
+    const markPromise = service.markNotificationRead('notification-1');
+    const optimisticState = (service as any).stateSubject.value;
+
+    expect(optimisticState.unreadCount).toBe(0);
+    expect(optimisticState.recentNotifications[0]).toEqual(expect.objectContaining({
+      id: 'notification-1',
+      status: 'read',
+      isUnread: false
+    }));
+
+    const patchRequest = httpMock.expectOne((req) =>
+      req.method === 'PATCH' && req.url.includes('/items/notifications/notification-1')
+    );
+    expect(patchRequest.request.body).toEqual(expect.objectContaining({
+      status: 'read'
+    }));
+    expect(typeof patchRequest.request.body.read_at).toBe('string');
+    patchRequest.flush({ data: { id: 'notification-1' } });
+
+    await expect(markPromise).resolves.toBeUndefined();
+    expect((service as any).stateSubject.value.unreadCount).toBe(0);
+  });
+
+  it('does nothing for an already-read notification', async () => {
+    service.initialize();
+
+    const fieldsRequest = httpMock.expectOne((req) => req.url.includes('/fields/notifications'));
+    fieldsRequest.flush({
+      data: [
+        { field: 'id' },
+        { field: 'status' },
+        { field: 'title' },
+        { field: 'message' },
+        { field: 'business_profile' },
+        { field: 'date_created' },
+        { field: 'user_created' },
+        { field: 'read_at' }
+      ]
+    });
+
+    const notificationsRequest = httpMock.expectOne((req) => req.url.includes('/items/notifications'));
+    notificationsRequest.flush({
+      data: [
+        {
+          id: 'notification-1',
+          status: 'read',
+          title: 'Read me',
+          message: 'Already read',
+          business_profile: 'profile-1',
+          date_created: '2026-07-01T12:00:00.000Z',
+          read_at: '2026-07-01T12:05:00.000Z'
+        }
+      ]
+    });
+
+    await expect(service.markNotificationRead('notification-1')).resolves.toBeUndefined();
+    httpMock.expectNone((req) => req.method === 'PATCH' && req.url.includes('/items/notifications/notification-1'));
+    expect((service as any).stateSubject.value.unreadCount).toBe(0);
+  });
+
+  it('restores the unread state when read persistence fails', async () => {
+    service.initialize();
+
+    const fieldsRequest = httpMock.expectOne((req) => req.url.includes('/fields/notifications'));
+    fieldsRequest.flush({
+      data: [
+        { field: 'id' },
+        { field: 'status' },
+        { field: 'title' },
+        { field: 'message' },
+        { field: 'business_profile' },
+        { field: 'date_created' },
+        { field: 'user_created' },
+        { field: 'read_at' }
+      ]
+    });
+
+    const notificationsRequest = httpMock.expectOne((req) => req.url.includes('/items/notifications'));
+    notificationsRequest.flush({
+      data: [
+        {
+          id: 'notification-1',
+          status: 'unread',
+          title: 'Read me',
+          message: 'Open me',
+          business_profile: 'profile-1',
+          date_created: '2026-07-01T12:00:00.000Z',
+          read_at: null
+        }
+      ]
+    });
+
+    const markPromise = service.markNotificationRead('notification-1');
+    expect((service as any).stateSubject.value.unreadCount).toBe(0);
+
+    const patchRequest = httpMock.expectOne((req) =>
+      req.method === 'PATCH' && req.url.includes('/items/notifications/notification-1')
+    );
+    patchRequest.flush({ errors: [{ message: 'Forbidden' }] }, { status: 403, statusText: 'Forbidden' });
+
+    await expect(markPromise).rejects.toBeTruthy();
+    expect((service as any).stateSubject.value.unreadCount).toBe(1);
+    expect((service as any).stateSubject.value.recentNotifications[0]).toEqual(expect.objectContaining({
+      id: 'notification-1',
+      status: 'unread',
+      isUnread: true
+    }));
+  });
+
+  it('deduplicates in-flight read persistence for one notification', async () => {
+    service.initialize();
+
+    const fieldsRequest = httpMock.expectOne((req) => req.url.includes('/fields/notifications'));
+    fieldsRequest.flush({
+      data: [
+        { field: 'id' },
+        { field: 'status' },
+        { field: 'title' },
+        { field: 'message' },
+        { field: 'business_profile' },
+        { field: 'date_created' },
+        { field: 'user_created' },
+        { field: 'read_at' }
+      ]
+    });
+
+    const notificationsRequest = httpMock.expectOne((req) => req.url.includes('/items/notifications'));
+    notificationsRequest.flush({
+      data: [
+        {
+          id: 'notification-1',
+          status: 'unread',
+          title: 'Read me',
+          message: 'Open me',
+          business_profile: 'profile-1',
+          date_created: '2026-07-01T12:00:00.000Z',
+          read_at: null
+        }
+      ]
+    });
+
+    const first = service.markNotificationRead('notification-1');
+    const second = service.markNotificationRead('notification-1');
+
+    const patchRequest = httpMock.expectOne((req) =>
+      req.method === 'PATCH' && req.url.includes('/items/notifications/notification-1')
+    );
+    patchRequest.flush({ data: { id: 'notification-1' } });
+
+    await expect(first).resolves.toBeUndefined();
+    await expect(second).resolves.toBeUndefined();
+    httpMock.expectNone((req) =>
+      req.method === 'PATCH' && req.url.includes('/items/notifications/notification-1')
+    );
+  });
 });
