@@ -556,9 +556,6 @@ type ScopedContext = {
 
 type CreateInvitePayload = {
   email: string;
-  status: 'pending';
-  requested_by_user: string;
-  business_profile: string;
   member_role: string;
   department?: string | null;
 };
@@ -2962,9 +2959,6 @@ export class OperationsAdminService {
     }
 
     const payload: CreateInvitePayload = {
-      status: 'pending',
-      requested_by_user: actorUserId,
-      business_profile: context.businessProfileId,
       member_role: memberRole,
       email
     };

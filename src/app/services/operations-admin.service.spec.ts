@@ -190,13 +190,32 @@ describe('OperationsAdminService department manager assignment', () => {
     const req = httpMock.expectOne(`${environment.API_URL}/wellar/workspaces/invites`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body).toEqual({
-      status: 'pending',
-      requested_by_user: 'user-1',
-      business_profile: 'workspace-1',
       member_role: 'manager',
       email: 'new.person@example.com',
       department: 'department-2'
     });
+    req.flush({ data: { inviteId: 'invite-1', deliveryChannel: 'in_app', message: 'Invitation sent in Wellar.' } });
+  });
+
+  it('does not send legacy invite fields to the new endpoint', () => {
+    service.createInvite({
+      email: 'new.person@example.com',
+      member_role: 'employee'
+    }).subscribe();
+
+    const req = httpMock.expectOne(`${environment.API_URL}/wellar/workspaces/invites`);
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({
+      member_role: 'employee',
+      email: 'new.person@example.com'
+    });
+    expect(req.request.body).not.toHaveProperty('status');
+    expect(req.request.body).not.toHaveProperty('requested_by_user');
+    expect(req.request.body).not.toHaveProperty('business_profile');
+    expect(req.request.body).not.toHaveProperty('invite_type');
+    expect(req.request.body).not.toHaveProperty('phone');
+    expect(req.request.body).not.toHaveProperty('token');
+    expect(req.request.body).not.toHaveProperty('accepted_user');
     req.flush({ data: { inviteId: 'invite-1', deliveryChannel: 'in_app', message: 'Invitation sent in Wellar.' } });
   });
 
