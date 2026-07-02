@@ -22,7 +22,7 @@ export type WorkspaceInviteUser = {
 
 export type WorkspaceInviteDetail = {
   id: string;
-  email: string;
+  email: string | null;
   inviteType: string | null;
   status: string;
   memberRole: string;
@@ -723,7 +723,7 @@ export class InviteService {
     const status = this.pickString(payload['status']) ?? 'pending';
     const companyName = this.pickString(payload['companyName'] ?? payload['company_name']) ?? 'Workspace invitation';
 
-    if (!id || !email || !memberRole) {
+    if (!id || !memberRole) {
       throw new Error('Invite details were incomplete.');
     }
 

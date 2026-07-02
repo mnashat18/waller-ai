@@ -68,6 +68,32 @@ describe('InviteService invitation actions', () => {
     });
   });
 
+  it('accepts canonical invite details when email is omitted from the response payload', () => {
+    service.getInvite('invite-1').subscribe((invite) => {
+      expect(invite.id).toBe('invite-1');
+      expect(invite.email).toBeNull();
+      expect(invite.companyName).toBe('Waller Demo Company');
+      expect(invite.status).toBe('pending');
+    });
+
+    const req = httpMock.expectOne((request) =>
+      request.url === `${environment.API_URL}/wellar/workspaces/invites/invite-1` &&
+      request.params.has('_ts')
+    );
+    expect(req.request.method).toBe('GET');
+    req.flush({
+      data: {
+        id: 'invite-1',
+        inviteType: 'in_app',
+        status: 'pending',
+        memberRole: 'manager',
+        companyName: 'Waller Demo Company',
+        departmentName: 'hala wallah',
+        canAct: true
+      }
+    });
+  });
+
   it('accepts invitations through the protected accept endpoint', () => {
     service.acceptInvite('invite-1').subscribe((response) => {
       expect(response.ok).toBe(true);

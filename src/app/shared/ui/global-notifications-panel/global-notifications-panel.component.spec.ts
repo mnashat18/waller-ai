@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, of, throwError } from 'rxjs';
 import { vi } from 'vitest';
 
 import { CompanyContextService } from '../../../core/context/company-context.service';
@@ -16,6 +16,7 @@ describe('GlobalNotificationsPanelComponent', () => {
   let openInvite: ReturnType<typeof vi.fn>;
   let acceptInvite: ReturnType<typeof vi.fn>;
   let declineInvite: ReturnType<typeof vi.fn>;
+  let detectChangesSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     notificationsState$ = new BehaviorSubject({
@@ -101,6 +102,7 @@ describe('GlobalNotificationsPanelComponent', () => {
     }).compileComponents();
 
     fixture = TestBed.createComponent(GlobalNotificationsPanelComponent);
+    detectChangesSpy = vi.spyOn(fixture.componentRef.changeDetectorRef, 'detectChanges');
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -159,6 +161,7 @@ describe('GlobalNotificationsPanelComponent', () => {
     await fixture.whenStable();
 
     expect(openInvite).toHaveBeenCalledWith('invite-1');
+    expect(openInvite).toHaveBeenCalledTimes(1);
     expect(fixture.nativeElement.textContent).toContain('Invitation details');
     expect(fixture.nativeElement.textContent).toContain('Accept');
     expect(fixture.nativeElement.textContent).toContain('Decline');
@@ -175,6 +178,176 @@ describe('GlobalNotificationsPanelComponent', () => {
     expect(refreshCompanyContext).toHaveBeenCalledWith(true);
     expect(fixture.nativeElement.textContent).toContain('Invitation accepted');
     expect(fixture.nativeElement.textContent).toContain('organization is now available in Profile');
+  });
+
+  it('renders the live successful invite payload without leaving the modal in loading', async () => {
+    const inviteSubject = new Subject<any>();
+    openInvite.mockReturnValueOnce(inviteSubject.asObservable());
+
+    notificationsState$.next({
+      unreadCount: 1,
+      loading: false,
+      error: null,
+      activeWorkspaceId: 'profile-1',
+      recentNotifications: [
+        {
+          id: 'notification-live-1',
+          title: 'Waller Demo Company invitation',
+          message: 'You have been invited to join Waller Demo Company as Manager.',
+          status: 'unread',
+          dateCreated: '2026-07-01T12:00:00.000Z',
+          iconKey: 'invite',
+          linkType: 'invite',
+          linkId: 'a7f46288-2392-422b-87b2-e231dc262087'
+        }
+      ]
+    });
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const bell = fixture.nativeElement.querySelector('button[aria-label="Notifications"]') as HTMLButtonElement;
+    bell.click();
+    fixture.detectChanges();
+
+    const item = fixture.nativeElement.querySelector('article') as HTMLElement;
+    detectChangesSpy.mockClear();
+    item.click();
+    fixture.detectChanges();
+
+    inviteSubject.next({
+      id: 'a7f46288-2392-422b-87b2-e231dc262087',
+      email: 'mnashat2508@gmail.com',
+      inviteType: 'in_app',
+      status: 'pending',
+      memberRole: 'manager',
+      businessProfileId: null,
+      companyName: 'Waller Demo Company',
+      departmentId: null,
+      departmentName: 'hala wallah',
+      expiresAt: null,
+      requestedByUser: null,
+      canAct: true
+    });
+    inviteSubject.complete();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.selectedInvite).toEqual(expect.objectContaining({
+      id: 'a7f46288-2392-422b-87b2-e231dc262087',
+      email: 'mnashat2508@gmail.com',
+      status: 'pending',
+      memberRole: 'manager',
+      companyName: 'Waller Demo Company',
+      departmentName: 'hala wallah',
+      canAct: true
+    }));
+    expect(detectChangesSpy).toHaveBeenCalled();
+    expect(fixture.componentInstance.detailLoading).toBe(false);
+    expect(fixture.nativeElement.textContent).toContain('Waller Demo Company');
+    expect(fixture.nativeElement.textContent).toContain('Manager');
+    expect(fixture.nativeElement.textContent).toContain('hala wallah');
+    expect(fixture.nativeElement.textContent).toContain('Accept');
+    expect(fixture.nativeElement.textContent).toContain('Decline');
+    expect(fixture.nativeElement.textContent).not.toContain('Loading invitation');
+  });
+
+  it('clears loading and renders pending invite details when the successful response omits email', async () => {
+    openInvite.mockReturnValueOnce(of({
+      id: 'invite-1',
+      email: null,
+      inviteType: 'in_app',
+      status: 'pending',
+      memberRole: 'manager',
+      businessProfileId: 'profile-1',
+      companyName: 'Waller Demo Company',
+      departmentId: 'department-1',
+      departmentName: 'hala wallah',
+      expiresAt: null,
+      requestedByUser: null,
+      canAct: true
+    }));
+
+    notificationsState$.next({
+      unreadCount: 1,
+      loading: false,
+      error: null,
+      activeWorkspaceId: 'profile-1',
+      recentNotifications: [
+        {
+          id: 'notification-1',
+          title: 'Waller Demo Company invitation',
+          message: 'You have been invited to join Waller Demo Company as Manager.',
+          status: 'unread',
+          dateCreated: '2026-07-01T12:00:00.000Z',
+          iconKey: 'invite',
+          linkType: 'invite',
+          linkId: 'invite-1'
+        }
+      ]
+    });
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const bell = fixture.nativeElement.querySelector('button[aria-label="Notifications"]') as HTMLButtonElement;
+    bell.click();
+    fixture.detectChanges();
+
+    const item = fixture.nativeElement.querySelector('article') as HTMLElement;
+    detectChangesSpy.mockClear();
+    item.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.detailLoading).toBe(false);
+    expect(fixture.nativeElement.textContent).toContain('Waller Demo Company');
+    expect(fixture.nativeElement.textContent).toContain('Manager');
+    expect(fixture.nativeElement.textContent).toContain('hala wallah');
+    expect(fixture.nativeElement.textContent).toContain('Accept');
+    expect(fixture.nativeElement.textContent).toContain('Decline');
+  });
+
+  it('clears loading and shows a safe error when invite details fail to load', async () => {
+    const inviteSubject = new Subject<any>();
+    openInvite.mockReturnValueOnce(inviteSubject.asObservable());
+
+    notificationsState$.next({
+      unreadCount: 1,
+      loading: false,
+      error: null,
+      activeWorkspaceId: 'profile-1',
+      recentNotifications: [
+        {
+          id: 'notification-1',
+          title: 'Northwind Logistics invitation',
+          message: 'You have been invited to join Northwind Logistics as Manager.',
+          status: 'unread',
+          dateCreated: '2026-07-01T12:00:00.000Z',
+          iconKey: 'invite',
+          linkType: 'invite',
+          linkId: 'invite-1'
+        }
+      ]
+    });
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const bell = fixture.nativeElement.querySelector('button[aria-label="Notifications"]') as HTMLButtonElement;
+    bell.click();
+    fixture.detectChanges();
+
+    const item = fixture.nativeElement.querySelector('article') as HTMLElement;
+    item.click();
+    fixture.detectChanges();
+
+    inviteSubject.error(new Error('boom'));
+    await fixture.whenStable();
+
+    expect(detectChangesSpy).toHaveBeenCalled();
+    expect(fixture.componentInstance.detailLoading).toBe(false);
+    expect(fixture.nativeElement.textContent).toContain('Could not load invite.');
   });
 
   it('renders informational notifications without action buttons', async () => {

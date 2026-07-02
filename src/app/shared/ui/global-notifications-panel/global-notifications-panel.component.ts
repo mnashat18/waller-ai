@@ -1,5 +1,5 @@
 import { CommonModule, DatePipe } from '@angular/common';
-import { Component, HostListener, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, HostListener, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { EmptyStateComponent } from '../empty-state/empty-state.component';
@@ -29,7 +29,8 @@ export class GlobalNotificationsPanelComponent implements OnInit {
     private notifications: NotificationsService,
     private inviteService: InviteService,
     private companyContext: CompanyContextService,
-    private router: Router
+    private router: Router,
+    private cdr: ChangeDetectorRef
   ) {
     this.notificationsState$ = this.notifications.state$;
   }
@@ -72,10 +73,12 @@ export class GlobalNotificationsPanelComponent implements OnInit {
           this.selectedInvite = invite;
           this.detailLoading = false;
           this.detailError = '';
+          this.cdr.detectChanges();
         },
         error: (error) => {
           this.detailLoading = false;
           this.detailError = this.inviteService.getReadableInviteError(error);
+          this.cdr.detectChanges();
         }
       });
       return;
@@ -85,7 +88,7 @@ export class GlobalNotificationsPanelComponent implements OnInit {
   }
 
   acceptInvite(): void {
-    if (!this.selectedInvite?.canAct || this.detailActionInFlight) {
+    if (!this.isInviteActionable()) {
       return;
     }
 
@@ -93,7 +96,7 @@ export class GlobalNotificationsPanelComponent implements OnInit {
   }
 
   declineInvite(): void {
-    if (!this.selectedInvite?.canAct || this.detailActionInFlight) {
+    if (!this.isInviteActionable()) {
       return;
     }
 
@@ -148,7 +151,11 @@ export class GlobalNotificationsPanelComponent implements OnInit {
   }
 
   isInviteActionable(): boolean {
-    return Boolean(this.selectedInvite?.canAct && !this.detailActionInFlight);
+    return Boolean(
+      this.selectedInvite?.canAct &&
+      (this.selectedInvite.status ?? '').trim().toLowerCase() === 'pending' &&
+      !this.detailActionInFlight
+    );
   }
 
   private toDisplayLabel(value: string): string {
