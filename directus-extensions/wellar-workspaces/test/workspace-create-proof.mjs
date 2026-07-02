@@ -16,6 +16,13 @@ const deterministicIds = [
   '11111111-1111-4111-8111-111111111111',
   '22222222-2222-4222-8222-222222222222'
 ];
+const roleIds = {
+  owner: '44444444-4444-4444-8444-444444444444',
+  hr: '55555555-5555-4555-8555-555555555555',
+  manager: '66666666-6666-4666-8666-666666666666',
+  employee: '77777777-7777-4777-8777-777777777777'
+};
+const ownerRoleId = roleIds.owner;
 
 const payload = buildCompanyPayload(
   {
@@ -185,6 +192,7 @@ function extractEqualityFilters(filters) {
 
 function createQueryBuilder(table, state, scope) {
   const filters = [];
+  const whereInFilters = [];
   const executeRows = () => {
     const equalityFilters = extractEqualityFilters(filters);
 
@@ -203,6 +211,18 @@ function createQueryBuilder(table, state, scope) {
       if (equalityFilters.user) {
         return state.scenario.activeMembershipRows ?? [];
       }
+    }
+
+    if (table === 'directus_roles' && whereInFilters.length) {
+      const matchedIds = new Set();
+      for (const filter of whereInFilters) {
+        for (const id of filter.values ?? []) {
+          if (Object.values(state.scenario.roleIds ?? roleIds).includes(String(id))) {
+            matchedIds.add(String(id));
+          }
+        }
+      }
+      return Array.from(matchedIds).map((id) => ({ id }));
     }
 
     return [];
@@ -230,7 +250,8 @@ function createQueryBuilder(table, state, scope) {
     andWhere(columnOrObject, value) {
       return builder.where(columnOrObject, value);
     },
-    whereIn() {
+    whereIn(column, values) {
+      whereInFilters.push({ column, values });
       return builder;
     },
     whereNotIn() {
@@ -279,8 +300,9 @@ function createQueryBuilder(table, state, scope) {
       }
 
       if (table === 'directus_roles') {
-        if (equalityFilters.id === state.scenario.ownerRoleId && state.scenario.ownerRoleExists !== false) {
-          return { id: state.scenario.ownerRoleId };
+        const configuredRoleIds = Object.values(state.scenario.roleIds ?? roleIds);
+        if (configuredRoleIds.includes(String(equalityFilters.id))) {
+          return { id: String(equalityFilters.id) };
         }
 
         return undefined;
@@ -421,8 +443,7 @@ function createFakeDatabase(scenario = {}) {
     committedCalls,
     pendingCalls: committedCalls,
     scenario: {
-      ownerRoleId: '44444444-4444-4444-8444-444444444444',
-      ownerRoleExists: true,
+      roleIds,
       existingMembership: undefined,
       duplicateOwnerMembership: undefined,
       switchMembership: undefined,
@@ -488,25 +509,38 @@ function buildTestHarness(scenario = {}) {
 }
 
 async function withOwnerRoleEnv(value, callback) {
-  const previousValue = process.env.WELLAR_OWNER_ROLE_ID;
+  const previousValues = {
+    owner: process.env.WELLAR_OWNER_ROLE_ID,
+    hr: process.env.WELLAR_HR_ROLE_ID,
+    manager: process.env.WELLAR_MANAGER_ROLE_ID,
+    employee: process.env.WELLAR_EMPLOYEE_ROLE_ID
+  };
   if (value === undefined) {
     delete process.env.WELLAR_OWNER_ROLE_ID;
-  } else {
+    delete process.env.WELLAR_HR_ROLE_ID;
+    delete process.env.WELLAR_MANAGER_ROLE_ID;
+    delete process.env.WELLAR_EMPLOYEE_ROLE_ID;
+  } else if (typeof value === 'string') {
     process.env.WELLAR_OWNER_ROLE_ID = value;
+    process.env.WELLAR_HR_ROLE_ID = roleIds.hr;
+    process.env.WELLAR_MANAGER_ROLE_ID = roleIds.manager;
+    process.env.WELLAR_EMPLOYEE_ROLE_ID = roleIds.employee;
+  } else {
+    process.env.WELLAR_OWNER_ROLE_ID = value.owner ?? roleIds.owner;
+    process.env.WELLAR_HR_ROLE_ID = value.hr ?? roleIds.hr;
+    process.env.WELLAR_MANAGER_ROLE_ID = value.manager ?? roleIds.manager;
+    process.env.WELLAR_EMPLOYEE_ROLE_ID = value.employee ?? roleIds.employee;
   }
 
   try {
     await callback();
   } finally {
-    if (previousValue === undefined) {
-      delete process.env.WELLAR_OWNER_ROLE_ID;
-    } else {
-      process.env.WELLAR_OWNER_ROLE_ID = previousValue;
-    }
+    process.env.WELLAR_OWNER_ROLE_ID = previousValues.owner;
+    process.env.WELLAR_HR_ROLE_ID = previousValues.hr;
+    process.env.WELLAR_MANAGER_ROLE_ID = previousValues.manager;
+    process.env.WELLAR_EMPLOYEE_ROLE_ID = previousValues.employee;
   }
 }
-
-const ownerRoleId = '44444444-4444-4444-8444-444444444444';
 
 await withOwnerRoleEnv(ownerRoleId, async () => {
   const { database, routeLoggerCalls, createWorkspaceHandler } = buildTestHarness({ ownerRoleId });
@@ -612,8 +646,12 @@ await withOwnerRoleEnv('not-a-uuid', async () => {
 
 await withOwnerRoleEnv(ownerRoleId, async () => {
   const { database, createWorkspaceHandler } = buildTestHarness({
-    ownerRoleId,
-    ownerRoleExists: false
+    roleIds: {
+      owner: '88888888-8888-4888-8888-888888888888',
+      hr: roleIds.hr,
+      manager: roleIds.manager,
+      employee: roleIds.employee
+    }
   });
   const createResponse = buildFakeResponse();
 
@@ -748,7 +786,7 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
 
   assert.equal(switchResponse.statusCode, 200);
   const directusUserUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'directus_users');
-  assert.equal(directusUserUpdate.payload.role, undefined);
+  assert.equal(directusUserUpdate.payload.role, roleIds.hr);
   assert.equal(directusUserUpdate.payload.active_business_profile, 'switch-workspace');
   assert.equal(directusUserUpdate.payload.active_department, 'department-1');
   assert.equal(directusUserUpdate.payload.active_member_role, 'hr');
@@ -817,10 +855,11 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
 
   assert.equal(switchResponse.statusCode, 200);
   const switchUpdate = database.calls.find((call) => call.type === 'update' && call.table === 'directus_users');
-  assert.equal(switchUpdate.payload.role, undefined);
+  assert.equal(switchUpdate.payload.role, roleIds.hr);
   assert.equal(switchUpdate.payload.active_business_profile, 'company-b');
   assert.equal(switchUpdate.payload.active_department, 'department-marketing');
   assert.equal(switchUpdate.payload.active_member_role, 'hr');
+  const updatesAfterSwitch = database.calls.filter((call) => call.type === 'update' && call.table === 'directus_users').length;
 
   const contextResponse = buildFakeResponse();
   await contextHandler(
@@ -835,6 +874,13 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
   assert.equal(contextResponse.body.data.active.workspace.id, 'company-b');
   assert.equal(contextResponse.body.data.active.membership.memberRole, 'hr');
   assert.equal(contextResponse.body.data.memberships.length, 2);
+  const updatesAfterContext = database.calls.filter((call) => call.type === 'update' && call.table === 'directus_users').length;
+  assert.equal(updatesAfterContext, updatesAfterSwitch);
+  const contextUpdate = database.calls.filter((call) => call.type === 'update' && call.table === 'directus_users').at(-1);
+  assert.equal(contextUpdate.payload.role, roleIds.hr);
+  assert.equal(contextUpdate.payload.active_business_profile, 'company-b');
+  assert.equal(contextUpdate.payload.active_department, 'department-marketing');
+  assert.equal(contextUpdate.payload.active_member_role, 'hr');
   assert.deepEqual(
     contextResponse.body.data.memberships.map((membership) => [membership.id, membership.workspace.id, membership.memberRole]),
     [
@@ -868,6 +914,52 @@ await withOwnerRoleEnv(ownerRoleId, async () => {
   assert.equal(ownerContextResponse.body.data.active.membership.id, 'membership-owner');
   assert.equal(ownerContextResponse.body.data.active.workspace.id, 'company-a');
   assert.equal(ownerContextResponse.body.data.active.membership.memberRole, 'owner');
+  const ownerSwitchUpdate = database.calls.filter((call) => call.type === 'update' && call.table === 'directus_users').at(-1);
+  assert.equal(ownerSwitchUpdate.payload.role, roleIds.owner);
+});
+
+await withOwnerRoleEnv(ownerRoleId, async () => {
+  const ownerMembership = {
+    id: 'membership-owner-readonly',
+    user: 'user-readonly',
+    status: 'active',
+    member_role: 'owner',
+    workspace_id: 'company-readonly',
+    department_id: null,
+    joined_at: now,
+    company_name: 'Readonly Company',
+    company_country: 'Egypt',
+    company_city: 'Cairo',
+    company_sector: 'Technology',
+    company_size: '11-50',
+    company_verification_status: 'verified',
+    company_is_active: true,
+    department_match_id: null,
+    department_name: null,
+    department_business_profile: null,
+    department_is_active: null
+  };
+  const { database, contextHandler } = buildTestHarness({
+    ownerRoleId,
+    activeMembershipRows: [ownerMembership],
+    directusUserRow: {
+      id: 'user-readonly',
+      active_business_profile: 'stale-workspace',
+      active_department: 'stale-department',
+      active_member_role: 'hr'
+    }
+  });
+
+  const contextResponse = buildFakeResponse();
+  await contextHandler(
+    {
+      accountability: { user: 'user-readonly' }
+    },
+    contextResponse
+  );
+
+  assert.equal(contextResponse.statusCode, 200);
+  assert.equal(database.calls.some((call) => call.type === 'update' && call.table === 'directus_users'), false);
 });
 
 await withOwnerRoleEnv(ownerRoleId, async () => {

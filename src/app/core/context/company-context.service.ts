@@ -156,7 +156,9 @@ const INITIAL_STATE: CompanyContextState = {
 };
 
 const ACTIVE_MEMBERSHIP_STORAGE_KEY = 'active_workspace_membership_v1';
+const ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY = 'active_workspace_membership_sync_v1';
 type RefreshOptions = { force?: boolean; failOnError?: boolean };
+type EnsureLoadedOptions = { skipMembershipSync?: boolean };
 
 type VerifiedWorkspaceContext = {
   activeMembership: ActiveMembershipContext;
@@ -556,6 +558,7 @@ export class CompanyContextService {
     this.persistStoredValue('active_department', null);
     this.persistStoredValue('active_department_name', null);
     this.persistStoredValue('active_workspace_membership_user_id', null);
+    this.persistStoredValue(ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY, null);
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(ACTIVE_MEMBERSHIP_STORAGE_KEY);
     }
@@ -791,9 +794,13 @@ export class CompanyContextService {
   }
 
   ensureLoaded(forceRefresh = false): Observable<CompanyContextState> {
+    return this.ensureLoadedInternal(forceRefresh, {});
+  }
+
+  private ensureLoadedInternal(forceRefresh = false, options: EnsureLoadedOptions = {}): Observable<CompanyContextState> {
     const current = this.snapshot();
-    const token = this.auth.getStoredAccessToken() ?? '';
-    if (!token) {
+    const initialToken = this.auth.getStoredAccessToken() ?? '';
+    if (!initialToken) {
       const signedOutState = this.buildSignedOutState(true, true);
       this.stateSubject.next(signedOutState);
       return of(signedOutState);
@@ -811,8 +818,11 @@ export class CompanyContextService {
       current.context.availableCompanies.length > 1 &&
       !current.error
     );
+    const currentActiveMembershipId =
+      current.context.availableCompanies.find((company) => company.isActive)?.membershipId ?? null;
+    const syncedMembershipId = this.readStoredValue(ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY);
 
-    if (!forceRefresh && alreadyLoaded && !current.loading) {
+    if (!forceRefresh && alreadyLoaded && !current.loading && syncedMembershipId && currentActiveMembershipId === syncedMembershipId) {
       return of(current);
     }
 
@@ -820,18 +830,16 @@ export class CompanyContextService {
       return this.inFlight$;
     }
 
-    this.stateSubject.next({
-      ...current,
-      loading: true,
-      error: null
-    });
-
-    const request$ = this.fetchCurrentUserContext(token).pipe(
-      timeout(15000),
-      switchMap((user) =>
-        from(this.loadWorkspaceContext(token)).pipe(
-          catchError(() => of(null)),
-          map((workspaceContext) => this.buildState(user, workspaceContext))
+    const request$ = from(this.resolveLoadedContextToken(initialToken, options, forceRefresh)).pipe(
+      switchMap((token) =>
+        this.fetchCurrentUserContext(token).pipe(
+          timeout(15000),
+          switchMap((user) =>
+            from(this.loadWorkspaceContext(token)).pipe(
+              catchError(() => of(null)),
+              map((workspaceContext) => this.buildState(user, workspaceContext))
+            )
+          )
         )
       ),
       tap((state) => this.stateSubject.next(state)),
@@ -862,8 +870,54 @@ export class CompanyContextService {
       shareReplay(1)
     );
 
+    this.stateSubject.next({
+      ...current,
+      loading: true,
+      error: null
+    });
+
     this.inFlight$ = request$;
     return request$;
+  }
+
+  private async resolveLoadedContextToken(
+    initialToken: string,
+    options: EnsureLoadedOptions,
+    forceRefresh: boolean
+  ): Promise<string> {
+    if (!options.skipMembershipSync) {
+      await this.syncServerConfirmedMembershipAccessOnce(forceRefresh);
+    }
+
+    return this.auth.getStoredAccessToken() ?? initialToken;
+  }
+
+  private async syncServerConfirmedMembershipAccessOnce(forceRefresh = false): Promise<void> {
+    const token = this.auth.getStoredAccessToken() ?? '';
+    if (!token) {
+      return;
+    }
+
+    const workspaceContext = await firstValueFrom(this.workspaceContextApi.getContext().pipe(timeout(10000)));
+    const activeMembershipId = this.normalizeId(workspaceContext?.active?.membership?.id);
+    if (!activeMembershipId) {
+      return;
+    }
+
+    const currentSignature = this.readStoredValue(ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY);
+    if (currentSignature === activeMembershipId) {
+      return;
+    }
+
+    await firstValueFrom(this.workspaceContextApi.switchMembership(activeMembershipId));
+
+    const refreshedToken = await this.auth.refreshAuthTokenWithStoredRefreshToken();
+    if (!refreshedToken) {
+      this.auth.clearAuthState();
+      throw new Error('Workspace access could not be synchronized. Please sign in again.');
+    }
+
+    this.persistStoredValue(ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY, activeMembershipId);
   }
 
   switchCompany(companyId: string): Observable<CompanyContextState> {
@@ -873,9 +927,18 @@ export class CompanyContextService {
     }
 
     return this.workspaceContextApi.switchMembership(company.membershipId).pipe(
-      switchMap(() => this.ensureLoaded(true)),
+      switchMap(() => from(this.refreshAccessTokenAfterMembershipChange())),
+      switchMap(() => this.ensureLoadedInternal(true, { skipMembershipSync: true })),
       switchMap(() => from(this.ensureVerifiedWorkspaceContext(true, true))),
-      map(() => this.snapshot()),
+      map((verifiedContext) => {
+        const confirmedMembershipId = this.normalizeId(verifiedContext?.activeMembership?.id);
+        if (confirmedMembershipId !== company.membershipId) {
+          throw new Error('Workspace switch did not confirm the selected organization.');
+        }
+
+        this.persistStoredValue(ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY, confirmedMembershipId);
+        return this.snapshot();
+      }),
       catchError((error) => this.handleMutationError(error, 'Failed to switch company context.'))
     );
   }
@@ -900,11 +963,28 @@ export class CompanyContextService {
     }
 
     return this.workspaceContextApi.switchMembership(matchingCompany.membershipId).pipe(
-      switchMap(() => this.ensureLoaded(true)),
+      switchMap(() => from(this.refreshAccessTokenAfterMembershipChange())),
+      switchMap(() => this.ensureLoadedInternal(true, { skipMembershipSync: true })),
       switchMap(() => from(this.ensureVerifiedWorkspaceContext(true, true))),
-      map(() => this.snapshot()),
+      map((verifiedContext) => {
+        const confirmedMembershipId = this.normalizeId(verifiedContext?.activeMembership?.id);
+        if (confirmedMembershipId !== matchingCompany.membershipId) {
+          throw new Error('Workspace update did not confirm the selected organization.');
+        }
+
+        this.persistStoredValue(ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY, confirmedMembershipId);
+        return this.snapshot();
+      }),
       catchError((error) => this.handleMutationError(error, 'Failed to update workspace context.'))
     );
+  }
+
+  private async refreshAccessTokenAfterMembershipChange(): Promise<void> {
+    const refreshedToken = await this.auth.refreshAuthTokenWithStoredRefreshToken();
+    if (!refreshedToken) {
+      this.auth.clearAuthState();
+      throw new Error('Workspace access could not be synchronized. Please sign in again.');
+    }
   }
 
   private fetchCurrentUserContext(token: string): Observable<UserContextResponse> {
@@ -1381,6 +1461,7 @@ export class CompanyContextService {
     this.persistStoredValue('user_display_name', null);
     this.persistStoredValue('user_first_name', null);
     this.persistStoredValue('user_last_name', null);
+    this.persistStoredValue(ACTIVE_MEMBERSHIP_SYNC_SIGNATURE_KEY, null);
 
     if (reason === 'logout') {
       this.stateSubject.next(this.buildSignedOutState(true, true));

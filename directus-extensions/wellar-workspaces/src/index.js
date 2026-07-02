@@ -283,6 +283,59 @@ function readOwnerRoleIdFromEnv(env = process.env) {
   return { value: ownerRoleId };
 }
 
+const ACTIVE_MEMBERSHIP_ROLE_ENV_KEYS = {
+  owner: 'WELLAR_OWNER_ROLE_ID',
+  hr: 'WELLAR_HR_ROLE_ID',
+  manager: 'WELLAR_MANAGER_ROLE_ID',
+  employee: 'WELLAR_EMPLOYEE_ROLE_ID'
+};
+
+function readConfiguredActiveMembershipRoleMap(env = process.env) {
+  const roleMap = {};
+
+  for (const [role, envKey] of Object.entries(ACTIVE_MEMBERSHIP_ROLE_ENV_KEYS)) {
+    const roleId = pickString(env[envKey]);
+    if (!roleId) {
+      return { error: `${envKey} must be configured to an existing Directus role UUID.` };
+    }
+
+    if (!UUID_PATTERN.test(roleId)) {
+      return { error: `${envKey} must be a valid UUID.` };
+    }
+
+    roleMap[role] = roleId;
+  }
+
+  const uniqueRoleIds = new Set(Object.values(roleMap));
+  if (uniqueRoleIds.size !== Object.values(roleMap).length) {
+    return { error: 'Wellar role mappings must point to unique Directus roles.' };
+  }
+
+  return { value: roleMap };
+}
+
+async function requireConfiguredActiveMembershipRoleMap(trx, env = process.env) {
+  const configuredRoles = readConfiguredActiveMembershipRoleMap(env);
+  if (configuredRoles.error) {
+    const error = new Error(configuredRoles.error);
+    error.code = 'CONFIGURATION_ERROR';
+    throw error;
+  }
+
+  const roleIds = Object.values(configuredRoles.value);
+  const rows = await trx('directus_roles')
+    .select('id')
+    .whereIn('id', roleIds);
+
+  if (rows.length !== roleIds.length) {
+    const error = new Error('One or more Wellar role mappings do not match an existing Directus role.');
+    error.code = 'CONFIGURATION_ERROR';
+    throw error;
+  }
+
+  return configuredRoles.value;
+}
+
 function buildWorkspaceRecordIds(createId = randomUUID) {
   const ids = {
     businessProfileId: createId(),
@@ -652,6 +705,26 @@ async function syncDirectusUserContext(trx, userId, membershipRow) {
     });
 }
 
+async function syncDirectusUserActiveMembershipAccess(trx, userId, verifiedMembership, roleMap) {
+  const normalizedRole = normalizeRole(verifiedMembership?.member_role);
+  const mappedRoleId = normalizedRole ? roleMap?.[normalizedRole] : null;
+
+  if (!mappedRoleId) {
+    const error = new Error('The selected membership role is not configured.');
+    error.code = 'CONFIGURATION_ERROR';
+    throw error;
+  }
+
+  await trx('directus_users')
+    .where({ id: userId })
+    .update({
+      role: mappedRoleId,
+      active_business_profile: verifiedMembership.workspace_id,
+      active_department: verifiedMembership.department_id ?? null,
+      active_member_role: normalizedRole
+    });
+}
+
 async function requireConfiguredOwnerRoleId(trx, env = process.env) {
   const configuredRole = readOwnerRoleIdFromEnv(env);
   if (configuredRole.error) {
@@ -674,15 +747,17 @@ async function requireConfiguredOwnerRoleId(trx, env = process.env) {
   return configuredRole.value;
 }
 
-async function syncDirectusUserOwnerContext(trx, userId, businessProfileId, ownerRoleId) {
-  await trx('directus_users')
-    .where({ id: userId })
-    .update({
-      role: ownerRoleId,
-      active_business_profile: businessProfileId,
-      active_department: null,
-      active_member_role: 'owner'
-    });
+async function syncDirectusUserOwnerContext(trx, userId, businessProfileId, roleMap) {
+  await syncDirectusUserActiveMembershipAccess(
+    trx,
+    userId,
+    {
+      workspace_id: businessProfileId,
+      department_id: null,
+      member_role: 'owner'
+    },
+    roleMap
+  );
 }
 
 async function loadPendingInvitations(trx, workspaceId) {
@@ -2624,20 +2699,6 @@ export default {
           const validMembershipRows = membershipRows.filter((row) => validateMembershipRow(row).ok);
           const activeRow = resolveActiveMembership(validMembershipRows, userRow);
 
-          if (activeRow) {
-            const activeWorkspaceId = pickString(userRow?.active_business_profile);
-            const activeDepartmentId = pickString(userRow?.active_department);
-            const activeRole = normalizeRole(userRow?.active_member_role);
-            const shouldSync =
-              activeWorkspaceId !== pickString(activeRow.workspace_id) ||
-              activeDepartmentId !== pickString(activeRow.department_id) ||
-              activeRole !== normalizeRole(activeRow.member_role);
-
-            if (shouldSync) {
-              await syncDirectusUserContext(trx, userId, activeRow);
-            }
-          }
-
           const invitations =
             activeRow && ['owner', 'hr'].includes(normalizeRole(activeRow.member_role) ?? '')
               ? (await loadPendingInvitations(trx, activeRow.workspace_id))
@@ -2692,6 +2753,7 @@ export default {
             `wellar-workspace-switch:user:${userId}`
           ]);
 
+          const roleMap = await requireConfiguredActiveMembershipRoleMap(trx);
           const membershipRow = await loadMembershipForSwitch(trx, membershipId, userId);
           const validation = validateMembershipRow(membershipRow);
           if (!validation.ok) {
@@ -2700,7 +2762,7 @@ export default {
             throw error;
           }
 
-          await syncDirectusUserContext(trx, userId, membershipRow);
+          await syncDirectusUserActiveMembershipAccess(trx, userId, membershipRow, roleMap);
 
           return {
             workspace: publicWorkspace(membershipRow),
@@ -2756,7 +2818,7 @@ export default {
             `wellar-workspace-create:user:${userId}`
           ]);
 
-          const ownerRoleId = await requireConfiguredOwnerRoleId(trx);
+          const roleMap = await requireConfiguredActiveMembershipRoleMap(trx);
 
           const existingMembership = await trx('business_profile_members as member')
             .leftJoin('business_profiles as profile', 'profile.id', 'member.business_profile')
@@ -2782,14 +2844,7 @@ export default {
               existingMembership.business_profile;
 
             if (isExistingSelfOwnedWorkspace) {
-              await trx('directus_users')
-                .where({ id: userId })
-                .update({
-                  role: ownerRoleId,
-                  active_business_profile: existingMembership.business_profile,
-                  active_department: null,
-                  active_member_role: 'owner'
-                });
+              await syncDirectusUserOwnerContext(trx, userId, existingMembership.business_profile, roleMap);
 
               const existingContext = buildExistingContext(existingMembership);
               return {
@@ -2837,7 +2892,7 @@ export default {
             throw new Error('Owner membership creation did not return an id.');
           }
 
-          await syncDirectusUserOwnerContext(trx, userId, profile.id, ownerRoleId);
+          await syncDirectusUserOwnerContext(trx, userId, profile.id, roleMap);
 
           return {
             status: 201,
