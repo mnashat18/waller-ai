@@ -149,7 +149,7 @@ export class DepartmentsPageComponent implements OnInit {
     const payload: DepartmentMutationInput = {
       name: this.form.name.trim(),
       is_active: this.form.is_active,
-      manager_member_id: this.toNullable(this.form.manager_member_id)
+      manager_member: this.toNullable(this.form.manager_member_id)
     };
 
     this.operationsAdmin.createDepartment(payload).subscribe({
@@ -177,7 +177,7 @@ export class DepartmentsPageComponent implements OnInit {
     const payload: Partial<DepartmentMutationInput> = {
       name: this.form.name.trim(),
       is_active: this.form.is_active,
-      manager_member_id: this.toNullable(this.form.manager_member_id)
+      manager_member: this.toNullable(this.form.manager_member_id)
     };
 
     this.operationsAdmin.updateDepartment(this.selectedDepartment.id, payload).subscribe({

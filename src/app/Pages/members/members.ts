@@ -226,7 +226,8 @@ export class MembersPageComponent implements OnInit {
       next: (result) => {
         this.savingInvite = false;
         this.showInviteModal = false;
-        this.feedbackMessage = result.message || `Invite sent to ${this.inviteForm.email.trim()}`;
+        void result;
+        this.feedbackMessage = `Invite sent to ${this.inviteForm.email.trim()}`;
         this.loadPage();
       },
       error: (error) => {

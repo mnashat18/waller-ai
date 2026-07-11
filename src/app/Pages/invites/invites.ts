@@ -136,7 +136,8 @@ export class InvitesPageComponent implements OnInit {
       next: (result) => {
         this.saving = false;
         this.showCreateModal = false;
-        this.feedbackMessage = result.message || 'Invite sent.';
+        void result;
+        this.feedbackMessage = 'Invite sent.';
         this.loadPage();
       },
       error: (error) => {

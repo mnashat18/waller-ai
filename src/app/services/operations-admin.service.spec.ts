@@ -78,26 +78,26 @@ describe('OperationsAdminService department manager assignment', () => {
     httpMock.verify();
   });
 
-  it('sends null manager_member_id when creating a department without a manager', () => {
+  it('sends null manager_member when creating a department without a manager', () => {
     service.createDepartment({ name: ' Operations ' }).subscribe();
 
     const req = httpMock.expectOne(`${environment.API_URL}/wellar/organization/departments`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body).toEqual({
       name: 'Operations',
-      manager_member_id: null
+      manager_member: null
     });
     req.flush({ data: { department: { id: 'department-1' } } });
   });
 
   it('sends the selected membership id in the exact create payload', () => {
-    service.createDepartment({ name: 'Operations', manager_member_id: 'member-1' }).subscribe();
+    service.createDepartment({ name: 'Operations', manager_member: 'member-1' }).subscribe();
 
     const req = httpMock.expectOne(`${environment.API_URL}/wellar/organization/departments`);
     expect(req.request.method).toBe('POST');
     expect(req.request.body).toEqual({
       name: 'Operations',
-      manager_member_id: 'member-1'
+      manager_member: 'member-1'
     });
     req.flush({ data: { department: { id: 'department-1' } } });
   });
@@ -108,7 +108,7 @@ describe('OperationsAdminService department manager assignment', () => {
     const req = httpMock.expectOne(`${environment.API_URL}/wellar/organization/departments/department-1`);
     expect(req.request.method).toBe('PATCH');
     expect(req.request.body).toEqual({
-      manager_member_id: null
+      manager_member: null
     });
     req.flush({ data: { department: { id: 'department-1' } } });
   });

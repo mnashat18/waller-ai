@@ -109,7 +109,7 @@ describe('DepartmentsPageComponent manager assignment', () => {
     expect(operationsAdmin.createDepartment).toHaveBeenCalledWith({
       name: 'Operations',
       is_active: true,
-      manager_member_id: null
+      manager_member: null
     } satisfies DepartmentMutationInput);
 
     component.openCreateModal();
@@ -120,7 +120,7 @@ describe('DepartmentsPageComponent manager assignment', () => {
     expect(operationsAdmin.createDepartment).toHaveBeenLastCalledWith({
       name: 'Safety',
       is_active: true,
-      manager_member_id: 'member-2'
+      manager_member: 'member-2'
     } satisfies DepartmentMutationInput);
   });
 
@@ -144,7 +144,7 @@ describe('DepartmentsPageComponent manager assignment', () => {
     expect(operationsAdmin.updateDepartment).toHaveBeenCalledWith('department-1', {
       name: 'Field Operations',
       is_active: true,
-      manager_member_id: 'member-2'
+      manager_member: 'member-2'
     });
   });
 });

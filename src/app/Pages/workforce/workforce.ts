@@ -1,4 +1,4 @@
-﻿import { CommonModule } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -496,12 +496,8 @@ export class WorkforcePageComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (result) => {
         this.showInviteModal = false;
-        this.pushFeedback(
-          'success',
-          result.deliveryChannel === 'in_app'
-            ? 'Invitation sent in Wellar.'
-            : 'Email invitation sent.'
-        );
+        void result;
+        this.pushFeedback('success', 'Invitation sent.');
         this.loadPage();
       },
       error: (error) => {
