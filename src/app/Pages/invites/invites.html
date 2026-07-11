@@ -31,7 +31,7 @@
     <input
       [(ngModel)]="filters.search"
       name="inviteSearch"
-      placeholder="Search email, phone, claimed member"
+      placeholder="Search email or claimed member"
       class="min-w-[15rem] rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-700" />
     <select [(ngModel)]="filters.status" name="inviteStatus" class="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-700">
       <option value="">All statuses</option>
@@ -139,14 +139,13 @@
           <tbody>
             <tr *ngFor="let row of filteredRows; trackBy: trackByInvite" class="border-t border-slate-100 align-top text-sm text-slate-600">
               <td class="px-5 py-4">
-                <p class="font-medium text-slate-950">{{ row.email || row.phone || 'No recipient value' }}</p>
-                <p class="mt-1 text-xs text-slate-500">{{ row.phone || 'Email-based invite' }}</p>
+                <p class="font-medium text-slate-950">{{ row.email || 'No recipient value' }}</p>
+                <p class="mt-1 text-xs text-slate-500">Email-based invite</p>
               </td>
               <td class="px-5 py-4">
                 <app-role-badge [role]="row.member_role"></app-role-badge>
               </td>
               <td class="px-5 py-4">{{ row.department_name || 'Unassigned' }}</td>
-              <td class="px-5 py-4">{{ row.invite_type || 'member_onboarding' }}</td>
               <td class="px-5 py-4">
                 <app-status-badge [status]="row.status"></app-status-badge>
               </td>

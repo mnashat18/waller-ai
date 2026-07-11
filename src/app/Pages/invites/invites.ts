@@ -86,7 +86,6 @@ export class InvitesPageComponent implements OnInit {
       const matchesSearch =
         !search ||
         (row.email ?? '').toLowerCase().includes(search) ||
-        (row.phone ?? '').toLowerCase().includes(search) ||
         (row.claimed_member_name ?? '').toLowerCase().includes(search);
 
       const matchesStatus = !this.filters.status || (row.status ?? '') === this.filters.status;
@@ -161,7 +160,7 @@ export class InvitesPageComponent implements OnInit {
   }
 
   expireInvite(row: InviteRow): void {
-    if (typeof window !== 'undefined' && !window.confirm(`Expire invite for ${row.email || row.phone || row.id}?`)) {
+    if (typeof window !== 'undefined' && !window.confirm(`Expire invite for ${row.email || row.id}?`)) {
       return;
     }
 
@@ -178,7 +177,7 @@ export class InvitesPageComponent implements OnInit {
   }
 
   revokeInvite(row: InviteRow): void {
-    if (typeof window !== 'undefined' && !window.confirm(`Revoke invite for ${row.email || row.phone || row.id}?`)) {
+    if (typeof window !== 'undefined' && !window.confirm(`Revoke invite for ${row.email || row.id}?`)) {
       return;
     }
 
