@@ -274,6 +274,7 @@ export const businessOnboardingGuard: CanActivateFn = (_, state) => {
     '/auth-callback',
     '/verify-email',
     '/download-app',
+    '/delete-account',
     '/request-welcome',
     '/about',
     '/contact',
@@ -556,6 +557,13 @@ export const routes: Routes = [
       {
         path: 'download-app',
         component: DownloadAppLanding
+      },
+      {
+        path: 'delete-account',
+        loadComponent: () =>
+          import('./public.layout/delete-account/delete-account').then(
+            (m) => m.DeleteAccountComponent
+          )
       },
       {
         path: 'request-welcome',

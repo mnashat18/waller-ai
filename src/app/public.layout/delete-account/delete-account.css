@@ -1,0 +1,251 @@
+.delete-shell {
+  position: relative;
+  z-index: 3;
+  padding: 90px 10% 120px;
+  color: #e2e8f0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.delete-shell::before {
+  content: '';
+  position: absolute;
+  inset: -25% -20%;
+  background:
+    radial-gradient(760px at 12% 20%, rgba(59, 130, 246, 0.24), transparent 60%),
+    radial-gradient(820px at 88% 28%, rgba(245, 196, 81, 0.16), transparent 60%),
+    radial-gradient(760px at 50% 90%, rgba(14, 165, 233, 0.16), transparent 65%);
+  z-index: -1;
+}
+
+.delete-hero {
+  max-width: 760px;
+  margin-bottom: 36px;
+}
+
+.delete-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #f5c451;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(245, 196, 81, 0.32);
+}
+
+.delete-hero h1 {
+  margin: 14px 0 14px;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  color: #f8fafc;
+  line-height: 1.02;
+}
+
+.delete-hero p {
+  max-width: 64rem;
+  color: rgba(226, 232, 240, 0.76);
+  line-height: 1.7;
+  font-size: 1.02rem;
+}
+
+.delete-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.delete-card {
+  background: rgba(10, 18, 31, 0.92);
+  border: 1px solid rgba(112, 137, 176, 0.28);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.field {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.field span {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  background: rgba(7, 13, 24, 0.95);
+  border: 1px solid rgba(94, 117, 151, 0.35);
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #f3f7fb;
+  font: inherit;
+  resize: vertical;
+}
+
+.field input:focus,
+.field textarea:focus {
+  outline: none;
+  border-color: #f0bd5f;
+  box-shadow: 0 0 0 3px rgba(240, 189, 95, 0.14);
+}
+
+.field input.is-invalid {
+  border-color: rgba(248, 113, 113, 0.8);
+}
+
+.field textarea {
+  min-height: 150px;
+}
+
+.field-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: rgba(226, 232, 240, 0.6);
+  font-size: 0.82rem;
+}
+
+.confirm-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(7, 13, 24, 0.6);
+  border: 1px solid rgba(94, 117, 151, 0.25);
+  color: rgba(243, 247, 251, 0.9);
+  line-height: 1.6;
+}
+
+.confirm-line input {
+  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: #f0bd5f;
+}
+
+.field-error {
+  margin-top: -2px;
+  color: #ffc6cf;
+  font-size: 0.82rem;
+}
+
+.status-message {
+  margin: 10px 0 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  line-height: 1.6;
+}
+
+.status-message--success {
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.22);
+  color: #dcfce7;
+}
+
+.status-message--error {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.22);
+  color: #fecdd3;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.secondary-action,
+.primary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  border-radius: 16px;
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.secondary-action {
+  color: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(7, 13, 24, 0.72);
+}
+
+.primary-action {
+  border: 0;
+  background: #f0bd5f;
+  color: #08111f;
+  cursor: pointer;
+}
+
+.primary-action:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.delete-notes h2 {
+  margin: 0 0 14px;
+  color: #f8fafc;
+  font-size: 1.3rem;
+}
+
+.delete-notes ul {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding-left: 18px;
+  color: rgba(226, 232, 240, 0.76);
+  line-height: 1.7;
+}
+
+.delete-notes a {
+  color: #f5c451;
+  text-decoration: none;
+}
+
+.delete-notes a:hover {
+  color: #fde68a;
+}
+
+@media (max-width: 960px) {
+  .delete-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .delete-shell {
+    padding: 80px 6% 120px;
+  }
+
+  .delete-card {
+    padding: 22px;
+    border-radius: 22px;
+  }
+
+  .delete-hero h1 {
+    font-size: 2.45rem;
+  }
+
+  .actions {
+    flex-direction: column;
+  }
+
+  .secondary-action,
+  .primary-action {
+    width: 100%;
+  }
+}

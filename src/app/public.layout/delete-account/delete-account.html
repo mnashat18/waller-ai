@@ -1,0 +1,87 @@
+<section class="delete-shell">
+  <div class="delete-hero">
+    <span class="delete-pill">Account deletion request</span>
+    <h1>Delete your Wellar account</h1>
+    <p>
+      Use this form to request permanent deletion of your Wellar account and associated personal
+      data. Some records may be retained where legally or contractually required, and submitting
+      this form starts a deletion request rather than deleting the account immediately.
+    </p>
+  </div>
+
+  <div class="delete-grid">
+    <form class="delete-card" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+      <label class="field">
+        <span>Account email</span>
+        <input
+          type="email"
+          formControlName="email"
+          autocomplete="email"
+          inputmode="email"
+          placeholder="user@example.com"
+          [class.is-invalid]="emailControl.touched && emailControl.invalid" />
+        <small class="field-error" *ngIf="emailControl.touched && emailControl.hasError('required')">
+          Enter the email address for the account deletion request.
+        </small>
+        <small class="field-error" *ngIf="emailControl.touched && emailControl.hasError('email')">
+          Enter a valid email address.
+        </small>
+        <small class="field-error" *ngIf="emailControl.touched && emailControl.hasError('maxlength')">
+          Email addresses must be 254 characters or fewer.
+        </small>
+      </label>
+
+      <label class="field">
+        <span>Reason for deletion</span>
+        <textarea
+          formControlName="reason"
+          maxlength="1000"
+          rows="6"
+          placeholder="Optional: tell us why you are leaving"></textarea>
+        <div class="field-meta">
+          <small>Optional</small>
+          <small>{{ reasonLength }}/1000</small>
+        </div>
+      </label>
+
+      <label class="confirm-line">
+        <input type="checkbox" formControlName="confirmed" />
+        <span>
+          I understand that this request may permanently delete my Wellar account and associated
+          personal data.
+        </span>
+      </label>
+      <small class="field-error" *ngIf="confirmedControl.touched && confirmedControl.invalid">
+        You must confirm before submitting the request.
+      </small>
+
+      <p class="status-message status-message--success" *ngIf="successText" role="status">
+        {{ successText }}
+      </p>
+      <p class="status-message status-message--error" *ngIf="errorText" role="alert">
+        {{ errorText }}
+      </p>
+
+      <div class="actions">
+        <a routerLink="/" class="secondary-action">Cancel / Back</a>
+        <button type="submit" class="primary-action" [disabled]="isSubmitting">
+          {{ isSubmitting ? 'Submitting...' : 'Submit deletion request' }}
+        </button>
+      </div>
+    </form>
+
+    <aside class="delete-card delete-notes">
+      <h2>Before you submit</h2>
+      <ul>
+        <li>This starts a deletion request and does not delete the account immediately.</li>
+        <li>Wellar staff may retain records required by law or contract.</li>
+        <li>Staff will verify identity before deleting any account data.</li>
+        <li>
+          Review the
+          <a routerLink="/privacy">privacy policy</a>
+          for more information.
+        </li>
+      </ul>
+    </aside>
+  </div>
+</section>
