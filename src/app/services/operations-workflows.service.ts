@@ -527,7 +527,7 @@ export class OperationsWorkflowsService {
   getRequestsPageData(): Observable<RequestsPageData> {
     return this.ensureScopedContext(true).pipe(
       tap(() => {
-        console.log('[ScanRequests] active context ready');
+
       }),
       switchMap((context) =>
         forkJoin({
@@ -543,7 +543,7 @@ export class OperationsWorkflowsService {
           ),
           queue: this.fetchScanRequestQueue(context).pipe(
             tap((requests) => {
-              console.log('[ScanRequests] scan requests result', Array.isArray(requests.rows) ? requests.rows.length : 0);
+
             })
           ),
           departments: this.loadDepartmentsForRequests(context).pipe(
@@ -633,7 +633,7 @@ export class OperationsWorkflowsService {
     try {
       const queue = await firstValueFrom(this.fetchScanRequestQueue(context).pipe(take(1), timeout(8000)));
       requests = queue.rows ?? [];
-      console.log('[ScanRequests] scan requests result', Array.isArray(requests) ? requests.length : 0);
+
     } catch (error) {
       console.error('[OperationsWorkflows] requests failed', error);
       requests = [];
@@ -2312,7 +2312,7 @@ export class OperationsWorkflowsService {
    * (business_profile) before a by-id mutation. Returns the row on success,
    * otherwise errors with a clear, professional message.
    *
-   * This is a front-end defense-in-depth check only â€” it does NOT replace
+   * This is a front-end defense-in-depth check only - it does NOT replace
    * Directus row-level security, which remains the authoritative guard.
    */
   private verifyTenantOwnership(
