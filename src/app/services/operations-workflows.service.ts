@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+﻿import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpHeaders } from '@angular/common/http';
 import { Observable, forkJoin, of, throwError, firstValueFrom } from 'rxjs';
 import { catchError, map, switchMap, take, tap, timeout } from 'rxjs/operators';
@@ -39,6 +39,9 @@ export type WorkflowMemberOption = {
   department_id: string | null;
   department_name: string | null;
   status: string | null;
+  has_open_request?: boolean;
+  open_request_id?: string | null;
+  open_request_status?: string | null;
 };
 
 export type ComplianceWorkerRow = {
@@ -706,26 +709,68 @@ export class OperationsWorkflowsService {
     return this.ensureScopedContext(true).pipe(
       switchMap((context) =>
         this.workforceRosterApi.getWorkforceRoster().pipe(
-          map((payload) => ({
-            departments: (payload.departments ?? [])
-              .map((department) => ({
-                id: department.id,
-                name: department.name
-              }))
-              .filter((item) => Boolean(item.id && item.name)),
-            members: (payload.eligible_scan_targets ?? [])
-              .map((target) => ({
-                member_id: target.member_id,
-                user_id: target.user_id,
-                label: target.label,
-                email: target.email,
-                member_role: this.normalizeMemberRole(target.member_role),
-                department_id: target.department_id,
-                department_name: target.department_name,
-                status: target.status
-              }))
-              .filter((item) => Boolean(item.member_id && item.label && item.email))
-          }))
+          map((payload) => {
+            const openRequestByIdentity = new Map<string, { requestId: string | null; status: string | null; timestamp: number }>();
+            for (const request of payload.scan_requests?.rows ?? []) {
+              const status = this.requestStatus(request);
+              if (this.closedRequestStatuses.has(this.normalizeText(status))) {
+                continue;
+              }
+              const requestId = this.normalizeId(request.id);
+              if (!requestId) {
+                continue;
+              }
+              for (const identity of this.requestIdentityKeys(request)) {
+                const existing = openRequestByIdentity.get(identity);
+                if (!existing || this.requestTimestamp(request) >= existing.timestamp) {
+                  openRequestByIdentity.set(identity, {
+                    requestId,
+                    status,
+                    timestamp: this.requestTimestamp(request)
+                  });
+                }
+              }
+            }
+
+            return {
+              departments: (payload.departments ?? [])
+                .map((department) => ({
+                  id: department.id,
+                  name: department.name
+                }))
+                .filter((item) => Boolean(item.id && item.name)),
+              members: (payload.eligible_scan_targets ?? [])
+                .map((target) => {
+                  const identities = this.memberIdentityKeys(target.member_id, target.user_id, target.email);
+                  let openRequestId: string | null = null;
+                  let openRequestStatus: string | null = null;
+                  for (const identity of identities) {
+                    const match = openRequestByIdentity.get(identity);
+                    if (!match) {
+                      continue;
+                    }
+                    openRequestId = match.requestId;
+                    openRequestStatus = match.status;
+                    break;
+                  }
+
+                  return {
+                    member_id: target.member_id,
+                    user_id: target.user_id,
+                    label: target.label,
+                    email: target.email,
+                    member_role: this.normalizeMemberRole(target.member_role),
+                    department_id: target.department_id,
+                    department_name: target.department_name,
+                    status: target.status,
+                    has_open_request: Boolean(openRequestId),
+                    open_request_id: openRequestId,
+                    open_request_status: openRequestStatus
+                  };
+                })
+                .filter((item) => Boolean(item.member_id && item.label && item.email))
+            } satisfies RequestModalOptions;
+          })
         )
       )
     );
@@ -869,6 +914,11 @@ export class OperationsWorkflowsService {
 
         const dueAt = this.pickString(input.due_at);
         if (dueAt) {
+          if (!this.isIsoDateTime(dueAt)) {
+            return throwError(() =>
+              new ScanRequestApiError('invalid_response', 0, 'Due date must be a valid ISO date.')
+            );
+          }
           body['due_at'] = dueAt;
         }
 
@@ -2262,7 +2312,7 @@ export class OperationsWorkflowsService {
    * (business_profile) before a by-id mutation. Returns the row on success,
    * otherwise errors with a clear, professional message.
    *
-   * This is a front-end defense-in-depth check only — it does NOT replace
+   * This is a front-end defense-in-depth check only â€” it does NOT replace
    * Directus row-level security, which remains the authoritative guard.
    */
   private verifyTenantOwnership(
@@ -2733,6 +2783,20 @@ export class OperationsWorkflowsService {
     if (!value) return 0;
     const parsed = new Date(value).getTime();
     return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  private isIsoDateTime(value: string | null | undefined): boolean {
+    if (!value) {
+      return false;
+    }
+
+    const normalized = value.trim();
+    if (!normalized) {
+      return false;
+    }
+
+    const parsed = new Date(normalized);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(normalized.slice(0, 10));
   }
 
   private startOfToday(): Date {
